@@ -1,0 +1,416 @@
+import { useEffect, useState } from 'react';
+import { useAuth } from '../App';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { Plus, Edit, Trash2, MapPin } from 'lucide-react';
+
+interface Area {
+  id: number;
+  codigo: string;
+  nombre: string;
+  descripcion?: string | null;
+  activo: boolean;
+  idCentroCosto?: number | null;
+  centroCostoNombre?: string | null;
+}
+
+interface CentroCosto {
+  id: number;
+  nombre: string;
+}
+
+export default function AreasPage() {
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingArea, setEditingArea] = useState<Area | null>(null);
+  const [codigo, setCodigo] = useState('');
+  const [nombre, setNombre] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [idCentroCosto, setIdCentroCosto] = useState<string>('');
+  const [centrosCosto, setCentrosCosto] = useState<CentroCosto[]>([]);
+  const [nuevoCcCodigo, setNuevoCcCodigo] = useState('');
+  const [nuevoCcNombre, setNuevoCcNombre] = useState('');
+  const [creandoCentro, setCreandoCentro] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const { token } = useAuth();
+
+  const cargarAreas = async () => {
+    if (!token) {
+      // Si no hay token (usuario no autenticado), no intentamos llamar al backend protegido
+      return;
+    }
+
+    try {
+      const resp = await fetch('http://localhost:4000/api/areas', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const mapped: Area[] = (data as any[]).map((a) => ({
+        id: a.IdArea as number,
+        codigo: a.Codigo as string,
+        nombre: a.Nombre as string,
+        descripcion: (a.Descripcion as string) ?? null,
+        activo: !!a.Activo,
+        idCentroCosto: (a.IdCentroCosto as number) ?? null,
+        centroCostoNombre: (a.CentroCostoNombre as string) ?? null,
+      }));
+      setAreas(mapped);
+      setTotal(mapped.length);
+      setPage(1);
+    } catch (error) {
+      console.error('Error al cargar áreas', error);
+    }
+  };
+
+  const cargarCentrosCosto = async () => {
+    if (!token) return;
+
+    try {
+      const resp = await fetch('http://localhost:4000/api/centros-costo', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const mapped: CentroCosto[] = (data as any[]).map((c) => ({
+        id: c.IdCentroCosto as number,
+        nombre: c.Nombre as string,
+      }));
+      setCentrosCosto(mapped);
+    } catch (error) {
+      console.error('Error al cargar centros de costo', error);
+    }
+  };
+
+  useEffect(() => {
+    cargarAreas();
+    cargarCentrosCosto();
+  }, [page, pageSize, token]);
+
+  const handleOpenDialog = (area?: Area) => {
+    setEditingArea(area || null);
+    setCodigo(area?.codigo || '');
+    setNombre(area?.nombre || '');
+    setDescripcion(area?.descripcion || '');
+     setIdCentroCosto(
+       area?.idCentroCosto !== undefined && area?.idCentroCosto !== null
+         ? String(area.idCentroCosto)
+         : '',
+     );
+    setDialogOpen(true);
+  };
+
+  const handleCrearCentroCostoRapido = async () => {
+    if (!token) return;
+    if (!nuevoCcCodigo.trim() || !nuevoCcNombre.trim()) return;
+
+    try {
+      const resp = await fetch('http://localhost:4000/api/centros-costo', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          codigo: nuevoCcCodigo.trim(),
+          nombre: nuevoCcNombre.trim(),
+          descripcion: null,
+          activo: true,
+        }),
+      });
+
+      if (!resp.ok) {
+        console.error('Error HTTP al crear centro de costo', await resp.text());
+        return;
+      }
+
+      const data = await resp.json();
+      const idCreado = data.idCentroCosto as number | undefined;
+
+      await cargarCentrosCosto();
+
+      if (idCreado) {
+        setIdCentroCosto(String(idCreado));
+      }
+
+      setNuevoCcCodigo('');
+      setNuevoCcNombre('');
+      setCreandoCentro(false);
+    } catch (error) {
+      console.error('Error al crear centro de costo rápido', error);
+    }
+  };
+
+  const handleGuardar = async () => {
+    if (!codigo || !nombre) return;
+
+    try {
+      if (editingArea) {
+        await fetch(`http://localhost:4000/api/areas/${editingArea.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            codigo,
+            nombre,
+            descripcion,
+            activo: editingArea.activo,
+            idCentroCosto: idCentroCosto ? Number(idCentroCosto) : null,
+          }),
+        });
+      } else {
+        await fetch('http://localhost:4000/api/areas', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            codigo,
+            nombre,
+            descripcion,
+            activo: true,
+            idCentroCosto: idCentroCosto ? Number(idCentroCosto) : null,
+          }),
+        });
+      }
+
+      setDialogOpen(false);
+      await cargarAreas();
+    } catch (error) {
+      console.error('Error al guardar área', error);
+    }
+  };
+
+  const handleEliminar = async (id: number) => {
+    if (!confirm('¿Estás seguro de eliminar esta área?')) return;
+    try {
+      await fetch(`http://localhost:4000/api/areas/${id}`, {
+        method: 'DELETE',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      await cargarAreas();
+    } catch (error) {
+      console.error('Error al eliminar área', error);
+    }
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1>Gestión de Áreas</h1>
+          <p className="text-muted-foreground mt-1">
+            Administración de áreas del negocio
+          </p>
+        </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button onClick={() => handleOpenDialog()}>
+              <Plus className="w-4 h-4 mr-2" />
+              Nueva Área
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{editingArea ? 'Editar Área' : 'Nueva Área'}</DialogTitle>
+              <DialogDescription>
+                {editingArea ? 'Modifica la información del área' : 'Crea una nueva área del negocio'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="codigo-area">Código</Label>
+                <Input
+                  id="codigo-area"
+                  value={codigo}
+                  onChange={(e) => setCodigo(e.target.value)}
+                  placeholder="PROD_A, MANTTO, ..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="nombre-area">Nombre</Label>
+                <Input
+                  id="nombre-area"
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  placeholder="Producción A"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="descripcion-area">Descripción</Label>
+                <Input
+                  id="descripcion-area"
+                  value={descripcion}
+                  onChange={(e) => setDescripcion(e.target.value)}
+                  placeholder="Descripción del área"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="centro-costo-area">Centro de costo</Label>
+                <div className="flex gap-2 items-center">
+                  <select
+                    id="centro-costo-area"
+                    className="border rounded px-3 py-2 text-sm w-full"
+                    value={idCentroCosto}
+                    onChange={(e) => setIdCentroCosto(e.target.value)}
+                  >
+                    <option value="">(Sin centro de costo)</option>
+                    {centrosCosto.map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCreandoCentro((v) => !v)}
+                  >
+                    + Nuevo
+                  </Button>
+                </div>
+                {creandoCentro && (
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <Input
+                      placeholder="Código CC"
+                      value={nuevoCcCodigo}
+                      onChange={(e) => setNuevoCcCodigo(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Nombre CC"
+                        value={nuevoCcNombre}
+                        onChange={(e) => setNuevoCcNombre(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleCrearCentroCostoRapido}
+                        disabled={!nuevoCcCodigo.trim() || !nuevoCcNombre.trim()}
+                      >
+                        Guardar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleGuardar}>
+                {editingArea ? 'Guardar Cambios' : 'Crear Área'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MapPin className="w-5 h-5" />
+            Áreas ({total})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between text-sm text-muted-foreground mb-3">
+            <div>
+              Página {page} de {totalPages}
+            </div>
+            <div className="space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+          <div className="border rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Descripción</TableHead>
+                  <TableHead>Centro de costo</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {areas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                      No se encontraron áreas
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  areas
+                    .slice((page - 1) * pageSize, page * pageSize)
+                    .map((area) => (
+                      <TableRow key={area.id}>
+                        <TableCell className="font-mono text-xs">{area.codigo}</TableCell>
+                        <TableCell className="font-medium">{area.nombre}</TableCell>
+                        <TableCell>{area.descripcion || '-'}</TableCell>
+                        <TableCell>{area.centroCostoNombre || '-'}</TableCell>
+                        <TableCell>{area.activo ? 'Activa' : 'Inactiva'}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleOpenDialog(area)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEliminar(area.id)}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

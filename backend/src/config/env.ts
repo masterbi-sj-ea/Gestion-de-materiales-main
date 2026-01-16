@@ -1,0 +1,14 @@
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+export const env = {
+  NODE_ENV: process.env.NODE_ENV || 'development',
+  PORT: process.env.PORT ? Number(process.env.PORT) : 4000,
+  DB_SERVER: process.env.DB_SERVER || '',
+  DB_USER: process.env.DB_USER || '',
+  DB_PASSWORD: process.env.DB_PASSWORD || '',
+  DB_DATABASE: process.env.DB_DATABASE || '',
+  DB_ENCRYPT: process.env.DB_ENCRYPT === 'true',
+  JWT_SECRET: process.env.JWT_SECRET || 'change-me-in-production'
+};
