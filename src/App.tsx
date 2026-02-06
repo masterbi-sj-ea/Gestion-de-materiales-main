@@ -1,5 +1,7 @@
-import { useState, createContext, useContext } from 'react';
+import { useEffect, useRef, useState, createContext, useContext } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { CheckCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { PermisosProvider } from './contexts/PermisosContext';
 import Login from './components/Login';
 import Layout from './components/Layout';
@@ -46,11 +48,47 @@ export const useAuth = () => {
 };
 
 function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const stored = localStorage.getItem('authUser');
+    try {
+      return stored ? (JSON.parse(stored) as User) : null;
+    } catch (e) {
+      console.error('Error parsing stored user', e);
+      return null;
+    }
+  });
+
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('authToken');
   });
+  const lastToastUserId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      lastToastUserId.current = null;
+      return;
+    }
+
+    if (lastToastUserId.current === user.id) return;
+
+    toast.custom((t) => (
+      <div
+        className="flex w-[320px] items-start gap-3 rounded-xl border border-emerald-100 bg-white px-4 py-3 shadow-lg"
+        onClick={() => toast.dismiss(t)}
+      >
+        <div className="mt-0.5 text-emerald-600">
+          <CheckCircle className="h-5 w-5" />
+        </div>
+        <div className="flex-1">
+          <div className="text-sm font-semibold text-slate-900">Inicio de sesión exitoso</div>
+          <div className="text-xs text-slate-500">Bienvenido, {user.name}.</div>
+        </div>
+      </div>
+    ));
+    lastToastUserId.current = user.id;
+  }, [user]);
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
@@ -82,6 +120,13 @@ function App() {
       };
 
       setUser(mappedUser);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('authUser', JSON.stringify(mappedUser));
+        } catch (e) {
+          console.error('Error saving user to localStorage', e);
+        }
+      }
       const token = data.token as string | undefined;
       if (token) {
         setToken(token);
@@ -102,6 +147,7 @@ function App() {
     setToken(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('authToken');
+      localStorage.removeItem('authUser');
     }
   };
 

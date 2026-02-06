@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../App';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,8 +8,9 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
-import { AlertCircle, Plus, Trash2, DollarSign, Package, Save, Send, User, CalendarDays, Tag, Loader2 } from 'lucide-react';
+import { AlertCircle, Plus, Trash2, DollarSign, Package, Save, Send, User, CalendarDays, Tag, Loader2, Pencil, Check, X } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
+import { toast } from 'sonner';
 import {
   Table,
   TableBody,
@@ -58,6 +59,7 @@ interface RecursoListado {
 export default function CrearSolicitudPage() {
   const { user, token } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [materiales, setMateriales] = useState<MaterialDisponible[]>([]);
   const [areas, setAreas] = useState<AreaListado[]>([]);
   const [recursos, setRecursos] = useState<RecursoListado[]>([]);
@@ -76,8 +78,12 @@ export default function CrearSolicitudPage() {
   });
   const [idAreaDestino, setIdAreaDestino] = useState<string>('');
   const [idRecurso, setIdRecurso] = useState<string>('');
+  const [codigoCuenta, setCodigoCuenta] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingCantidad, setEditingCantidad] = useState<string>('');
 
   const gruposUnicos = Array.from(
     new Set(materiales.map((m) => m.grupoArticulos).filter((g): g is string => !!g)),
@@ -100,21 +106,23 @@ export default function CrearSolicitudPage() {
   const total = items.reduce((sum, item) => sum + item.subtotal, 0);
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    setEditId(id);
+  }, [location.search]);
+
+  useEffect(() => {
     if (!token) return;
 
     const cargarDatos = async () => {
       try {
         setError(null);
 
-        const [matResp, areasResp, recursosResp] = await Promise.all([
+        const [matResp, areasResp] = await Promise.all([
           fetch('http://localhost:4000/api/materiales/con-stock', {
             headers: { Authorization: `Bearer ${token}` },
           }),
           fetch('http://localhost:4000/api/areas', {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          // TODO: Reemplazar con el endpoint real de recursos
-          fetch('http://localhost:4000/api/recursos', {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
@@ -125,14 +133,8 @@ export default function CrearSolicitudPage() {
         if (!areasResp.ok) {
           throw new Error('No se pudieron cargar las áreas');
         }
-        if (!recursosResp.ok) {
-          // No es un error fatal si los recursos no cargan
-          console.warn('No se pudieron cargar los recursos');
-        }
-
         const materialesJson = await matResp.json();
         const areasJson = await areasResp.json();
-        const recursosJson = recursosResp.ok ? await recursosResp.json() : [];
 
         setMateriales(
           (materialesJson || []).map((m: any) => ({
@@ -147,22 +149,22 @@ export default function CrearSolicitudPage() {
           })),
         );
 
-        setAreas(
-          (areasJson || []).map((a: any) => ({
+        const mappedAreas: AreaListado[] = (areasJson || [])
+          .filter((a: any) => (a.Activo ?? a.activo) !== false)
+          .map((a: any) => ({
             id: a.IdArea ?? a.id,
             codigo: a.Codigo ?? a.codigo,
             nombre: a.Nombre ?? a.nombre,
             idCentroCosto: a.IdCentroCosto ?? a.idCentroCosto ?? null,
             centroCostoNombre: a.CentroCostoNombre ?? a.centroCostoNombre ?? null,
-          })),
+          }));
+
+        const uniqueAreas: AreaListado[] = Array.from(
+          new Map<number, AreaListado>(mappedAreas.map((a) => [a.id, a])).values(),
         );
 
-        setRecursos(
-          (recursosJson || []).map((r: any) => ({
-            id: r.IdRecurso ?? r.id,
-            nombre: r.Nombre ?? r.nombre,
-          })),
-        );
+        setAreas(uniqueAreas);
+
       } catch (e: any) {
         console.error('Error al cargar datos para CrearSolicitudPage', e);
         setError(e?.message || 'Error al cargar datos iniciales');
@@ -172,6 +174,153 @@ export default function CrearSolicitudPage() {
     cargarDatos();
   }, [token]);
 
+  useEffect(() => {
+    if (!token || !editId) return;
+
+    const cargarSolicitud = async () => {
+      try {
+        setError(null);
+
+        const resp = await fetch(`http://localhost:4000/api/solicitudes/${editId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!resp.ok) {
+          throw new Error('No se pudo cargar la solicitud');
+        }
+
+        const data: { cabecera: any; detalle: any[] } = await resp.json();
+        const cabecera = data.cabecera || null;
+        const detalle = data.detalle || [];
+
+        if (!cabecera) {
+          throw new Error('Solicitud no encontrada');
+        }
+
+        const estado = String(cabecera.Estado ?? '').toUpperCase();
+        if (estado !== 'RECHAZADA' && estado !== 'BORRADOR') {
+          toast.error('No se puede editar esta solicitud', {
+            description: 'Solo se permiten editar solicitudes rechazadas o en borrador.',
+          });
+          navigate('/solicitudes');
+          return;
+        }
+
+        const fecha = cabecera.FechaSolicitud
+          ? new Date(String(cabecera.FechaSolicitud)).toISOString().slice(0, 10)
+          : fechaSolicitud;
+
+        setFechaSolicitud(fecha);
+        setObservaciones(cabecera.Comentario ?? '');
+        setIdAreaDestino(cabecera.IdArea ? String(cabecera.IdArea) : '');
+        setIdRecurso('');
+        setCodigoCuenta('');
+
+        const mappedItems: ItemSolicitud[] = detalle.map((d: any) => {
+          const cantidad = Number(d.CantidadSolicitada ?? 0);
+          const costoUnitario = Number(d.UltimoPrecioCompra ?? 0);
+          return {
+            idMaterial: Number(d.IdMaterial),
+            grupoArticulos: d.GrupoArticulos ?? null,
+            numeroArticulo: d.NumeroArticulo ?? '',
+            descripcionArticulo: d.DescripcionArticulo ?? '',
+            unidadMedida: d.UnidadMedidaDetalle ?? d.UnidadMedidaMaterial ?? '',
+            cantidad,
+            stockDisponible: d.EnStock ?? null,
+            costoUnitario,
+            subtotal: cantidad * costoUnitario,
+          };
+        });
+
+        setItems(mappedItems);
+      } catch (e: any) {
+        console.error('Error al cargar solicitud para edición', e);
+        setError(e?.message || 'Error al cargar la solicitud');
+      }
+    };
+
+    cargarSolicitud();
+  }, [editId, token, navigate, fechaSolicitud]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const cargarRecursosPorArea = async () => {
+      if (!idAreaDestino) {
+        setRecursos([]);
+        setIdRecurso('');
+        setCodigoCuenta('');
+        return;
+      }
+
+      try {
+        const resp = await fetch(
+          `http://localhost:4000/api/area-recursos/recursos?idArea=${idAreaDestino}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
+
+        if (!resp.ok) {
+          setRecursos([]);
+          setIdRecurso('');
+          setCodigoCuenta('');
+          return;
+        }
+
+        const recursosJson = await resp.json();
+        setRecursos(
+          (recursosJson || []).map((r: any) => ({
+            id: r.IdRecurso ?? r.id,
+            nombre: r.Nombre ?? r.nombre,
+          })),
+        );
+        setIdRecurso('');
+        setCodigoCuenta('');
+      } catch (e) {
+        console.error('Error al cargar recursos por área', e);
+        setRecursos([]);
+        setIdRecurso('');
+        setCodigoCuenta('');
+      }
+    };
+
+    cargarRecursosPorArea();
+  }, [idAreaDestino, token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const cargarCodigoCuenta = async () => {
+      if (!idAreaDestino || !idRecurso) {
+        setCodigoCuenta('');
+        return;
+      }
+
+      try {
+        const resp = await fetch(
+          `http://localhost:4000/api/area-recursos/codigo-cuenta?idArea=${idAreaDestino}&idRecurso=${idRecurso}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
+
+        if (!resp.ok) {
+          setCodigoCuenta('');
+          return;
+        }
+
+        const data = await resp.json();
+        setCodigoCuenta(data?.codigoCuenta ?? '');
+      } catch (e) {
+        console.error('Error al cargar código de cuenta', e);
+        setCodigoCuenta('');
+      }
+    };
+
+    cargarCodigoCuenta();
+  }, [idAreaDestino, idRecurso, token]);
+
   const handleAgregarItem = () => {
     if (!selectedMaterialId || !cantidad || Number(cantidad) <= 0) return;
 
@@ -180,7 +329,9 @@ export default function CrearSolicitudPage() {
 
     const cantidadNumber = Number(cantidad);
     if (material.enStock != null && cantidadNumber > material.enStock) {
-      alert('La cantidad solicitada excede el stock disponible');
+      toast.warning('La cantidad solicitada excede el stock disponible', {
+        description: 'Ajusta la cantidad según el stock actual.',
+      });
       return;
     }
 
@@ -207,18 +358,59 @@ export default function CrearSolicitudPage() {
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleEditarItem = (index: number) => {
+    const item = items[index];
+    if (!item) return;
+    setEditingIndex(index);
+    setEditingCantidad(String(item.cantidad));
+  };
+
+  const handleCancelarEdicionItem = () => {
+    setEditingIndex(null);
+    setEditingCantidad('');
+  };
+
+  const handleGuardarEdicionItem = () => {
+    if (editingIndex === null) return;
+    const nuevaCantidad = Number(editingCantidad);
+    if (!editingCantidad || Number.isNaN(nuevaCantidad) || nuevaCantidad <= 0) return;
+
+    const item = items[editingIndex];
+    if (item?.stockDisponible != null && nuevaCantidad > item.stockDisponible) {
+      toast.warning('La cantidad solicitada excede el stock disponible', {
+        description: `Stock disponible: ${item.stockDisponible}`,
+      });
+      return;
+    }
+
+    setItems((prev) =>
+      prev.map((item, idx) => {
+        if (idx !== editingIndex) return item;
+        const subtotal = nuevaCantidad * (item.costoUnitario ?? 0);
+        return { ...item, cantidad: nuevaCantidad, subtotal };
+      }),
+    );
+
+    setEditingIndex(null);
+    setEditingCantidad('');
+  };
+
   const handleGuardarBorrador = async () => {
     await handleEnviarSolicitud(true);
   };
 
   const handleEnviarSolicitud = async (comoBorrador = false) => {
     if (!token) {
-      alert('No hay sesión activa');
+      toast.error('No hay sesión activa', {
+        description: 'Inicia sesión nuevamente para continuar.',
+      });
       return;
     }
 
     if (items.length === 0) {
-      alert('Debe agregar al menos un material a la solicitud');
+      toast.info('Agrega materiales a la solicitud', {
+        description: 'Debes incluir al menos un material antes de enviar.',
+      });
       return;
     }
 
@@ -228,30 +420,36 @@ export default function CrearSolicitudPage() {
     setError(null);
 
     try {
-      const resp = await fetch('http://localhost:4000/api/solicitudes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+      const payload = {
+        fechaSolicitud,
+        estado: comoBorrador ? 'PENDIENTE' : 'PENDIENTE',
+        nuevoEstado: 'PENDIENTE',
+        area: null,
+        comentario: observaciones || null,
+        idCorteStock: null,
+        idArea: areaSeleccionada ? areaSeleccionada.id : null,
+        idRecurso: idRecurso ? Number(idRecurso) : null,
+        idCentroCosto: areaSeleccionada ? areaSeleccionada.idCentroCosto : null,
+        ot: ot || null,
+        detalle: items.map((it) => ({
+          idMaterial: it.idMaterial,
+          cantidadSolicitada: it.cantidad,
+          unidadMedida: it.unidadMedida,
+          comentarioLinea: null,
+        })),
+      };
+
+      const resp = await fetch(
+        editId ? `http://localhost:4000/api/solicitudes/${editId}` : 'http://localhost:4000/api/solicitudes',
+        {
+          method: editId ? 'PUT' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify({
-          fechaSolicitud,
-          estado: comoBorrador ? 'PENDIENTE' : 'PENDIENTE',
-          area: null,
-          comentario: observaciones || null,
-          idCorteStock: null,
-          idArea: areaSeleccionada ? areaSeleccionada.id : null,
-          idRecurso: idRecurso ? Number(idRecurso) : null,
-          idCentroCosto: areaSeleccionada ? areaSeleccionada.idCentroCosto : null,
-          ot: ot || null,
-          detalle: items.map((it) => ({
-            idMaterial: it.idMaterial,
-            cantidadSolicitada: it.cantidad,
-            unidadMedida: it.unidadMedida,
-            comentarioLinea: null,
-          })),
-        }),
-      });
+      );
 
       if (!resp.ok) {
         const text = await resp.text();
@@ -259,16 +457,22 @@ export default function CrearSolicitudPage() {
       }
       const data = await resp.json();
 
-      // Abrir vista elegante para impresión / PDF
-      try {
-        const idSolicitud = data.IdSolicitud ?? data.idSolicitud ?? null;
-        const codigoSolicitud = data.CodigoSolicitud ?? data.codigoSolicitud ?? 'Solicitud';
+      // Abrir vista elegante para impresión / PDF (solo en creación)
+      if (!editId) {
+        try {
+          const idSolicitud = data.IdSolicitud ?? data.idSolicitud ?? null;
+          const codigoSolicitud = data.CodigoSolicitud ?? data.codigoSolicitud ?? 'Solicitud';
 
         const areaSeleccionada = idAreaDestino ? areas.find((a) => String(a.id) === idAreaDestino) : null;
 
         const ventana = window.open('', '_blank');
         if (ventana) {
-          const fechaLocal = new Date(fechaSolicitud).toLocaleDateString();
+          // `fechaSolicitud` es YYYY-MM-DD. `new Date('YYYY-MM-DD')` se interpreta como UTC
+          // y en zonas horarias negativas puede “retroceder” al día anterior.
+          // Parseamos como fecha local para impresión.
+          const [yy, mm, dd] = (fechaSolicitud || '').split('-').map((n) => Number(n));
+          const fechaDate = yy && mm && dd ? new Date(yy, mm - 1, dd) : new Date();
+          const fechaLocal = fechaDate.toLocaleDateString();
           const totalLocal = total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
           ventana.document.write(`<!DOCTYPE html>
@@ -333,8 +537,8 @@ export default function CrearSolicitudPage() {
           <div>${areaSeleccionada ? `${areaSeleccionada.codigo} - ${areaSeleccionada.nombre}` : ''}</div>
         </div>
         <div>
-          <div class="label">Centro de costo</div>
-          <div>${areaSeleccionada?.centroCostoNombre ?? ''}</div>
+          <div class="label">Código de cuenta</div>
+          <div>${codigoCuenta ?? ''}</div>
         </div>
       </div>
     </div>
@@ -354,8 +558,8 @@ export default function CrearSolicitudPage() {
         </thead>
         <tbody>
           ${items
-            .map(
-              (it) => `
+              .map(
+                (it) => `
           <tr>
             <td>${it.grupoArticulos ?? '-'}</td>
             <td>${it.numeroArticulo}</td>
@@ -364,8 +568,8 @@ export default function CrearSolicitudPage() {
             <td class="text-right">${it.stockDisponible ?? 0}</td>
             <td class="text-right">${it.cantidad}</td>
           </tr>`,
-            )
-            .join('')}
+              )
+              .join('')}
         </tbody>
       </table>
     </div>
@@ -387,16 +591,32 @@ export default function CrearSolicitudPage() {
 </html>`);
           ventana.document.close();
         }
-      } catch (printError) {
-        console.error('Error al abrir vista de impresión de solicitud', printError);
+        } catch (printError) {
+          console.error('Error al abrir vista de impresión de solicitud', printError);
+        }
       }
 
-      alert(comoBorrador ? 'Solicitud guardada correctamente' : 'Solicitud creada correctamente');
+      toast.success(
+        editId
+          ? 'Solicitud actualizada correctamente'
+          : comoBorrador
+            ? 'Solicitud guardada correctamente'
+            : 'Solicitud creada correctamente',
+        {
+          description: editId
+            ? 'La solicitud quedó actualizada y enviada a revisión.'
+            : comoBorrador
+              ? 'El borrador quedó disponible en el listado de solicitudes.'
+              : 'Se registró y quedó en estado pendiente.',
+        },
+      );
       navigate('/solicitudes');
     } catch (e: any) {
       console.error('Error al crear solicitud', e);
       setError(e?.message || 'Error al crear la solicitud');
-      alert('Error al crear la solicitud');
+      toast.error('No se pudo crear la solicitud', {
+        description: 'Intenta nuevamente o contacta al administrador.',
+      });
     } finally {
       setLoading(false);
     }
@@ -461,16 +681,6 @@ export default function CrearSolicitudPage() {
                   />
                 </div>
               </div>
-              {idAreaDestino && (() => {
-                const area = areas.find((a) => String(a.id) === idAreaDestino);
-                if (!area) return null;
-                return (
-                  <div className="text-[11px] text-slate-500 md:text-right">
-                    <span className="uppercase tracking-wide text-slate-400 mr-1">Centro de costo:</span>
-                    <span>{area.centroCostoNombre ?? 'Sin centro de costo'}</span>
-                  </div>
-                );
-              })()}
             </div>
           </div>
           {error && (
@@ -498,7 +708,7 @@ export default function CrearSolicitudPage() {
                 <SelectContent>
                   {areas.map((a) => (
                     <SelectItem key={a.id} value={String(a.id)}>
-                      {a.codigo} - {a.nombre}
+                      {a.nombre}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -506,9 +716,17 @@ export default function CrearSolicitudPage() {
             </div>
             <div className="space-y-2">
               <Label>Recurso</Label>
-              <Select value={idRecurso} onValueChange={setIdRecurso}>
+              <Select value={idRecurso} onValueChange={setIdRecurso} disabled={!idAreaDestino || recursos.length === 0}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar recurso" />
+                  <SelectValue
+                    placeholder={
+                      !idAreaDestino
+                        ? 'Selecciona un área primero'
+                        : recursos.length === 0
+                          ? 'Sin recursos disponibles'
+                          : 'Seleccionar recurso'
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {recursos.map((r) => (
@@ -520,20 +738,11 @@ export default function CrearSolicitudPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Centro de costo</Label>
+              <Label>Código de cuenta</Label>
               <Input
-                value={
-                  idAreaDestino
-                    ? (() => {
-                        const area = areas.find((a) => String(a.id) === idAreaDestino);
-                        if (!area) return '';
-                        if (!area.centroCostoNombre) return '';
-                        return area.centroCostoNombre;
-                      })()
-                    : ''
-                }
+                value={codigoCuenta}
                 readOnly
-                placeholder="Se completa según el área seleccionada"
+                placeholder="Se completa según área y recurso"
               />
             </div>
           </div>
@@ -683,7 +892,20 @@ export default function CrearSolicitudPage() {
                         <TableCell>{item.descripcionArticulo}</TableCell>
                         <TableCell>{item.unidadMedida}</TableCell>
                         <TableCell className="text-right">{item.stockDisponible ?? 0}</TableCell>
-                        <TableCell className="text-right">{item.cantidad}</TableCell>
+                        <TableCell className="text-right">
+                          {editingIndex === index ? (
+                            <Input
+                              type="number"
+                              min="1"
+                              max={item.stockDisponible ?? undefined}
+                              value={editingCantidad}
+                              onChange={(e) => setEditingCantidad(e.target.value)}
+                              className="h-8 w-24 ml-auto text-right"
+                            />
+                          ) : (
+                            item.cantidad
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
                           <Button
                             size="sm"
@@ -692,6 +914,32 @@ export default function CrearSolicitudPage() {
                           >
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </Button>
+                          {editingIndex === index ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={handleGuardarEdicionItem}
+                              >
+                                <Check className="w-4 h-4 text-green-600" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={handleCancelarEdicionItem}
+                              >
+                                <X className="w-4 h-4 text-slate-500" />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditarItem(index)}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

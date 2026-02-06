@@ -75,6 +75,17 @@ interface SolicitudDetalleApi {
   UltimaMonedaCompra: string | null;
 }
 
+interface AprobacionSolicitudApi {
+  IdAprobacion: number;
+  IdSolicitud: number;
+  IdAprobador: number;
+  NombreAprobador: string;
+  EmailAprobador: string;
+  FechaAprobacion: string;
+  Estado: string;
+  Comentario: string | null;
+}
+
 function mapEstadoDesdeBackend(estadoDb: EstadoDb): Solicitud['estado'] {
   const v = (estadoDb || '').toUpperCase();
   switch (v) {
@@ -121,6 +132,9 @@ export default function VerSolicitudesPage() {
   const [detalleSeleccionado, setDetalleSeleccionado] = useState<SolicitudDetalleApi[]>([]);
   const [detalleLoading, setDetalleLoading] = useState(false);
   const [detalleError, setDetalleError] = useState<string | null>(null);
+  const [aprobacionesSeleccionadas, setAprobacionesSeleccionadas] = useState<AprobacionSolicitudApi[]>([]);
+  const [aprobacionesLoading, setAprobacionesLoading] = useState(false);
+  const [aprobacionesError, setAprobacionesError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -207,6 +221,9 @@ export default function VerSolicitudesPage() {
     setDetalleSeleccionado([]);
     setDetalleError(null);
     setDetalleLoading(true);
+    setAprobacionesSeleccionadas([]);
+    setAprobacionesError(null);
+    setAprobacionesLoading(true);
 
     fetch(`http://localhost:4000/api/solicitudes/${solicitud.id}`, {
       method: 'GET',
@@ -227,6 +244,27 @@ export default function VerSolicitudesPage() {
       })
       .finally(() => {
         setDetalleLoading(false);
+      });
+
+    fetch(`http://localhost:4000/api/solicitudes/${solicitud.id}/aprobaciones`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error('Error al obtener aprobaciones de la solicitud');
+        }
+        const data: AprobacionSolicitudApi[] = await res.json();
+        setAprobacionesSeleccionadas(data || []);
+      })
+      .catch((err: any) => {
+        console.error('Error al obtener aprobaciones de solicitud', err);
+        setAprobacionesError('Error al obtener comentario del aprobador');
+      })
+      .finally(() => {
+        setAprobacionesLoading(false);
       });
   };
 
@@ -330,7 +368,7 @@ export default function VerSolicitudesPage() {
                     return (
                       <TableRow key={solicitud.id}>
                         <TableCell className="font-medium">{solicitud.numero}</TableCell>
-                        <TableCell>{new Date(solicitud.fecha).toLocaleDateString()}</TableCell>
+                        <TableCell>{new Date(solicitud.fecha).toLocaleDateString(undefined, { timeZone: 'UTC' })}</TableCell>
                         <TableCell>{solicitud.area}</TableCell>
                         <TableCell>{solicitud.solicitante}</TableCell>
                         <TableCell className="text-center">{solicitud.items}</TableCell>
@@ -497,14 +535,29 @@ export default function VerSolicitudesPage() {
                 )}
               </div>
 
-              {selectedSolicitud.comentarioRechazo && (
-                <div className="border-t pt-4">
-                  <div className="text-sm text-muted-foreground mb-2">Motivo de Rechazo</div>
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
-                    {selectedSolicitud.comentarioRechazo}
+              <div className="border-t pt-4">
+                <div className="text-sm text-muted-foreground mb-2">Comentario del jefe de producción</div>
+                {aprobacionesLoading && (
+                  <div className="text-sm text-muted-foreground">Cargando comentario...</div>
+                )}
+                {aprobacionesError && (
+                  <div className="text-sm text-red-600">{aprobacionesError}</div>
+                )}
+                {!aprobacionesLoading && !aprobacionesError && aprobacionesSeleccionadas.length === 0 && (
+                  <div className="text-sm text-muted-foreground">Sin comentario del aprobador</div>
+                )}
+                {!aprobacionesLoading && !aprobacionesError && aprobacionesSeleccionadas.length > 0 && (
+                  <div className="p-3 bg-slate-50 rounded-lg text-sm">
+                    <div className="font-medium">
+                      {aprobacionesSeleccionadas[0].NombreAprobador}
+                    </div>
+                    <div className="text-muted-foreground text-xs mb-2">
+                      {new Date(aprobacionesSeleccionadas[0].FechaAprobacion).toLocaleString()}
+                    </div>
+                    {aprobacionesSeleccionadas[0].Comentario || 'Sin comentario'}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               {selectedSolicitud.observaciones && (
                 <div className="border-t pt-4">

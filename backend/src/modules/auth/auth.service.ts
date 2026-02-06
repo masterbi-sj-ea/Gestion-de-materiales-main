@@ -7,17 +7,18 @@ interface LoginSpResult {
   NombreCompleto: string;
   Email: string;
   Activo: boolean;
+  HashPassword: Buffer | null;
   Roles: string | null; // STRING_AGG desde el SP
 }
 
-export async function loginService(email: string, _password: string) {
-  if (!email) {
-    throw new Error('Email requerido');
+export async function loginService(email: string, passwordString: string) {
+  if (!email || !passwordString) {
+    throw new Error('Email y contraseña requeridos');
   }
 
   const row = await callSpOne<LoginSpResult>('sp_LoginUsuario', {
     Email: email,
-    Password: _password
+    Password: passwordString
   });
 
   if (!row) {
@@ -26,6 +27,20 @@ export async function loginService(email: string, _password: string) {
 
   if (!row.Activo) {
     throw new Error('Usuario inactivo');
+  }
+
+  // Validación de Contraseña
+  // Verificamos si la contraseña coincide con el binario almacenado (Legacy: UTF-16LE directo)
+  let isValid = false;
+  if (row.HashPassword) {
+    const inputBuffer = Buffer.from(passwordString, 'utf16le');
+    if (inputBuffer.equals(row.HashPassword)) {
+      isValid = true;
+    }
+  }
+
+  if (!isValid) {
+    throw new Error('Credenciales inválidas');
   }
 
   const payload = {

@@ -4,6 +4,7 @@ import {
   crearSolicitud,
   listarSolicitudes,
   obtenerSolicitud,
+  actualizarSolicitud,
   registrarAprobacionSolicitud,
   listarAprobacionesPorSolicitud,
   actualizarEstadoSolicitud,
@@ -105,6 +106,59 @@ export async function obtenerSolicitudController(req: AuthRequest, res: Response
   } catch (error: any) {
     console.error('Error en obtenerSolicitudController', error);
     return res.status(500).json({ message: 'Error al obtener solicitud' });
+  }
+}
+
+export async function actualizarSolicitudController(req: AuthRequest, res: Response) {
+  const { id } = req.params;
+  const idSolicitud = Number(id);
+  if (!idSolicitud || Number.isNaN(idSolicitud)) {
+    return res.status(400).json({ message: 'Id de solicitud inválido' });
+  }
+
+  const {
+    fechaSolicitud,
+    comentario,
+    idArea,
+    idCentroCosto,
+    detalle,
+    nuevoEstado,
+  } = req.body || {};
+
+  if (!Array.isArray(detalle) || !detalle.length) {
+    return res.status(400).json({ message: 'La solicitud debe tener al menos una línea de detalle' });
+  }
+
+  try {
+    await actualizarSolicitud({
+      idSolicitud,
+      fechaSolicitud: fechaSolicitud ?? null,
+      nuevoEstado: nuevoEstado ?? 'PENDIENTE',
+      comentario: comentario ?? null,
+      idArea: idArea ?? null,
+      idCentroCosto: idCentroCosto ?? null,
+      area: null,
+      detalle: detalle.map((d: any) => ({
+        idMaterial: d.idMaterial,
+        cantidadSolicitada: d.cantidadSolicitada,
+        unidadMedida: d.unidadMedida,
+        comentarioLinea: d.comentarioLinea,
+      })),
+    });
+
+    try {
+      await registrarAuditoria(req.userId ?? null, 'ACTUALIZAR_SOLICITUD', {
+        modulo: 'Solicitudes',
+        idSolicitud,
+      });
+    } catch (auditError) {
+      console.error('Error al registrar auditoría ACTUALIZAR_SOLICITUD', auditError);
+    }
+
+    return res.status(200).json({ message: 'Solicitud actualizada correctamente' });
+  } catch (error: any) {
+    console.error('Error en actualizarSolicitudController', error);
+    return res.status(500).json({ message: error?.message || 'Error al actualizar solicitud' });
   }
 }
 

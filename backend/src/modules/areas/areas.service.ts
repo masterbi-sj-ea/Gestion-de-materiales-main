@@ -8,6 +8,8 @@ export interface Area {
   Activo: boolean;
   IdCentroCosto: number | null;
   CentroCostoNombre: string | null;
+  CodigoCuenta?: string | null;
+  NombreCuenta?: string | null;
 }
 
 export async function listarAreas(): Promise<Area[]> {

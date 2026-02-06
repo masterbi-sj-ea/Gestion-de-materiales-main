@@ -16,15 +16,14 @@ GO
 
 -- Roles del sistema
 IF OBJECT_ID('dbo.Roles', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Roles (
-        IdRol          INT IDENTITY(1,1) PRIMARY KEY,
-        Nombre         NVARCHAR(100) NOT NULL,
-        Descripcion    NVARCHAR(255) NULL,
-        EsAdmin        BIT NOT NULL DEFAULT(0),
-        Activo         BIT NOT NULL DEFAULT(1)
-    );
-END
+    CREATE TABLE dbo.Roles
+(
+    IdRol INT IDENTITY(1,1) PRIMARY KEY,
+    Nombre NVARCHAR(100) NOT NULL,
+    Descripcion NVARCHAR(255) NULL,
+    EsAdmin BIT NOT NULL DEFAULT(0),
+    Activo BIT NOT NULL DEFAULT(1)
+);
 GO
 
 ------------------------------------------------------------
@@ -74,15 +73,17 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Usuarios (NombreCompleto, Email, HashPassword, Activo)
-    VALUES (
-        @NombreCompleto,
-        @Email,
-        CASE
+    INSERT INTO dbo.Usuarios
+        (NombreCompleto, Email, HashPassword, Activo)
+    VALUES
+        (
+            @NombreCompleto,
+            @Email,
+            CASE
             WHEN @HashPassword IS NULL THEN NULL
             ELSE CONVERT(VARBINARY(500), @HashPassword)
         END,
-        @Activo
+            @Activo
     );
 
     SELECT SCOPE_IDENTITY() AS IdUsuario;
@@ -153,8 +154,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Roles (Nombre, Descripcion)
-    VALUES (@Nombre, @Descripcion);
+    INSERT INTO dbo.Roles
+        (Nombre, Descripcion)
+    VALUES
+        (@Nombre, @Descripcion);
 
     SELECT SCOPE_IDENTITY() AS IdRol;
 END
@@ -183,7 +186,9 @@ BEGIN
     SET NOCOUNT ON;
 
     -- Solo permite eliminar el rol si no tiene usuarios asociados
-    IF EXISTS (SELECT 1 FROM dbo.UsuariosRoles WHERE IdRol = @IdRol)
+    IF EXISTS (SELECT 1
+    FROM dbo.UsuariosRoles
+    WHERE IdRol = @IdRol)
     BEGIN
         RAISERROR('No se puede eliminar el rol porque tiene usuarios asignados.', 16, 1);
         RETURN;
@@ -203,12 +208,12 @@ IF TYPE_ID('dbo.TPermisosRolModulo') IS NULL
 BEGIN
     CREATE TYPE dbo.TPermisosRolModulo AS TABLE
     (
-        IdModulo       INT NOT NULL,
-        PuedeVer       BIT NOT NULL,
-        PuedeCrear     BIT NOT NULL,
-        PuedeEditar    BIT NOT NULL,
-        PuedeAprobar   BIT NOT NULL,
-        PuedeEliminar  BIT NOT NULL
+        IdModulo INT NOT NULL,
+        PuedeVer BIT NOT NULL,
+        PuedeCrear BIT NOT NULL,
+        PuedeEditar BIT NOT NULL,
+        PuedeAprobar BIT NOT NULL,
+        PuedeEliminar BIT NOT NULL
     );
 END
 GO
@@ -225,7 +230,8 @@ BEGIN
     WHERE IdRol = @IdRol;
 
     -- Insertamos los nuevos permisos
-    INSERT INTO dbo.PermisosRolModulo (
+    INSERT INTO dbo.PermisosRolModulo
+        (
         IdRol,
         IdModulo,
         PuedeVer,
@@ -233,7 +239,7 @@ BEGIN
         PuedeEditar,
         PuedeAprobar,
         PuedeEliminar
-    )
+        )
     SELECT
         @IdRol,
         p.IdModulo,
@@ -249,92 +255,88 @@ GO
 
 -- Usuarios del sistema
 IF OBJECT_ID('dbo.Usuarios', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Usuarios (
-        IdUsuario        INT IDENTITY(1,1) PRIMARY KEY,
-        NombreCompleto   NVARCHAR(150) NOT NULL,
-        Email            NVARCHAR(150) NOT NULL UNIQUE,
-        HashPassword     VARBINARY(500) NULL,
-        Activo           BIT NOT NULL DEFAULT(1),
-        FechaCreacion    DATETIME2 NOT NULL DEFAULT(SYSDATETIME())
-    );
-END
+    CREATE TABLE dbo.Usuarios
+(
+    IdUsuario INT IDENTITY(1,1) PRIMARY KEY,
+    NombreCompleto NVARCHAR(150) NOT NULL,
+    Email NVARCHAR(150) NOT NULL UNIQUE,
+    HashPassword VARBINARY(500) NULL,
+    Activo BIT NOT NULL DEFAULT(1),
+    FechaCreacion DATETIME2 NOT NULL DEFAULT(SYSDATETIME())
+);
 GO
 
 -- Relación Usuarios-Roles (multi-rol)
 IF OBJECT_ID('dbo.UsuariosRoles', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.UsuariosRoles (
-        IdUsuarioRol   INT IDENTITY(1,1) PRIMARY KEY,
-        IdUsuario      INT NOT NULL,
-        IdRol          INT NOT NULL,
-        CONSTRAINT FK_UsuariosRoles_Usuarios
+    CREATE TABLE dbo.UsuariosRoles
+(
+    IdUsuarioRol INT IDENTITY(1,1) PRIMARY KEY,
+    IdUsuario INT NOT NULL,
+    IdRol INT NOT NULL,
+    CONSTRAINT FK_UsuariosRoles_Usuarios
             FOREIGN KEY (IdUsuario) REFERENCES dbo.Usuarios(IdUsuario),
-        CONSTRAINT FK_UsuariosRoles_Roles
+    CONSTRAINT FK_UsuariosRoles_Roles
             FOREIGN KEY (IdRol) REFERENCES dbo.Roles(IdRol),
-        CONSTRAINT UQ_UsuariosRoles UNIQUE (IdUsuario, IdRol)
-    );
-END
+    CONSTRAINT UQ_UsuariosRoles UNIQUE (IdUsuario, IdRol)
+);
 GO
 
 -- Módulos / pantallas del sistema
 IF OBJECT_ID('dbo.Modulos', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Modulos (
-        IdModulo      INT IDENTITY(1,1) PRIMARY KEY,
-        Codigo        NVARCHAR(50) NOT NULL UNIQUE, -- ej: 'dashboard', 'materiales'
-        Nombre        NVARCHAR(100) NOT NULL,
-        Path          NVARCHAR(200) NULL,           -- ruta frontend: /materiales
-        Descripcion   NVARCHAR(255) NULL,
-        EsMenu        BIT NOT NULL DEFAULT(1)
-    );
-END
+    CREATE TABLE dbo.Modulos
+(
+    IdModulo INT IDENTITY(1,1) PRIMARY KEY,
+    Codigo NVARCHAR(50) NOT NULL UNIQUE,
+    -- ej: 'dashboard', 'materiales'
+    Nombre NVARCHAR(100) NOT NULL,
+    Path NVARCHAR(200) NULL,
+    -- ruta frontend: /materiales
+    Descripcion NVARCHAR(255) NULL,
+    EsMenu BIT NOT NULL DEFAULT(1)
+);
 GO
 
 -- Permisos por Rol y Módulo
 IF OBJECT_ID('dbo.PermisosRolModulo', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.PermisosRolModulo (
-        IdRol         INT NOT NULL,
-        IdModulo      INT NOT NULL,
-        PuedeVer      BIT NOT NULL DEFAULT(0),
-        PuedeCrear    BIT NOT NULL DEFAULT(0),
-        PuedeEditar   BIT NOT NULL DEFAULT(0),
-        PuedeAprobar  BIT NOT NULL DEFAULT(0),
-        PuedeEliminar BIT NOT NULL DEFAULT(0),
-        CONSTRAINT PK_PermisosRolModulo PRIMARY KEY (IdRol, IdModulo),
-        CONSTRAINT FK_PermisosRolModulo_Roles
+    CREATE TABLE dbo.PermisosRolModulo
+(
+    IdRol INT NOT NULL,
+    IdModulo INT NOT NULL,
+    PuedeVer BIT NOT NULL DEFAULT(0),
+    PuedeCrear BIT NOT NULL DEFAULT(0),
+    PuedeEditar BIT NOT NULL DEFAULT(0),
+    PuedeAprobar BIT NOT NULL DEFAULT(0),
+    PuedeEliminar BIT NOT NULL DEFAULT(0),
+    CONSTRAINT PK_PermisosRolModulo PRIMARY KEY (IdRol, IdModulo),
+    CONSTRAINT FK_PermisosRolModulo_Roles
             FOREIGN KEY (IdRol) REFERENCES dbo.Roles(IdRol),
-        CONSTRAINT FK_PermisosRolModulo_Modulos
+    CONSTRAINT FK_PermisosRolModulo_Modulos
             FOREIGN KEY (IdModulo) REFERENCES dbo.Modulos(IdModulo)
-    );
-END
+);
 GO
 
 -- Parámetros globales del sistema
 IF OBJECT_ID('dbo.ParametrosSistema', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.ParametrosSistema (
-        Clave         NVARCHAR(100) NOT NULL PRIMARY KEY,
-        Valor         NVARCHAR(500) NOT NULL,
-        Descripcion   NVARCHAR(255) NULL
-    );
-END
+    CREATE TABLE dbo.ParametrosSistema
+(
+    Clave NVARCHAR(100) NOT NULL PRIMARY KEY,
+    Valor NVARCHAR(500) NOT NULL,
+    Descripcion NVARCHAR(255) NULL
+);
 GO
 
 -- Preferencias por Usuario
 IF OBJECT_ID('dbo.PreferenciasUsuario', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.PreferenciasUsuario (
-        IdPreferencia  INT IDENTITY(1,1) PRIMARY KEY,
-        IdUsuario      INT NOT NULL,
-        Clave          NVARCHAR(100) NOT NULL,
-        Valor          NVARCHAR(500) NOT NULL,
-        CONSTRAINT FK_PreferenciasUsuario_Usuarios
+    CREATE TABLE dbo.PreferenciasUsuario
+(
+    IdPreferencia INT IDENTITY(1,1) PRIMARY KEY,
+    IdUsuario INT NOT NULL,
+    Clave NVARCHAR(100) NOT NULL,
+    Valor NVARCHAR(500) NOT NULL,
+    CONSTRAINT FK_PreferenciasUsuario_Usuarios
             FOREIGN KEY (IdUsuario) REFERENCES dbo.Usuarios(IdUsuario),
-        CONSTRAINT UQ_PreferenciasUsuario UNIQUE (IdUsuario, Clave)
-    );
-END
+    CONSTRAINT UQ_PreferenciasUsuario UNIQUE (IdUsuario, Clave)
+);
 GO
 
 ------------------------------------------------------------
@@ -343,13 +345,12 @@ GO
 
 -- Cortes de stock (marca cada nueva foto de stock cargada desde Excel)
 IF OBJECT_ID('dbo.CortesStock', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.CortesStock (
-        IdCorte      INT IDENTITY(1,1) PRIMARY KEY,
-        FechaCorte   DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
-        Descripcion  NVARCHAR(200) NULL
-    );
-END
+    CREATE TABLE dbo.CortesStock
+(
+    IdCorte INT IDENTITY(1,1) PRIMARY KEY,
+    FechaCorte DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+    Descripcion NVARCHAR(200) NULL
+);
 GO
 
 ------------------------------------------------------------
@@ -358,60 +359,69 @@ GO
 
 -- Maestro de Materiales (estable, NO se trunca)
 IF OBJECT_ID('dbo.Materiales', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Materiales (
-        IdMaterial          INT IDENTITY(1,1) PRIMARY KEY,
-        NumeroArticulo      NVARCHAR(50) NOT NULL UNIQUE,   -- Número de artículo (Excel)
-        DescripcionArticulo NVARCHAR(255) NOT NULL,         -- Descripción del artículo
-        UnidadMedida        NVARCHAR(50) NOT NULL,          -- Unidad de Medida
-        GrupoArticulos      NVARCHAR(100) NULL              -- Grupo de artículos
-    );
-END
+    CREATE TABLE dbo.Materiales
+(
+    IdMaterial INT IDENTITY(1,1) PRIMARY KEY,
+    NumeroArticulo NVARCHAR(50) NOT NULL UNIQUE,
+    -- Número de artículo (Excel)
+    DescripcionArticulo NVARCHAR(255) NOT NULL,
+    -- Descripción del artículo
+    UnidadMedida NVARCHAR(50) NOT NULL,
+    -- Unidad de Medida
+    GrupoArticulos NVARCHAR(100) NULL
+    -- Grupo de artículos
+);
 GO
 
 -- Stock actual (TRUNCATE + recarga desde Excel)
 IF OBJECT_ID('dbo.StockActual', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.StockActual (
-        IdMaterial          INT NOT NULL PRIMARY KEY,
-        EnStock             DECIMAL(18,4) NOT NULL,         -- En stock
-        UltimaFechaCompra   DATE NULL,                      -- Última fecha de compra
-        UltimoPrecioCompra  DECIMAL(18,4) NULL,             -- Último precio de compra
-        UltimaMonedaCompra  NVARCHAR(10) NULL,              -- Última moneda de compra
-        FechaActualizacion  DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
-        CONSTRAINT FK_StockActual_Materiales
+    CREATE TABLE dbo.StockActual
+(
+    IdMaterial INT NOT NULL PRIMARY KEY,
+    EnStock DECIMAL(18,4) NOT NULL,
+    -- En stock
+    UltimaFechaCompra DATE NULL,
+    -- Última fecha de compra
+    UltimoPrecioCompra DECIMAL(18,4) NULL,
+    -- Último precio de compra
+    UltimaMonedaCompra NVARCHAR(10) NULL,
+    -- Última moneda de compra
+    FechaActualizacion DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+    CONSTRAINT FK_StockActual_Materiales
             FOREIGN KEY (IdMaterial) REFERENCES dbo.Materiales(IdMaterial)
-    );
-END
+);
 GO
 
 -- Ubicaciones físicas (catálogo)
 IF OBJECT_ID('dbo.Ubicaciones', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Ubicaciones (
-        IdUbicacion   INT IDENTITY(1,1) PRIMARY KEY,
-        Codigo        NVARCHAR(50) NOT NULL UNIQUE,  -- Código (Excel ubicaciones)
-        Descripcion   NVARCHAR(255) NOT NULL         -- Descripción
-    );
-END
+    CREATE TABLE dbo.Ubicaciones
+(
+    IdUbicacion INT IDENTITY(1,1) PRIMARY KEY,
+    Codigo NVARCHAR(50) NOT NULL UNIQUE,
+    -- Código (Excel ubicaciones)
+    Descripcion NVARCHAR(255) NOT NULL
+    -- Descripción
+);
 GO
 
 -- Relación Material-Ubicación (desde Excel de ubicaciones)
 IF OBJECT_ID('dbo.MaterialUbicacion', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.MaterialUbicacion (
-        IdMaterialUbicacion  INT IDENTITY(1,1) PRIMARY KEY,
-        IdMaterial           INT NOT NULL,
-        IdUbicacion          INT NOT NULL,
-        NumeroParte          NVARCHAR(100) NULL,     -- N° parte
-        UnidadMedida         NVARCHAR(50) NULL,      -- Unidad de medida
-        UbicacionTexto       NVARCHAR(100) NULL,     -- Ubicación libre si viene en texto
-        CONSTRAINT FK_MaterialUbicacion_Materiales
+    CREATE TABLE dbo.MaterialUbicacion
+(
+    IdMaterialUbicacion INT IDENTITY(1,1) PRIMARY KEY,
+    IdMaterial INT NOT NULL,
+    IdUbicacion INT NOT NULL,
+    NumeroParte NVARCHAR(100) NULL,
+    -- N° parte
+    UnidadMedida NVARCHAR(50) NULL,
+    -- Unidad de medida
+    UbicacionTexto NVARCHAR(100) NULL,
+    -- Ubicación libre si viene en texto
+    CONSTRAINT FK_MaterialUbicacion_Materiales
             FOREIGN KEY (IdMaterial) REFERENCES dbo.Materiales(IdMaterial),
-        CONSTRAINT FK_MaterialUbicacion_Ubicaciones
+    CONSTRAINT FK_MaterialUbicacion_Ubicaciones
             FOREIGN KEY (IdUbicacion) REFERENCES dbo.Ubicaciones(IdUbicacion)
-    );
-END
+);
 GO
 
 ------------------------------------------------------------
@@ -420,74 +430,76 @@ GO
 
 -- Solicitud de materiales (cabecera)
 IF OBJECT_ID('dbo.SolicitudesMaterial', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.SolicitudesMaterial (
-        IdSolicitud        INT IDENTITY(1,1) PRIMARY KEY,
-        CodigoSolicitud    NVARCHAR(50) NOT NULL UNIQUE,
-        IdSolicitante      INT NOT NULL,
-        FechaSolicitud     DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
-        Estado             NVARCHAR(30) NOT NULL,       -- PENDIENTE, APROBADA, RECHAZADA, DESPACHADA
-        Area               NVARCHAR(100) NULL,          -- texto libre histórico
-        Comentario         NVARCHAR(500) NULL,
-        IdCorteStock       INT NULL,                    -- corte de stock vigente al crear la solicitud
-        CONSTRAINT FK_SolicitudesMaterial_Usuarios
+    CREATE TABLE dbo.SolicitudesMaterial
+(
+    IdSolicitud INT IDENTITY(1,1) PRIMARY KEY,
+    CodigoSolicitud NVARCHAR(50) NOT NULL UNIQUE,
+    IdSolicitante INT NOT NULL,
+    FechaSolicitud DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+    Estado NVARCHAR(30) NOT NULL,
+    -- PENDIENTE, APROBADA, RECHAZADA, DESPACHADA
+    Area NVARCHAR(100) NULL,
+    -- texto libre histórico
+    Comentario NVARCHAR(500) NULL,
+    IdCorteStock INT NULL,
+    -- corte de stock vigente al crear la solicitud
+    CONSTRAINT FK_SolicitudesMaterial_Usuarios
             FOREIGN KEY (IdSolicitante) REFERENCES dbo.Usuarios(IdUsuario),
-        CONSTRAINT FK_SolicitudesMaterial_CortesStock
+    CONSTRAINT FK_SolicitudesMaterial_CortesStock
             FOREIGN KEY (IdCorteStock) REFERENCES dbo.CortesStock(IdCorte)
-    );
-END
+);
 GO
 
 -- Detalle de solicitudes
 IF OBJECT_ID('dbo.DetalleSolicitudesMaterial', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.DetalleSolicitudesMaterial (
-        IdDetalleSolicitud INT IDENTITY(1,1) PRIMARY KEY,
-        IdSolicitud        INT NOT NULL,
-        IdMaterial         INT NOT NULL,               -- referencia a Materiales
-        CantidadSolicitada DECIMAL(18,4) NOT NULL,
-        CantidadAprobada   DECIMAL(18,4) NULL,
-        UnidadMedida       NVARCHAR(50) NULL,
-        ComentarioLinea    NVARCHAR(255) NULL,
-        CONSTRAINT FK_DetalleSolicitudesMaterial_Solicitud
+    CREATE TABLE dbo.DetalleSolicitudesMaterial
+(
+    IdDetalleSolicitud INT IDENTITY(1,1) PRIMARY KEY,
+    IdSolicitud INT NOT NULL,
+    IdMaterial INT NOT NULL,
+    -- referencia a Materiales
+    CantidadSolicitada DECIMAL(18,4) NOT NULL,
+    CantidadAprobada DECIMAL(18,4) NULL,
+    UnidadMedida NVARCHAR(50) NULL,
+    ComentarioLinea NVARCHAR(255) NULL,
+    CONSTRAINT FK_DetalleSolicitudesMaterial_Solicitud
             FOREIGN KEY (IdSolicitud) REFERENCES dbo.SolicitudesMaterial(IdSolicitud),
-        CONSTRAINT FK_DetalleSolicitudesMaterial_Material
+    CONSTRAINT FK_DetalleSolicitudesMaterial_Material
             FOREIGN KEY (IdMaterial) REFERENCES dbo.Materiales(IdMaterial)
-    );
-END
+);
 GO
 
 -- Aprobaciones
 IF OBJECT_ID('dbo.Aprobaciones', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Aprobaciones (
-        IdAprobacion     INT IDENTITY(1,1) PRIMARY KEY,
-        IdSolicitud      INT NOT NULL,
-        IdAprobador      INT NOT NULL,
-        FechaAprobacion  DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
-        Estado           NVARCHAR(30) NOT NULL,     -- APROBADA / RECHAZADA
-        Comentario       NVARCHAR(500) NULL,
-        CONSTRAINT FK_Aprobaciones_Solicitudes
+    CREATE TABLE dbo.Aprobaciones
+(
+    IdAprobacion INT IDENTITY(1,1) PRIMARY KEY,
+    IdSolicitud INT NOT NULL,
+    IdAprobador INT NOT NULL,
+    FechaAprobacion DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+    Estado NVARCHAR(30) NOT NULL,
+    -- APROBADA / RECHAZADA
+    Comentario NVARCHAR(500) NULL,
+    CONSTRAINT FK_Aprobaciones_Solicitudes
             FOREIGN KEY (IdSolicitud) REFERENCES dbo.SolicitudesMaterial(IdSolicitud),
-        CONSTRAINT FK_Aprobaciones_Usuarios
+    CONSTRAINT FK_Aprobaciones_Usuarios
             FOREIGN KEY (IdAprobador) REFERENCES dbo.Usuarios(IdUsuario)
-    );
-END
+);
 GO
 
 -- Auditoría
 IF OBJECT_ID('dbo.AuditoriaAcciones', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.AuditoriaAcciones (
-        IdAuditoria      INT IDENTITY(1,1) PRIMARY KEY,
-        IdUsuario        INT NULL,
-        FechaAccion      DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
-        TipoAccion       NVARCHAR(50) NOT NULL,     -- LOGIN, CREAR_SOLICITUD, APROBAR, etc.
-        DetalleJson      NVARCHAR(MAX) NULL,
-        CONSTRAINT FK_AuditoriaAcciones_Usuarios
+    CREATE TABLE dbo.AuditoriaAcciones
+(
+    IdAuditoria INT IDENTITY(1,1) PRIMARY KEY,
+    IdUsuario INT NULL,
+    FechaAccion DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+    TipoAccion NVARCHAR(50) NOT NULL,
+    -- LOGIN, CREAR_SOLICITUD, APROBAR, etc.
+    DetalleJson NVARCHAR(MAX) NULL,
+    CONSTRAINT FK_AuditoriaAcciones_Usuarios
             FOREIGN KEY (IdUsuario) REFERENCES dbo.Usuarios(IdUsuario)
-    );
-END
+);
 GO
 
 -- Listar auditoría con datos de usuario y rol principal
@@ -498,25 +510,30 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    ;WITH OrderedAuditoria AS (
-        SELECT
-            aa.IdAuditoria,
-            aa.IdUsuario,
-            aa.FechaAccion,
-            aa.TipoAccion,
-            aa.DetalleJson,
-            u.NombreCompleto   AS UsuarioNombre,
-            u.Email            AS Email,
-            -- Rol principal (primer rol asociado)
-            (SELECT TOP 1 r.Nombre
-             FROM dbo.UsuariosRoles ur
-             JOIN dbo.Roles r ON r.IdRol = ur.IdRol
-             WHERE ur.IdUsuario = aa.IdUsuario
-             ORDER BY r.Nombre) AS RolNombre,
-            ROW_NUMBER() OVER (ORDER BY aa.FechaAccion DESC, aa.IdAuditoria DESC) AS RowNum
-        FROM dbo.AuditoriaAcciones aa
-        LEFT JOIN dbo.Usuarios u ON u.IdUsuario = aa.IdUsuario
-    )
+    ;
+    WITH
+        OrderedAuditoria
+        AS
+        (
+            SELECT
+                aa.IdAuditoria,
+                aa.IdUsuario,
+                aa.FechaAccion,
+                aa.TipoAccion,
+                aa.DetalleJson,
+                u.NombreCompleto   AS UsuarioNombre,
+                u.Email            AS Email,
+                -- Rol principal (primer rol asociado)
+                (SELECT TOP 1
+                    r.Nombre
+                FROM dbo.UsuariosRoles ur
+                    JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+                WHERE ur.IdUsuario = aa.IdUsuario
+                ORDER BY r.Nombre) AS RolNombre,
+                ROW_NUMBER() OVER (ORDER BY aa.FechaAccion DESC, aa.IdAuditoria DESC) AS RowNum
+            FROM dbo.AuditoriaAcciones aa
+                LEFT JOIN dbo.Usuarios u ON u.IdUsuario = aa.IdUsuario
+        )
     SELECT
         IdAuditoria,
         IdUsuario,
@@ -539,23 +556,47 @@ GO
 -- 7. Índices adicionales
 ------------------------------------------------------------
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Usuarios_Email' AND object_id = OBJECT_ID('dbo.Usuarios'))
+IF NOT EXISTS (SELECT 1
+FROM sys.indexes
+WHERE name = 'IX_Usuarios_Email' AND object_id = OBJECT_ID('dbo.Usuarios'))
 BEGIN
     CREATE UNIQUE INDEX IX_Usuarios_Email ON dbo.Usuarios(Email);
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SolicitudesMaterial_Estado_Fecha' AND object_id = OBJECT_ID('dbo.SolicitudesMaterial'))
+IF NOT EXISTS (SELECT 1
+FROM sys.indexes
+WHERE name = 'IX_SolicitudesMaterial_Estado_Fecha' AND object_id = OBJECT_ID('dbo.SolicitudesMaterial'))
 BEGIN
     CREATE INDEX IX_SolicitudesMaterial_Estado_Fecha
     ON dbo.SolicitudesMaterial(Estado, FechaSolicitud);
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PermisosRolModulo_Rol_Modulo' AND object_id = OBJECT_ID('dbo.PermisosRolModulo'))
+IF NOT EXISTS (SELECT 1
+FROM sys.indexes
+WHERE name = 'IX_PermisosRolModulo_Rol_Modulo' AND object_id = OBJECT_ID('dbo.PermisosRolModulo'))
 BEGIN
     CREATE INDEX IX_PermisosRolModulo_Rol_Modulo
     ON dbo.PermisosRolModulo(IdRol, IdModulo);
+END
+GO
+
+IF NOT EXISTS (SELECT 1
+FROM sys.indexes
+WHERE name = 'IX_Materiales_NumeroArticulo' AND object_id = OBJECT_ID('dbo.Materiales'))
+BEGIN
+    CREATE INDEX IX_Materiales_NumeroArticulo
+    ON dbo.Materiales(NumeroArticulo);
+END
+GO
+
+IF NOT EXISTS (SELECT 1
+FROM sys.indexes
+WHERE name = 'IX_Materiales_GrupoArticulos' AND object_id = OBJECT_ID('dbo.Materiales'))
+BEGIN
+    CREATE INDEX IX_Materiales_GrupoArticulos
+    ON dbo.Materiales(GrupoArticulos);
 END
 GO
 
@@ -566,7 +607,8 @@ GO
 -- Login de usuario básico por email (password se manejará más adelante)
 CREATE OR ALTER PROCEDURE dbo.sp_LoginUsuario
     @Email       NVARCHAR(150),
-    @Password    NVARCHAR(200) = NULL  -- reservado para futura validación de hash
+    @Password    NVARCHAR(200) = NULL
+-- reservado para futura validación de hash
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -576,12 +618,13 @@ BEGIN
         u.NombreCompleto,
         u.Email,
         u.Activo,
+        u.HashPassword,
         STRING_AGG(r.Nombre, ',') WITHIN GROUP (ORDER BY r.Nombre) AS Roles
     FROM dbo.Usuarios u
-    LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
-    LEFT JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+        LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
+        LEFT JOIN dbo.Roles r ON r.IdRol = ur.IdRol
     WHERE u.Email = @Email
-    GROUP BY u.IdUsuario, u.NombreCompleto, u.Email, u.Activo;
+    GROUP BY u.IdUsuario, u.NombreCompleto, u.Email, u.Activo, u.HashPassword;
 END
 GO
 
@@ -604,7 +647,7 @@ BEGIN
         prm.PuedeAprobar,
         prm.PuedeEliminar
     FROM dbo.Modulos m
-    LEFT JOIN dbo.PermisosRolModulo prm
+        LEFT JOIN dbo.PermisosRolModulo prm
         ON prm.IdModulo = m.IdModulo AND prm.IdRol = @IdRol
     ORDER BY m.IdModulo;
 END
@@ -617,8 +660,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.CortesStock (FechaCorte, Descripcion)
-    VALUES (SYSDATETIME(), @Descripcion);
+    INSERT INTO dbo.CortesStock
+        (FechaCorte, Descripcion)
+    VALUES
+        (SYSDATETIME(), @Descripcion);
 
     SELECT SCOPE_IDENTITY() AS IdCorte;
 END
@@ -646,22 +691,23 @@ BEGIN
     SET NOCOUNT ON;
 
     DECLARE @IdCorteActual INT = (
-        SELECT MAX(IdCorte) FROM dbo.CortesStock
+        SELECT MAX(IdCorte)
+    FROM dbo.CortesStock
     );
 
     DECLARE @EnStock DECIMAL(18,4) = (
         SELECT sa.EnStock
-        FROM dbo.StockActual sa
-        WHERE sa.IdMaterial = @IdMaterial
+    FROM dbo.StockActual sa
+    WHERE sa.IdMaterial = @IdMaterial
     );
 
     DECLARE @Comprometido DECIMAL(18,4) = (
         SELECT ISNULL(SUM(ds.CantidadAprobada), 0)
-        FROM dbo.DetalleSolicitudesMaterial ds
+    FROM dbo.DetalleSolicitudesMaterial ds
         JOIN dbo.SolicitudesMaterial s ON s.IdSolicitud = ds.IdSolicitud
-        WHERE ds.IdMaterial = @IdMaterial
-          AND s.IdCorteStock = @IdCorteActual
-          AND s.Estado IN ('PENDIENTE', 'APROBADA', 'EN_DESPACHO')
+    WHERE ds.IdMaterial = @IdMaterial
+        AND s.IdCorteStock = @IdCorteActual
+        AND s.Estado IN ('PENDIENTE', 'APROBADA', 'EN_DESPACHO')
     );
 
     SELECT
@@ -712,8 +758,8 @@ BEGIN
         sa.UltimaFechaCompra,
         sa.UltimoPrecioCompra,
         sa.UltimaMonedaCompra
-    FROM dbo.Materiales m
-    LEFT JOIN dbo.StockActual sa
+    FROM dbo.Materiales m WITH (NOLOCK)
+        LEFT JOIN dbo.StockActual sa WITH (NOLOCK)
         ON sa.IdMaterial = m.IdMaterial
     ORDER BY m.NumeroArticulo;
 END
@@ -745,11 +791,13 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Materiales (
+    INSERT INTO dbo.Materiales
+        (
         NumeroArticulo, DescripcionArticulo, UnidadMedida, GrupoArticulos
-    )
-    VALUES (
-        @NumeroArticulo, @DescripcionArticulo, @UnidadMedida, @GrupoArticulos
+        )
+    VALUES
+        (
+            @NumeroArticulo, @DescripcionArticulo, @UnidadMedida, @GrupoArticulos
     );
 
     SELECT SCOPE_IDENTITY() AS IdMaterial;
@@ -803,8 +851,8 @@ BEGIN
         a.Activo,
         a.IdCentroCosto,
         cc.Nombre AS CentroCostoNombre
-    FROM dbo.Areas a
-    LEFT JOIN dbo.CentrosCosto cc
+    FROM dbo.Areas a WITH (NOLOCK)
+        LEFT JOIN dbo.CentrosCosto cc WITH (NOLOCK)
         ON cc.IdCentroCosto = a.IdCentroCosto
     ORDER BY a.Codigo;
 END
@@ -830,8 +878,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.CentrosCosto (Codigo, Nombre, Descripcion, Activo)
-    VALUES (@Codigo, @Nombre, @Descripcion, @Activo);
+    INSERT INTO dbo.CentrosCosto
+        (Codigo, Nombre, Descripcion, Activo)
+    VALUES
+        (@Codigo, @Nombre, @Descripcion, @Activo);
 
     SELECT SCOPE_IDENTITY() AS IdCentroCosto;
 END
@@ -848,8 +898,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Areas (Codigo, Nombre, Descripcion, Activo, IdCentroCosto)
-    VALUES (@Codigo, @Nombre, @Descripcion, @Activo, @IdCentroCosto);
+    INSERT INTO dbo.Areas
+        (Codigo, Nombre, Descripcion, Activo, IdCentroCosto)
+    VALUES
+        (@Codigo, @Nombre, @Descripcion, @Activo, @IdCentroCosto);
 
     SELECT SCOPE_IDENTITY() AS IdArea;
 END
@@ -897,31 +949,29 @@ GO
 
 -- Áreas del negocio
 IF OBJECT_ID('dbo.Areas', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Areas (
-        IdArea       INT IDENTITY(1,1) PRIMARY KEY,
-        Codigo       NVARCHAR(50) NOT NULL UNIQUE,
-        Nombre       NVARCHAR(150) NOT NULL,
-        Descripcion  NVARCHAR(255) NULL,
-        Activo       BIT NOT NULL DEFAULT(1),
-        IdCentroCosto INT NULL,
-        CONSTRAINT FK_Areas_CentrosCosto
+    CREATE TABLE dbo.Areas
+(
+    IdArea INT IDENTITY(1,1) PRIMARY KEY,
+    Codigo NVARCHAR(50) NOT NULL UNIQUE,
+    Nombre NVARCHAR(150) NOT NULL,
+    Descripcion NVARCHAR(255) NULL,
+    Activo BIT NOT NULL DEFAULT(1),
+    IdCentroCosto INT NULL,
+    CONSTRAINT FK_Areas_CentrosCosto
             FOREIGN KEY (IdCentroCosto) REFERENCES dbo.CentrosCosto(IdCentroCosto)
-    );
-END
+);
 GO
 
 -- Centros de Costo
 IF OBJECT_ID('dbo.CentrosCosto', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.CentrosCosto (
-        IdCentroCosto INT IDENTITY(1,1) PRIMARY KEY,
-        Codigo        NVARCHAR(50) NOT NULL UNIQUE,
-        Nombre        NVARCHAR(150) NOT NULL,
-        Descripcion   NVARCHAR(255) NULL,
-        Activo        BIT NOT NULL DEFAULT(1)
-    );
-END
+    CREATE TABLE dbo.CentrosCosto
+(
+    IdCentroCosto INT IDENTITY(1,1) PRIMARY KEY,
+    Codigo NVARCHAR(50) NOT NULL UNIQUE,
+    Nombre NVARCHAR(150) NOT NULL,
+    Descripcion NVARCHAR(255) NULL,
+    Activo BIT NOT NULL DEFAULT(1)
+);
 GO
 
 -- Agregar columnas IdArea e IdCentroCosto a SolicitudesMaterial si no existen
@@ -940,7 +990,9 @@ END
 GO
 
 -- Agregar FKs desde SolicitudesMaterial a Areas y CentrosCosto si no existen
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_SolicitudesMaterial_Areas')
+IF NOT EXISTS (SELECT 1
+FROM sys.foreign_keys
+WHERE name = 'FK_SolicitudesMaterial_Areas')
 BEGIN
     ALTER TABLE dbo.SolicitudesMaterial
     ADD CONSTRAINT FK_SolicitudesMaterial_Areas
@@ -948,7 +1000,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_SolicitudesMaterial_CentrosCosto')
+IF NOT EXISTS (SELECT 1
+FROM sys.foreign_keys
+WHERE name = 'FK_SolicitudesMaterial_CentrosCosto')
 BEGIN
     ALTER TABLE dbo.SolicitudesMaterial
     ADD CONSTRAINT FK_SolicitudesMaterial_CentrosCosto
@@ -958,40 +1012,41 @@ GO
 
 -- Cabecera de Presupuesto
 IF OBJECT_ID('dbo.Presupuestos', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.Presupuestos (
-        IdPresupuesto   INT IDENTITY(1,1) PRIMARY KEY,
-        Anio            INT NOT NULL,
-        Mes             INT NULL,              -- opcional: null = anual
-        IdArea          INT NULL,
-        IdCentroCosto   INT NULL,
-        MontoTotal      DECIMAL(18,2) NOT NULL,
-        Moneda          NVARCHAR(10) NOT NULL DEFAULT('USD'),
-        Activo          BIT NOT NULL DEFAULT(1),
-        FechaCreacion   DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
-        CONSTRAINT FK_Presupuestos_Areas
+    CREATE TABLE dbo.Presupuestos
+(
+    IdPresupuesto INT IDENTITY(1,1) PRIMARY KEY,
+    Anio INT NOT NULL,
+    Mes INT NULL,
+    -- opcional: null = anual
+    IdArea INT NULL,
+    IdCentroCosto INT NULL,
+    MontoTotal DECIMAL(18,2) NOT NULL,
+    Moneda NVARCHAR(10) NOT NULL DEFAULT('USD'),
+    Activo BIT NOT NULL DEFAULT(1),
+    FechaCreacion DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+    CONSTRAINT FK_Presupuestos_Areas
             FOREIGN KEY (IdArea) REFERENCES dbo.Areas(IdArea),
-        CONSTRAINT FK_Presupuestos_CentrosCosto
+    CONSTRAINT FK_Presupuestos_CentrosCosto
             FOREIGN KEY (IdCentroCosto) REFERENCES dbo.CentrosCosto(IdCentroCosto)
-    );
-END
+);
 GO
 
 -- Detalle de Presupuesto (por material o grupo de artículos)
 IF OBJECT_ID('dbo.PresupuestoDetalle', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.PresupuestoDetalle (
-        IdPresupuestoDetalle INT IDENTITY(1,1) PRIMARY KEY,
-        IdPresupuesto        INT NOT NULL,
-        IdMaterial           INT NULL,               -- si se desea por material específico
-        GrupoArticulos       NVARCHAR(100) NULL,     -- o por grupo de artículos
-        MontoPermitido       DECIMAL(18,2) NOT NULL,
-        CONSTRAINT FK_PresupuestoDetalle_Presupuestos
+    CREATE TABLE dbo.PresupuestoDetalle
+(
+    IdPresupuestoDetalle INT IDENTITY(1,1) PRIMARY KEY,
+    IdPresupuesto INT NOT NULL,
+    IdMaterial INT NULL,
+    -- si se desea por material específico
+    GrupoArticulos NVARCHAR(100) NULL,
+    -- o por grupo de artículos
+    MontoPermitido DECIMAL(18,2) NOT NULL,
+    CONSTRAINT FK_PresupuestoDetalle_Presupuestos
             FOREIGN KEY (IdPresupuesto) REFERENCES dbo.Presupuestos(IdPresupuesto),
-        CONSTRAINT FK_PresupuestoDetalle_Materiales
+    CONSTRAINT FK_PresupuestoDetalle_Materiales
             FOREIGN KEY (IdMaterial) REFERENCES dbo.Materiales(IdMaterial)
-    );
-END
+);
 GO
 
 -------------------------------------------------------------
@@ -1012,7 +1067,7 @@ BEGIN
         p.IdArea,
         a.Nombre AS AreaNombre
     FROM dbo.Presupuestos p
-    LEFT JOIN dbo.Areas a ON a.IdArea = p.IdArea
+        LEFT JOIN dbo.Areas a ON a.IdArea = p.IdArea
     WHERE p.Activo = 1
     ORDER BY p.Anio, p.Mes, a.Nombre;
 END
@@ -1020,7 +1075,8 @@ GO
 
 CREATE OR ALTER PROCEDURE dbo.sp_CrearPresupuesto
     @Anio       INT,
-    @Mes        INT = NULL, -- podemos usar 1..4 como trimestre si se desea
+    @Mes        INT = NULL,
+    -- podemos usar 1..4 como trimestre si se desea
     @IdArea     INT = NULL,
     @IdCentroCosto INT = NULL,
     @MontoTotal DECIMAL(18,2),
@@ -1029,8 +1085,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Presupuestos (Anio, Mes, IdArea, IdCentroCosto, MontoTotal, Moneda, Activo)
-    VALUES (@Anio, @Mes, @IdArea, @IdCentroCosto, @MontoTotal, @Moneda, 1);
+    INSERT INTO dbo.Presupuestos
+        (Anio, Mes, IdArea, IdCentroCosto, MontoTotal, Moneda, Activo)
+    VALUES
+        (@Anio, @Mes, @IdArea, @IdCentroCosto, @MontoTotal, @Moneda, 1);
 
     SELECT SCOPE_IDENTITY() AS IdPresupuesto;
 END
@@ -1069,7 +1127,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Usuarios_Areas')
+IF NOT EXISTS (SELECT 1
+FROM sys.foreign_keys
+WHERE name = 'FK_Usuarios_Areas')
 BEGIN
     ALTER TABLE dbo.Usuarios
     ADD CONSTRAINT FK_Usuarios_Areas
@@ -1094,9 +1154,9 @@ BEGIN
         a.Nombre  AS AreaNombre,
         u.IdArea
     FROM dbo.Usuarios u
-    LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
-    LEFT JOIN dbo.Roles r         ON r.IdRol = ur.IdRol
-    LEFT JOIN dbo.Areas a         ON a.IdArea = u.IdArea;
+        LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
+        LEFT JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+        LEFT JOIN dbo.Areas a ON a.IdArea = u.IdArea;
 END
 GO
 
@@ -1113,21 +1173,25 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Usuarios (NombreCompleto, Email, HashPassword, Activo, IdArea)
-    VALUES (
-        @NombreCompleto,
-        @Email,
-        CASE WHEN @HashPassword IS NULL THEN NULL ELSE CONVERT(VARBINARY(500), @HashPassword) END,
-        @Activo,
-        @IdArea
+    INSERT INTO dbo.Usuarios
+        (NombreCompleto, Email, HashPassword, Activo, IdArea)
+    VALUES
+        (
+            @NombreCompleto,
+            @Email,
+            CASE WHEN @HashPassword IS NULL THEN NULL ELSE CONVERT(VARBINARY(500), @HashPassword) END,
+            @Activo,
+            @IdArea
     );
 
     DECLARE @IdUsuario INT = SCOPE_IDENTITY();
 
     IF @IdRolPrincipal IS NOT NULL
     BEGIN
-        INSERT INTO dbo.UsuariosRoles (IdUsuario, IdRol)
-        VALUES (@IdUsuario, @IdRolPrincipal);
+        INSERT INTO dbo.UsuariosRoles
+            (IdUsuario, IdRol)
+        VALUES
+            (@IdUsuario, @IdRolPrincipal);
     END
 
     SELECT @IdUsuario AS IdUsuario;
@@ -1159,8 +1223,10 @@ BEGIN
 
     IF @IdRolPrincipal IS NOT NULL
     BEGIN
-        INSERT INTO dbo.UsuariosRoles (IdUsuario, IdRol)
-        VALUES (@IdUsuario, @IdRolPrincipal);
+        INSERT INTO dbo.UsuariosRoles
+            (IdUsuario, IdRol)
+        VALUES
+            (@IdUsuario, @IdRolPrincipal);
     END
 END
 GO
@@ -1173,7 +1239,8 @@ GO
 -- Login por email (ya lo tienes, aquí para referencia)
 CREATE OR ALTER PROCEDURE dbo.sp_LoginUsuario
     @Email       NVARCHAR(150),
-    @Password    NVARCHAR(200) = NULL  -- reservado para futura validación de hash
+    @Password    NVARCHAR(200) = NULL
+-- reservado para futura validación de hash
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1183,12 +1250,13 @@ BEGIN
         u.NombreCompleto,
         u.Email,
         u.Activo,
+        u.HashPassword,
         STRING_AGG(r.Nombre, ',') WITHIN GROUP (ORDER BY r.Nombre) AS Roles
     FROM dbo.Usuarios u
-    LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
-    LEFT JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+        LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
+        LEFT JOIN dbo.Roles r ON r.IdRol = ur.IdRol
     WHERE u.Email = @Email
-    GROUP BY u.IdUsuario, u.NombreCompleto, u.Email, u.Activo;
+    GROUP BY u.IdUsuario, u.NombreCompleto, u.Email, u.Activo, u.HashPassword;
 END
 GO
 
@@ -1211,7 +1279,7 @@ BEGIN
         prm.PuedeAprobar,
         prm.PuedeEliminar
     FROM dbo.Modulos m
-    LEFT JOIN dbo.PermisosRolModulo prm
+        LEFT JOIN dbo.PermisosRolModulo prm
         ON prm.IdModulo = m.IdModulo AND prm.IdRol = @IdRol
     ORDER BY m.IdModulo;
 END
@@ -1222,12 +1290,12 @@ IF TYPE_ID('dbo.TPermisosRolModulo') IS NULL
 BEGIN
     CREATE TYPE dbo.TPermisosRolModulo AS TABLE
     (
-        IdModulo       INT NOT NULL,
-        PuedeVer       BIT NOT NULL,
-        PuedeCrear     BIT NOT NULL,
-        PuedeEditar    BIT NOT NULL,
-        PuedeAprobar   BIT NOT NULL,
-        PuedeEliminar  BIT NOT NULL
+        IdModulo INT NOT NULL,
+        PuedeVer BIT NOT NULL,
+        PuedeCrear BIT NOT NULL,
+        PuedeEditar BIT NOT NULL,
+        PuedeAprobar BIT NOT NULL,
+        PuedeEliminar BIT NOT NULL
     );
 END
 GO
@@ -1243,7 +1311,8 @@ BEGIN
     DELETE FROM dbo.PermisosRolModulo
     WHERE IdRol = @IdRol;
 
-    INSERT INTO dbo.PermisosRolModulo (
+    INSERT INTO dbo.PermisosRolModulo
+        (
         IdRol,
         IdModulo,
         PuedeVer,
@@ -1251,7 +1320,7 @@ BEGIN
         PuedeEditar,
         PuedeAprobar,
         PuedeEliminar
-    )
+        )
     SELECT
         @IdRol,
         p.IdModulo,
@@ -1277,7 +1346,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Usuarios_Areas')
+IF NOT EXISTS (SELECT 1
+FROM sys.foreign_keys
+WHERE name = 'FK_Usuarios_Areas')
 BEGIN
     ALTER TABLE dbo.Usuarios
     ADD CONSTRAINT FK_Usuarios_Areas
@@ -1302,9 +1373,9 @@ BEGIN
         a.Nombre  AS AreaNombre,
         u.IdArea
     FROM dbo.Usuarios u
-    LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
-    LEFT JOIN dbo.Roles r         ON r.IdRol = ur.IdRol
-    LEFT JOIN dbo.Areas a         ON a.IdArea = u.IdArea;
+        LEFT JOIN dbo.UsuariosRoles ur ON ur.IdUsuario = u.IdUsuario
+        LEFT JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+        LEFT JOIN dbo.Areas a ON a.IdArea = u.IdArea;
 END
 GO
 
@@ -1320,21 +1391,25 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Usuarios (NombreCompleto, Email, HashPassword, Activo, IdArea)
-    VALUES (
-        @NombreCompleto,
-        @Email,
-        CASE WHEN @HashPassword IS NULL THEN NULL ELSE CONVERT(VARBINARY(500), @HashPassword) END,
-        @Activo,
-        @IdArea
+    INSERT INTO dbo.Usuarios
+        (NombreCompleto, Email, HashPassword, Activo, IdArea)
+    VALUES
+        (
+            @NombreCompleto,
+            @Email,
+            CASE WHEN @HashPassword IS NULL THEN NULL ELSE CONVERT(VARBINARY(500), @HashPassword) END,
+            @Activo,
+            @IdArea
     );
 
     DECLARE @IdUsuario INT = SCOPE_IDENTITY();
 
     IF @IdRolPrincipal IS NOT NULL
     BEGIN
-        INSERT INTO dbo.UsuariosRoles (IdUsuario, IdRol)
-        VALUES (@IdUsuario, @IdRolPrincipal);
+        INSERT INTO dbo.UsuariosRoles
+            (IdUsuario, IdRol)
+        VALUES
+            (@IdUsuario, @IdRolPrincipal);
     END
 
     SELECT @IdUsuario AS IdUsuario;
@@ -1365,8 +1440,10 @@ BEGIN
 
     IF @IdRolPrincipal IS NOT NULL
     BEGIN
-        INSERT INTO dbo.UsuariosRoles (IdUsuario, IdRol)
-        VALUES (@IdUsuario, @IdRolPrincipal);
+        INSERT INTO dbo.UsuariosRoles
+            (IdUsuario, IdRol)
+        VALUES
+            (@IdUsuario, @IdRolPrincipal);
     END
 END
 GO
@@ -1415,8 +1492,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Roles (Nombre, Descripcion)
-    VALUES (@Nombre, @Descripcion);
+    INSERT INTO dbo.Roles
+        (Nombre, Descripcion)
+    VALUES
+        (@Nombre, @Descripcion);
 
     SELECT SCOPE_IDENTITY() AS IdRol;
 END
@@ -1444,7 +1523,9 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF EXISTS (SELECT 1 FROM dbo.UsuariosRoles WHERE IdRol = @IdRol)
+    IF EXISTS (SELECT 1
+    FROM dbo.UsuariosRoles
+    WHERE IdRol = @IdRol)
     BEGIN
         RAISERROR('No se puede eliminar el rol porque tiene usuarios asignados.', 16, 1);
         RETURN;
@@ -1475,7 +1556,7 @@ BEGIN
         a.IdCentroCosto,
         cc.Nombre AS CentroCostoNombre
     FROM dbo.Areas a
-    LEFT JOIN dbo.CentrosCosto cc
+        LEFT JOIN dbo.CentrosCosto cc
         ON cc.IdCentroCosto = a.IdCentroCosto
     ORDER BY a.Codigo;
 END
@@ -1492,8 +1573,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Areas (Codigo, Nombre, Descripcion, Activo, IdCentroCosto)
-    VALUES (@Codigo, @Nombre, @Descripcion, @Activo, @IdCentroCosto);
+    INSERT INTO dbo.Areas
+        (Codigo, Nombre, Descripcion, Activo, IdCentroCosto)
+    VALUES
+        (@Codigo, @Nombre, @Descripcion, @Activo, @IdCentroCosto);
 
     SELECT SCOPE_IDENTITY() AS IdArea;
 END
@@ -1557,8 +1640,10 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.CortesStock (FechaCorte, Descripcion)
-    VALUES (SYSDATETIME(), @Descripcion);
+    INSERT INTO dbo.CortesStock
+        (FechaCorte, Descripcion)
+    VALUES
+        (SYSDATETIME(), @Descripcion);
 
     SELECT SCOPE_IDENTITY() AS IdCorte;
 END
@@ -1572,24 +1657,25 @@ BEGIN
 
     DECLARE @IdCorteActual INT =
     (
-        SELECT MAX(IdCorte) FROM dbo.CortesStock
+        SELECT MAX(IdCorte)
+    FROM dbo.CortesStock
     );
 
     DECLARE @EnStock DECIMAL(18,4) =
     (
         SELECT sa.EnStock
-        FROM dbo.StockActual sa
-        WHERE sa.IdMaterial = @IdMaterial
+    FROM dbo.StockActual sa
+    WHERE sa.IdMaterial = @IdMaterial
     );
 
     DECLARE @Comprometido DECIMAL(18,4) =
     (
         SELECT ISNULL(SUM(ds.CantidadAprobada), 0)
-        FROM dbo.DetalleSolicitudesMaterial ds
+    FROM dbo.DetalleSolicitudesMaterial ds
         JOIN dbo.SolicitudesMaterial s ON s.IdSolicitud = ds.IdSolicitud
-        WHERE ds.IdMaterial = @IdMaterial
-          AND s.IdCorteStock = @IdCorteActual
-          AND s.Estado IN ('PENDIENTE', 'APROBADA', 'EN_DESPACHO')
+    WHERE ds.IdMaterial = @IdMaterial
+        AND s.IdCorteStock = @IdCorteActual
+        AND s.Estado IN ('PENDIENTE', 'APROBADA', 'EN_DESPACHO')
     );
 
     SELECT
@@ -1644,11 +1730,13 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    INSERT INTO dbo.Materiales (
+    INSERT INTO dbo.Materiales
+        (
         NumeroArticulo, DescripcionArticulo, UnidadMedida, GrupoArticulos
-    )
-    VALUES (
-        @NumeroArticulo, @DescripcionArticulo, @UnidadMedida, @GrupoArticulos
+        )
+    VALUES
+        (
+            @NumeroArticulo, @DescripcionArticulo, @UnidadMedida, @GrupoArticulos
     );
 
     SELECT SCOPE_IDENTITY() AS IdMaterial;
@@ -1724,10 +1812,14 @@ GO
 ------------------------------------------------------------
 
 -- Dashboard
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'dashboard')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'dashboard')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('dashboard', 'Dashboard', '/', 'Panel principal con KPIs y gráficos', 'LayoutDashboard');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('dashboard', 'Dashboard', '/', 'Panel principal con KPIs y gráficos', 'LayoutDashboard');
 END
 ELSE
 BEGIN
@@ -1741,10 +1833,14 @@ END
 GO
 
 -- Materiales
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'materiales')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'materiales')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('materiales', 'Materiales', '/materiales', 'Catálogo de materiales e inventario', 'Package');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('materiales', 'Materiales', '/materiales', 'Catálogo de materiales e inventario', 'Package');
 END
 ELSE
 BEGIN
@@ -1758,10 +1854,14 @@ END
 GO
 
 -- Crear Solicitud
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'crear-solicitud')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'crear-solicitud')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('crear-solicitud', 'Crear Solicitud', '/solicitudes/crear', 'Formulario para nuevas solicitudes', 'FileText');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('crear-solicitud', 'Crear Solicitud', '/solicitudes/crear', 'Formulario para nuevas solicitudes', 'FileText');
 END
 ELSE
 BEGIN
@@ -1775,10 +1875,14 @@ END
 GO
 
 -- Solicitudes
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'solicitudes')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'solicitudes')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('solicitudes', 'Solicitudes', '/solicitudes', 'Visualizar y gestionar solicitudes', 'FileText');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('solicitudes', 'Solicitudes', '/solicitudes', 'Visualizar y gestionar solicitudes', 'FileText');
 END
 ELSE
 BEGIN
@@ -1792,10 +1896,14 @@ END
 GO
 
 -- Aprobaciones
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'aprobaciones')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'aprobaciones')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('aprobaciones', 'Aprobaciones', '/aprobaciones', 'Aprobar o rechazar solicitudes', 'CheckSquare');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('aprobaciones', 'Aprobaciones', '/aprobaciones', 'Aprobar o rechazar solicitudes', 'CheckSquare');
 END
 ELSE
 BEGIN
@@ -1809,10 +1917,14 @@ END
 GO
 
 -- Despacho
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'despacho')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'despacho')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('despacho', 'Despacho', '/despacho', 'Gestión de despachos de bodega', 'Truck');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('despacho', 'Despacho', '/despacho', 'Gestión de despachos de bodega', 'Truck');
 END
 ELSE
 BEGIN
@@ -1826,10 +1938,14 @@ END
 GO
 
 -- Presupuesto
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'presupuesto')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'presupuesto')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('presupuesto', 'Presupuesto', '/presupuesto', 'Control presupuestario por área', 'DollarSign');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('presupuesto', 'Presupuesto', '/presupuesto', 'Control presupuestario por área', 'DollarSign');
 END
 ELSE
 BEGIN
@@ -1843,10 +1959,14 @@ END
 GO
 
 -- Auditoría
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'auditoria')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'auditoria')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('auditoria', 'Auditoría', '/auditoria', 'Registro de auditoría del sistema', 'ClipboardList');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('auditoria', 'Auditoría', '/auditoria', 'Registro de auditoría del sistema', 'ClipboardList');
 END
 ELSE
 BEGIN
@@ -1860,10 +1980,14 @@ END
 GO
 
 -- Reportes
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'reportes')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'reportes')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('reportes', 'Reportes', '/reportes', 'Configuración de reportes automáticos', 'FileBarChart');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('reportes', 'Reportes', '/reportes', 'Configuración de reportes automáticos', 'FileBarChart');
 END
 ELSE
 BEGIN
@@ -1877,10 +2001,14 @@ END
 GO
 
 -- Usuarios
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'usuarios')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'usuarios')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('usuarios', 'Usuarios', '/usuarios', 'Gestión de usuarios del sistema', 'Users');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('usuarios', 'Usuarios', '/usuarios', 'Gestión de usuarios del sistema', 'Users');
 END
 ELSE
 BEGIN
@@ -1894,10 +2022,14 @@ END
 GO
 
 -- Roles
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'roles')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'roles')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('roles', 'Roles', '/roles', 'Gestión de roles del sistema', 'Shield');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('roles', 'Roles', '/roles', 'Gestión de roles del sistema', 'Shield');
 END
 ELSE
 BEGIN
@@ -1911,10 +2043,14 @@ END
 GO
 
 -- Áreas
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'areas')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'areas')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('areas', 'Áreas', '/areas', 'Gestión de áreas del negocio', 'ClipboardList');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('areas', 'Áreas', '/areas', 'Gestión de áreas del negocio', 'ClipboardList');
 END
 ELSE
 BEGIN
@@ -1928,10 +2064,14 @@ END
 GO
 
 -- Permisos
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'permisos')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'permisos')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('permisos', 'Permisos', '/permisos', 'Configuración de permisos por rol', 'Shield');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('permisos', 'Permisos', '/permisos', 'Configuración de permisos por rol', 'Shield');
 END
 ELSE
 BEGIN
@@ -1945,10 +2085,14 @@ END
 GO
 
 -- Cortes de Stock
-IF NOT EXISTS (SELECT 1 FROM dbo.Modulos WHERE Codigo = 'cortes')
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'cortes')
 BEGIN
-    INSERT INTO dbo.Modulos (Codigo, Nombre, Path, Descripcion, Icono)
-    VALUES ('cortes', 'Cortes de Stock', '/cortes', 'Gestión de cortes de stock para solicitudes, stock y presupuestos', 'Calendar');
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('cortes', 'Cortes de Stock', '/cortes', 'Gestión de cortes de stock para solicitudes, stock y presupuestos', 'Calendar');
 END
 ELSE
 BEGIN
@@ -1982,15 +2126,17 @@ GO
 
 
 CREATE OR ALTER PROCEDURE dbo.sp_RegistrarAuditoriaAccion
-  @IdUsuario  INT = NULL,
-  @TipoAccion NVARCHAR(50),
-  @DetalleJson NVARCHAR(MAX) = NULL
+    @IdUsuario  INT = NULL,
+    @TipoAccion NVARCHAR(50),
+    @DetalleJson NVARCHAR(MAX) = NULL
 AS
 BEGIN
-  SET NOCOUNT ON;
+    SET NOCOUNT ON;
 
-  INSERT INTO dbo.AuditoriaAcciones (IdUsuario, TipoAccion, DetalleJson)
-  VALUES (@IdUsuario, @TipoAccion, @DetalleJson);
+    INSERT INTO dbo.AuditoriaAcciones
+        (IdUsuario, TipoAccion, DetalleJson)
+    VALUES
+        (@IdUsuario, @TipoAccion, @DetalleJson);
 END
 
 
@@ -2074,21 +2220,23 @@ BEGIN
         WHERE Ambito = @Ambito;
     END;
 
-    INSERT INTO dbo.CortesStock (
+    INSERT INTO dbo.CortesStock
+        (
         FechaCorte,
         Descripcion,
         FechaInicio,
         FechaFin,
         Ambito,
         EsMaximo
-    )
-    VALUES (
-        SYSDATETIME(),                         -- FechaCorte (timestamp de creación)
-        @Descripcion,
-        ISNULL(@FechaInicio, SYSDATETIME()),  -- Inicio = ahora si no se envía
-        @FechaFin,                            -- Puede ser NULL
-        ISNULL(@Ambito, 'STOCK'),             -- Ambito por defecto
-        @EsMaximo
+        )
+    VALUES
+        (
+            SYSDATETIME(), -- FechaCorte (timestamp de creación)
+            @Descripcion,
+            ISNULL(@FechaInicio, SYSDATETIME()), -- Inicio = ahora si no se envía
+            @FechaFin, -- Puede ser NULL
+            ISNULL(@Ambito, 'STOCK'), -- Ambito por defecto
+            @EsMaximo
     );
 
     SELECT SCOPE_IDENTITY() AS IdCorte;
@@ -2148,7 +2296,7 @@ BEGIN
         UPDATE dbo.CortesStock
         SET EsMaximo = 0
         WHERE Ambito = @AmbitoFinal
-          AND IdCorte <> @IdCorte;
+            AND IdCorte <> @IdCorte;
     END;
 
     UPDATE dbo.CortesStock
@@ -2189,14 +2337,14 @@ IF TYPE_ID('dbo.TMaterialCarga') IS NULL
 BEGIN
     CREATE TYPE dbo.TMaterialCarga AS TABLE
     (
-        NumeroArticulo      NVARCHAR(50)  NOT NULL,
+        NumeroArticulo NVARCHAR(50) NOT NULL,
         DescripcionArticulo NVARCHAR(255) NOT NULL,
-        EnStock             DECIMAL(18,4) NOT NULL,
-        UnidadMedida        NVARCHAR(50)  NOT NULL,
-        GrupoArticulos      NVARCHAR(100) NULL,
-        UltimaFechaCompra   DATE          NULL,
-        UltimoPrecioCompra  DECIMAL(18,4) NULL,
-        UltimaMonedaCompra  NVARCHAR(10)  NULL
+        EnStock DECIMAL(18,4) NOT NULL,
+        UnidadMedida NVARCHAR(50) NOT NULL,
+        GrupoArticulos NVARCHAR(100) NULL,
+        UltimaFechaCompra DATE NULL,
+        UltimoPrecioCompra DECIMAL(18,4) NULL,
+        UltimaMonedaCompra NVARCHAR(10) NULL
     );
 END
 GO
@@ -2216,14 +2364,18 @@ BEGIN
     ---------------------------------------------------------
     -- 1) Upsert de Materiales (maestro estable)
     ---------------------------------------------------------
-    ;WITH Src AS (
-        SELECT DISTINCT
-            NumeroArticulo,
-            DescripcionArticulo,
-            UnidadMedida,
-            GrupoArticulos
-        FROM @Datos
-    )
+    ;
+    WITH
+        Src
+        AS
+        (
+            SELECT DISTINCT
+                NumeroArticulo,
+                DescripcionArticulo,
+                UnidadMedida,
+                GrupoArticulos
+            FROM @Datos
+        )
     -- Actualizar existentes
     UPDATE m
     SET
@@ -2231,23 +2383,24 @@ BEGIN
         m.UnidadMedida        = s.UnidadMedida,
         m.GrupoArticulos      = s.GrupoArticulos
     FROM dbo.Materiales m
-    JOIN Src s
+        JOIN Src s
         ON s.NumeroArticulo = m.NumeroArticulo;
 
     -- Insertar nuevos
-    INSERT INTO dbo.Materiales (
+    INSERT INTO dbo.Materiales
+        (
         NumeroArticulo,
         DescripcionArticulo,
         UnidadMedida,
         GrupoArticulos
-    )
+        )
     SELECT
         s.NumeroArticulo,
         s.DescripcionArticulo,
         s.UnidadMedida,
         s.GrupoArticulos
     FROM Src s
-    LEFT JOIN dbo.Materiales m
+        LEFT JOIN dbo.Materiales m
         ON m.NumeroArticulo = s.NumeroArticulo
     WHERE m.IdMaterial IS NULL;
 
@@ -2256,13 +2409,14 @@ BEGIN
     ---------------------------------------------------------
     TRUNCATE TABLE dbo.StockActual;
 
-    INSERT INTO dbo.StockActual (
+    INSERT INTO dbo.StockActual
+        (
         IdMaterial,
         EnStock,
         UltimaFechaCompra,
         UltimoPrecioCompra,
         UltimaMonedaCompra
-    )
+        )
     SELECT
         m.IdMaterial,
         d.EnStock,
@@ -2270,7 +2424,7 @@ BEGIN
         d.UltimoPrecioCompra,
         d.UltimaMonedaCompra
     FROM @Datos d
-    JOIN dbo.Materiales m
+        JOIN dbo.Materiales m
         ON m.NumeroArticulo = d.NumeroArticulo;
 END
 GO
@@ -2298,7 +2452,7 @@ BEGIN
         m.UnidadMedida        = s.UnidadMedida,
         m.GrupoArticulos      = s.GrupoArticulos
     FROM dbo.Materiales m
-    JOIN (
+        JOIN (
         SELECT DISTINCT
             NumeroArticulo,
             DescripcionArticulo,
@@ -2309,12 +2463,13 @@ BEGIN
         ON s.NumeroArticulo = m.NumeroArticulo;
 
     -- Insertar nuevos
-    INSERT INTO dbo.Materiales (
+    INSERT INTO dbo.Materiales
+        (
         NumeroArticulo,
         DescripcionArticulo,
         UnidadMedida,
         GrupoArticulos
-    )
+        )
     SELECT
         s.NumeroArticulo,
         s.DescripcionArticulo,
@@ -2328,7 +2483,7 @@ BEGIN
             GrupoArticulos
         FROM @Datos
     ) AS s
-    LEFT JOIN dbo.Materiales m
+        LEFT JOIN dbo.Materiales m
         ON m.NumeroArticulo = s.NumeroArticulo
     WHERE m.IdMaterial IS NULL;
 
@@ -2337,13 +2492,14 @@ BEGIN
     ---------------------------------------------------------
     TRUNCATE TABLE dbo.StockActual;
 
-    INSERT INTO dbo.StockActual (
+    INSERT INTO dbo.StockActual
+        (
         IdMaterial,
         EnStock,
         UltimaFechaCompra,
         UltimoPrecioCompra,
         UltimaMonedaCompra
-    )
+        )
     SELECT
         m.IdMaterial,
         d.EnStock,
@@ -2351,7 +2507,7 @@ BEGIN
         d.UltimoPrecioCompra,
         d.UltimaMonedaCompra
     FROM @Datos d
-    JOIN dbo.Materiales m
+        JOIN dbo.Materiales m
         ON m.NumeroArticulo = d.NumeroArticulo;
 END
 GO
@@ -2364,7 +2520,9 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Areas_CentrosCosto')
+IF NOT EXISTS (SELECT 1
+FROM sys.foreign_keys
+WHERE name = 'FK_Areas_CentrosCosto')
 BEGIN
     ALTER TABLE dbo.Areas
     ADD CONSTRAINT FK_Areas_CentrosCosto
@@ -2384,10 +2542,10 @@ IF TYPE_ID('dbo.TDetalleSolicitudMaterial') IS NULL
 BEGIN
     CREATE TYPE dbo.TDetalleSolicitudMaterial AS TABLE
     (
-        IdMaterial         INT NOT NULL,
+        IdMaterial INT NOT NULL,
         CantidadSolicitada DECIMAL(18,4) NOT NULL,
-        UnidadMedida       NVARCHAR(50) NULL,
-        ComentarioLinea    NVARCHAR(255) NULL
+        UnidadMedida NVARCHAR(50) NULL,
+        ComentarioLinea NVARCHAR(255) NULL
     );
 END
 GO
@@ -2397,9 +2555,9 @@ IF TYPE_ID('dbo.TDespachoSolicitudDetalle') IS NULL
 BEGIN
     CREATE TYPE dbo.TDespachoSolicitudDetalle AS TABLE
     (
-        IdMaterial       INT NOT NULL,
+        IdMaterial INT NOT NULL,
         CantidadAprobada DECIMAL(18,4) NOT NULL,
-        ComentarioLinea  NVARCHAR(255) NULL
+        ComentarioLinea NVARCHAR(255) NULL
     );
 END
 GO
@@ -2427,7 +2585,8 @@ BEGIN
         SET @FechaSolicitud = SYSDATETIME();
     END
 
-    IF NOT EXISTS (SELECT 1 FROM @Detalle)
+    IF NOT EXISTS (SELECT 1
+    FROM @Detalle)
     BEGIN
         RAISERROR('La solicitud debe tener al menos una línea de detalle.', 16, 1);
         RETURN;
@@ -2436,27 +2595,39 @@ BEGIN
     DECLARE @IdSolicitud INT;
     DECLARE @CodigoSolicitud NVARCHAR(50);
 
-    -- Generar un código único basado en fecha y un hash
-    SET @CodigoSolicitud =
-        'SOL-' +
-        CONVERT(VARCHAR(8), @FechaSolicitud, 112) + '-' +
-        RIGHT('000000' + CAST(ABS(CHECKSUM(NEWID())) AS VARCHAR(6)), 6);
+    -- Generar código secuencial por día (SOL-yyyymmdd-000001, ...)
+    -- Nota: se calcula dentro de la transacción con locks para evitar duplicados por concurrencia.
 
     BEGIN TRY
         BEGIN TRAN;
 
-        INSERT INTO dbo.SolicitudesMaterial (
-            CodigoSolicitud,
-            IdSolicitante,
-            FechaSolicitud,
-            Estado,
-            Area,
-            Comentario,
-            IdCorteStock,
-            IdArea,
-            IdCentroCosto
+        DECLARE @Hoy DATE = CONVERT(DATE, @FechaSolicitud);
+        DECLARE @Prefijo NVARCHAR(20) = N'SOL-' + CONVERT(NVARCHAR(8), @Hoy, 112) + N'-';
+        DECLARE @UltimoNumero INT;
+
+        SELECT
+        @UltimoNumero = ISNULL(MAX(TRY_CAST(RIGHT(s.CodigoSolicitud, 6) AS INT)), 0)
+    FROM dbo.SolicitudesMaterial s WITH (UPDLOCK, HOLDLOCK)
+    WHERE CONVERT(DATE, s.FechaSolicitud) = @Hoy
+        AND s.CodigoSolicitud LIKE @Prefijo + N'%';
+
+        DECLARE @NuevoNumero INT = @UltimoNumero + 1;
+        SET @CodigoSolicitud = @Prefijo + RIGHT(N'000000' + CAST(@NuevoNumero AS NVARCHAR(6)), 6);
+
+        INSERT INTO dbo.SolicitudesMaterial
+        (
+        CodigoSolicitud,
+        IdSolicitante,
+        FechaSolicitud,
+        Estado,
+        Area,
+        Comentario,
+        IdCorteStock,
+        IdArea,
+        IdCentroCosto
         )
-        VALUES (
+    VALUES
+        (
             @CodigoSolicitud,
             @IdSolicitante,
             @FechaSolicitud,
@@ -2470,28 +2641,29 @@ BEGIN
 
         SET @IdSolicitud = SCOPE_IDENTITY();
 
-        INSERT INTO dbo.DetalleSolicitudesMaterial (
-            IdSolicitud,
-            IdMaterial,
-            CantidadSolicitada,
-            CantidadAprobada,
-            UnidadMedida,
-            ComentarioLinea
+        INSERT INTO dbo.DetalleSolicitudesMaterial
+        (
+        IdSolicitud,
+        IdMaterial,
+        CantidadSolicitada,
+        CantidadAprobada,
+        UnidadMedida,
+        ComentarioLinea
         )
-        SELECT
-            @IdSolicitud,
-            d.IdMaterial,
-            d.CantidadSolicitada,
-            NULL,               -- CantidadAprobada se llenará en aprobación/despacho
-            d.UnidadMedida,
-            d.ComentarioLinea
-        FROM @Detalle d;
+    SELECT
+        @IdSolicitud,
+        d.IdMaterial,
+        d.CantidadSolicitada,
+        NULL, -- CantidadAprobada se llenará en aprobación/despacho
+        d.UnidadMedida,
+        d.ComentarioLinea
+    FROM @Detalle d;
 
         COMMIT TRAN;
 
         SELECT
-            @IdSolicitud AS IdSolicitud,
-            @CodigoSolicitud AS CodigoSolicitud;
+        @IdSolicitud AS IdSolicitud,
+        @CodigoSolicitud AS CodigoSolicitud;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0
@@ -2521,14 +2693,15 @@ BEGIN
         u.NombreCompleto       AS NombreSolicitante,
         u.Email                AS EmailSolicitante,
         -- Rol principal (primer rol asociado)
-        (SELECT TOP 1 r.Nombre
-         FROM dbo.UsuariosRoles ur
-         JOIN dbo.Roles r ON r.IdRol = ur.IdRol
-         WHERE ur.IdUsuario = s.IdSolicitante
-         ORDER BY r.Nombre)   AS RolSolicitante,
+        (SELECT TOP 1
+            r.Nombre
+        FROM dbo.UsuariosRoles ur
+            JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+        WHERE ur.IdUsuario = s.IdSolicitante
+        ORDER BY r.Nombre)   AS RolSolicitante,
         s.FechaSolicitud,
         s.Estado,
-        s.Area,                -- texto libre histórico
+        s.Area, -- texto libre histórico
         s.Comentario,
         s.IdCorteStock,
         s.IdArea,
@@ -2537,11 +2710,11 @@ BEGIN
         cc.Codigo              AS CentroCostoCodigo,
         cc.Nombre              AS CentroCostoNombre
     FROM dbo.SolicitudesMaterial s
-    JOIN dbo.Usuarios u
+        JOIN dbo.Usuarios u
         ON u.IdUsuario = s.IdSolicitante
-    LEFT JOIN dbo.Areas a
+        LEFT JOIN dbo.Areas a
         ON a.IdArea = s.IdArea
-    LEFT JOIN dbo.CentrosCosto cc
+        LEFT JOIN dbo.CentrosCosto cc
         ON cc.IdCentroCosto = s.IdCentroCosto
     WHERE s.IdSolicitud = @IdSolicitud;
 
@@ -2563,9 +2736,9 @@ BEGIN
         sa.UltimoPrecioCompra,
         sa.UltimaMonedaCompra
     FROM dbo.DetalleSolicitudesMaterial d
-    JOIN dbo.Materiales m
+        JOIN dbo.Materiales m
         ON m.IdMaterial = d.IdMaterial
-    LEFT JOIN dbo.StockActual sa
+        LEFT JOIN dbo.StockActual sa
         ON sa.IdMaterial = d.IdMaterial
     WHERE d.IdSolicitud = @IdSolicitud
     ORDER BY d.IdDetalleSolicitud;
@@ -2594,11 +2767,12 @@ BEGIN
         s.IdSolicitante,
         u.NombreCompleto       AS NombreSolicitante,
         -- Rol principal
-        (SELECT TOP 1 r.Nombre
-         FROM dbo.UsuariosRoles ur
-         JOIN dbo.Roles r ON r.IdRol = ur.IdRol
-         WHERE ur.IdUsuario = s.IdSolicitante
-         ORDER BY r.Nombre)   AS RolSolicitante,
+        (SELECT TOP 1
+            r.Nombre
+        FROM dbo.UsuariosRoles ur
+            JOIN dbo.Roles r ON r.IdRol = ur.IdRol
+        WHERE ur.IdUsuario = s.IdSolicitante
+        ORDER BY r.Nombre)   AS RolSolicitante,
         s.IdArea,
         a.Nombre               AS AreaNombre,
         s.IdCentroCosto,
@@ -2609,15 +2783,15 @@ BEGIN
         ISNULL(SUM(d.CantidadSolicitada), 0)                                       AS TotalItems,
         ISNULL(SUM(d.CantidadSolicitada * ISNULL(sa.UltimoPrecioCompra, 0)), 0.0)  AS TotalMonto
     FROM dbo.SolicitudesMaterial s
-    JOIN dbo.Usuarios u
+        JOIN dbo.Usuarios u
         ON u.IdUsuario = s.IdSolicitante
-    LEFT JOIN dbo.Areas a
+        LEFT JOIN dbo.Areas a
         ON a.IdArea = s.IdArea
-    LEFT JOIN dbo.CentrosCosto cc
+        LEFT JOIN dbo.CentrosCosto cc
         ON cc.IdCentroCosto = s.IdCentroCosto
-    LEFT JOIN dbo.DetalleSolicitudesMaterial d
+        LEFT JOIN dbo.DetalleSolicitudesMaterial d
         ON d.IdSolicitud = s.IdSolicitud
-    LEFT JOIN dbo.StockActual sa
+        LEFT JOIN dbo.StockActual sa
         ON sa.IdMaterial = d.IdMaterial
     WHERE
         (@IdSolicitante IS NULL OR s.IdSolicitante = @IdSolicitante)
@@ -2648,7 +2822,8 @@ GO
 CREATE OR ALTER PROCEDURE dbo.sp_RegistrarAprobacionSolicitud
     @IdSolicitud  INT,
     @IdAprobador  INT,
-    @Estado       NVARCHAR(30),      -- APROBADA / RECHAZADA
+    @Estado       NVARCHAR(30),
+    -- APROBADA / RECHAZADA
     @Comentario   NVARCHAR(500) = NULL
 AS
 BEGIN
@@ -2663,14 +2838,16 @@ BEGIN
     BEGIN TRY
         BEGIN TRAN;
 
-        INSERT INTO dbo.Aprobaciones (
-            IdSolicitud,
-            IdAprobador,
-            FechaAprobacion,
-            Estado,
-            Comentario
+        INSERT INTO dbo.Aprobaciones
+        (
+        IdSolicitud,
+        IdAprobador,
+        FechaAprobacion,
+        Estado,
+        Comentario
         )
-        VALUES (
+    VALUES
+        (
             @IdSolicitud,
             @IdAprobador,
             SYSDATETIME(),
@@ -2714,7 +2891,7 @@ BEGIN
         a.Estado,
         a.Comentario
     FROM dbo.Aprobaciones a
-    JOIN dbo.Usuarios u
+        JOIN dbo.Usuarios u
         ON u.IdUsuario = a.IdAprobador
     WHERE a.IdSolicitud = @IdSolicitud
     ORDER BY a.FechaAprobacion DESC, a.IdAprobacion DESC;
@@ -2746,12 +2923,14 @@ GO
 CREATE OR ALTER PROCEDURE dbo.sp_RegistrarDespachoSolicitud
     @IdSolicitud INT,
     @DetalleDesp dbo.TDespachoSolicitudDetalle READONLY,
-    @NuevoEstado NVARCHAR(30) = 'DESPACHADA'   -- EN_DESPACHO / DESPACHADA
+    @NuevoEstado NVARCHAR(30) = 'DESPACHADA'
+-- EN_DESPACHO / DESPACHADA
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF NOT EXISTS (SELECT 1 FROM @DetalleDesp)
+    IF NOT EXISTS (SELECT 1
+    FROM @DetalleDesp)
     BEGIN
         RAISERROR('El despacho debe contener al menos una línea.', 16, 1);
         RETURN;
@@ -2767,8 +2946,8 @@ BEGIN
             ds.ComentarioLinea  = ISNULL(d.ComentarioLinea, ds.ComentarioLinea)
         FROM dbo.DetalleSolicitudesMaterial ds
         JOIN @DetalleDesp d
-            ON ds.IdMaterial = d.IdMaterial
-           AND ds.IdSolicitud = @IdSolicitud;
+        ON ds.IdMaterial = d.IdMaterial
+            AND ds.IdSolicitud = @IdSolicitud;
 
         -- Actualizar estado de la solicitud
         UPDATE dbo.SolicitudesMaterial

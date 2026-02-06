@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../App';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -28,51 +29,134 @@ interface Solicitud {
   presupuestoArea: number;
   consumoAcumulado: number;
   excedePresupuesto: boolean;
+  fechaAprobacion?: string;
 }
 
-const mockSolicitudesPendientes: Solicitud[] = [
-  { id: '1', numero: 'SOL-2025-001', fecha: '2025-06-15', area: 'Producción A', solicitante: 'Juan Pérez', items: 5, total: 12500, presupuestoArea: 150000, consumoAcumulado: 125000, excedePresupuesto: false },
-  { id: '2', numero: 'SOL-2025-008', fecha: '2025-06-16', area: 'Producción B', solicitante: 'María López', items: 8, total: 28000, presupuestoArea: 120000, consumoAcumulado: 98000, excedePresupuesto: true },
-  { id: '3', numero: 'SOL-2025-009', fecha: '2025-06-16', area: 'Mantenimiento', solicitante: 'Carlos Ruiz', items: 4, total: 7800, presupuestoArea: 80000, consumoAcumulado: 65000, excedePresupuesto: false },
-];
-
-const mockSolicitudesAprobadas: Solicitud[] = [
-  { id: '4', numero: 'SOL-2025-002', fecha: '2025-06-14', area: 'Producción A', solicitante: 'Juan Pérez', items: 3, total: 8900, presupuestoArea: 150000, consumoAcumulado: 125000, excedePresupuesto: false },
-  { id: '5', numero: 'SOL-2025-006', fecha: '2025-06-13', area: 'Calidad', solicitante: 'Ana Torres', items: 6, total: 11200, presupuestoArea: 50000, consumoAcumulado: 38000, excedePresupuesto: false },
-];
-
-const mockSolicitudesRechazadas: Solicitud[] = [
-  { id: '6', numero: 'SOL-2025-005', fecha: '2025-06-11', area: 'Mantenimiento', solicitante: 'Carlos Ruiz', items: 6, total: 18500, presupuestoArea: 80000, consumoAcumulado: 75000, excedePresupuesto: true },
-];
-
 export default function AprobacionPage() {
-  const [pendientes, setPendientes] = useState<Solicitud[]>(mockSolicitudesPendientes);
-  const [aprobadas] = useState<Solicitud[]>(mockSolicitudesAprobadas);
-  const [rechazadas] = useState<Solicitud[]>(mockSolicitudesRechazadas);
+  const { token } = useAuth();
+  const [pendientes, setPendientes] = useState<Solicitud[]>([]);
+  const [aprobadas, setAprobadas] = useState<Solicitud[]>([]);
+  const [rechazadas, setRechazadas] = useState<Solicitud[]>([]);
   const [selectedSolicitud, setSelectedSolicitud] = useState<Solicitud | null>(null);
-  const [modalAction, setModalAction] = useState<'aprobar' | 'rechazar' | null>(null);
+  const [detalleSolicitud, setDetalleSolicitud] = useState<any[]>([]);
+  const [modalAction, setModalAction] = useState<'aprobar' | 'rechazar' | 'ver' | null>(null);
   const [comentario, setComentario] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
 
-  const handleOpenModal = (solicitud: Solicitud, action: 'aprobar' | 'rechazar') => {
+  const mapSolicitud = (s: any): Solicitud => ({
+    id: String(s.IdSolicitud ?? s.id ?? ''),
+    numero: s.CodigoSolicitud ?? s.numero ?? '-',
+    fecha: s.FechaSolicitud ?? s.fecha ?? new Date().toISOString(),
+    area: s.AreaNombre ?? s.area ?? 'Sin área',
+    solicitante: s.NombreSolicitante ?? s.solicitante ?? 'Sin solicitante',
+    items: Number(s.TotalItems ?? s.items ?? 0),
+    total: Number(s.TotalMonto ?? s.total ?? 0),
+    presupuestoArea: Number(s.PresupuestoArea ?? 0),
+    consumoAcumulado: Number(s.ConsumoAcumulado ?? 0),
+    excedePresupuesto:
+      Number(s.PresupuestoArea ?? 0) > 0
+        ? Number(s.ConsumoAcumulado ?? 0) + Number(s.TotalMonto ?? 0) > Number(s.PresupuestoArea ?? 0)
+        : false,
+    fechaAprobacion: s.FechaAprobacion,
+  });
+
+  const cargarSolicitudes = async () => {
+    if (!token) return;
+    setCargando(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [pendResp, aprResp, rejResp] = await Promise.all([
+        fetch('http://localhost:4000/api/solicitudes?estado=PENDIENTE', { headers }),
+        fetch('http://localhost:4000/api/solicitudes?estado=APROBADA', { headers }),
+        fetch('http://localhost:4000/api/solicitudes?estado=RECHAZADA', { headers }),
+      ]);
+
+      const [pendJson, aprJson, rejJson] = await Promise.all([
+        pendResp.ok ? pendResp.json() : [],
+        aprResp.ok ? aprResp.json() : [],
+        rejResp.ok ? rejResp.json() : [],
+      ]);
+
+      setPendientes((pendJson || []).map(mapSolicitud));
+      setAprobadas((aprJson || []).map(mapSolicitud));
+      setRechazadas((rejJson || []).map(mapSolicitud));
+    } catch (error) {
+      console.error('Error al cargar aprobaciones', error);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarSolicitudes();
+  }, [token]);
+
+  useEffect(() => {
+    if (!selectedSolicitud || !token) return;
+
+    const cargarDetalle = async () => {
+      setCargandoDetalle(true);
+      try {
+        const resp = await fetch(`http://localhost:4000/api/solicitudes/${selectedSolicitud.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setDetalleSolicitud(data.detalle || []);
+        }
+      } catch (error) {
+        console.error('Error al cargar detalle', error);
+      } finally {
+        setCargandoDetalle(false);
+      }
+    };
+
+    cargarDetalle();
+  }, [selectedSolicitud, token]);
+
+  const handleOpenModal = (solicitud: Solicitud, action: 'aprobar' | 'rechazar' | 'ver') => {
     setSelectedSolicitud(solicitud);
     setModalAction(action);
     setComentario('');
+    setDetalleSolicitud([]);
   };
 
-  const handleConfirmarAccion = () => {
+  const handleConfirmarAccion = async () => {
     if (modalAction === 'rechazar' && !comentario.trim()) {
       alert('Debes ingresar un comentario al rechazar la solicitud');
       return;
     }
 
-    console.log(`${modalAction} solicitud:`, selectedSolicitud, comentario);
-    
-    if (modalAction === 'aprobar') {
-      setPendientes(pendientes.filter(s => s.id !== selectedSolicitud?.id));
-      alert('Solicitud aprobada exitosamente');
-    } else {
-      setPendientes(pendientes.filter(s => s.id !== selectedSolicitud?.id));
-      alert('Solicitud rechazada');
+    if (!selectedSolicitud || !token) return;
+
+    try {
+      const resp = await fetch(`http://localhost:4000/api/solicitudes/${selectedSolicitud.id}/aprobaciones`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          estado: modalAction === 'aprobar' ? 'APROBADA' : 'RECHAZADA',
+          comentario: comentario || null,
+        }),
+      });
+
+      if (!resp.ok) {
+        console.error('Error al registrar aprobación', await resp.text());
+        return;
+      }
+
+      const actualizada = selectedSolicitud;
+      setPendientes((prev) => prev.filter((s) => s.id !== selectedSolicitud.id));
+      if (modalAction === 'aprobar') {
+        setAprobadas((prev) => [actualizada, ...prev]);
+      } else {
+        setRechazadas((prev) => [actualizada, ...prev]);
+      }
+    } catch (error) {
+      console.error('Error al aprobar/rechazar solicitud', error);
     }
 
     setSelectedSolicitud(null);
@@ -99,24 +183,29 @@ export default function AprobacionPage() {
           {solicitudes.length === 0 ? (
             <TableRow>
               <TableCell colSpan={showActions ? 8 : 7} className="text-center py-12 text-muted-foreground">
-                No hay solicitudes en este estado
+                {cargando ? 'Cargando...' : 'No hay solicitudes en este estado'}
               </TableCell>
             </TableRow>
           ) : (
             solicitudes.map((solicitud) => {
               const disponible = solicitud.presupuestoArea - solicitud.consumoAcumulado;
               const saldoDespues = disponible - solicitud.total;
+              const tienePresupuesto = solicitud.presupuestoArea > 0;
               
               return (
                 <TableRow key={solicitud.id}>
                   <TableCell className="font-medium">{solicitud.numero}</TableCell>
-                  <TableCell>{new Date(solicitud.fecha).toLocaleDateString()}</TableCell>
+                  <TableCell>{new Date(solicitud.fecha.replace('Z', '')).toLocaleDateString()}</TableCell>
                   <TableCell>{solicitud.area}</TableCell>
                   <TableCell>{solicitud.solicitante}</TableCell>
                   <TableCell className="text-center">{solicitud.items}</TableCell>
                   <TableCell className="text-right">${solicitud.total.toLocaleString()}</TableCell>
                   <TableCell>
-                    {solicitud.excedePresupuesto ? (
+                    {!tienePresupuesto ? (
+                      <Badge variant="outline" className="gap-1">
+                        N/D
+                      </Badge>
+                    ) : solicitud.excedePresupuesto ? (
                       <Badge variant="destructive" className="gap-1">
                         <AlertCircle className="w-3 h-3" />
                         Excede
@@ -134,7 +223,7 @@ export default function AprobacionPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setSelectedSolicitud(solicitud)}
+                          onClick={() => handleOpenModal(solicitud, 'ver')}
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
@@ -165,6 +254,14 @@ export default function AprobacionPage() {
       </Table>
     </div>
   );
+
+  const aprobadasHoy = useMemo(() => {
+    const hoy = new Date().toDateString();
+    return aprobadas.filter((s) => {
+      if (!s.fechaAprobacion) return false;
+      return new Date(s.fechaAprobacion.replace('Z', '')).toDateString() === hoy;
+    });
+  }, [aprobadas]);
 
   return (
     <div className="space-y-6">
@@ -197,9 +294,9 @@ export default function AprobacionPage() {
             <CheckCircle className="w-4 h-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{aprobadas.length}</div>
+            <div className="text-2xl">{aprobadasHoy.length}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Total: ${aprobadas.reduce((sum, s) => sum + s.total, 0).toLocaleString()}
+              Total: ${aprobadasHoy.reduce((sum, s) => sum + s.total, 0).toLocaleString()}
             </p>
           </CardContent>
         </Card>
@@ -255,10 +352,14 @@ export default function AprobacionPage() {
         setSelectedSolicitud(null);
         setComentario('');
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-auto max-w-[95vw] sm:max-w-fit md:min-w-[700px]">
           <DialogHeader>
             <DialogTitle>
-              {modalAction === 'aprobar' ? 'Aprobar Solicitud' : 'Rechazar Solicitud'}
+              {modalAction === 'ver'
+                ? 'Detalle de Solicitud'
+                : modalAction === 'aprobar'
+                  ? 'Aprobar Solicitud'
+                  : 'Rechazar Solicitud'}
             </DialogTitle>
             <DialogDescription>
               {selectedSolicitud?.numero}
@@ -327,6 +428,55 @@ export default function AprobacionPage() {
                 </CardContent>
               </Card>
 
+              {/* Items de la solicitud */}
+              <div className="border rounded-md overflow-hidden">
+                <div className="bg-slate-100 p-2 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Materiales solicitados
+                </div>
+                <div className="max-h-60 overflow-y-auto">
+                    <Table>
+                    <TableHeader>
+                        <TableRow>
+                        <TableHead className="py-2 h-8 text-xs">Código</TableHead>
+                        <TableHead className="py-2 h-8 text-xs">Descripción</TableHead>
+                        <TableHead className="py-2 h-8 text-xs text-right">Cant.</TableHead>
+                        <TableHead className="py-2 h-8 text-xs text-right">Unitario</TableHead>
+                        <TableHead className="py-2 h-8 text-xs text-right">Total</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {cargandoDetalle ? (
+                        <TableRow>
+                            <TableCell colSpan={5} className="text-center py-8 text-xs text-muted-foreground">
+                            Cargando items...
+                            </TableCell>
+                        </TableRow>
+                        ) : detalleSolicitud.length === 0 ? (
+                        <TableRow>
+                            <TableCell colSpan={5} className="text-center py-8 text-xs text-muted-foreground">
+                            No se encontraron items.
+                            </TableCell>
+                        </TableRow>
+                        ) : (
+                        detalleSolicitud.map((item, idx) => (
+                            <TableRow key={idx}>
+                            <TableCell className="py-2 text-xs font-medium">{item.NumeroArticulo}</TableCell>
+                            <TableCell className="py-2 text-xs">{item.DescripcionArticulo}</TableCell>
+                            <TableCell className="py-2 text-xs text-right">{item.CantidadSolicitada} {item.UnidadMedidaMaterial}</TableCell>
+                            <TableCell className="py-2 text-xs text-right">
+                                ${(item.UltimoPrecioCompra ?? 0).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="py-2 text-xs text-right font-semibold">
+                                ${(Number(item.CantidadSolicitada ?? 0) * Number(item.UltimoPrecioCompra ?? 0)).toLocaleString()}
+                            </TableCell>
+                            </TableRow>
+                        ))
+                        )}
+                    </TableBody>
+                    </Table>
+                </div>
+              </div>
+
               {/* Comentario */}
               {modalAction === 'rechazar' && (
                 <div className="space-y-2">
@@ -365,26 +515,29 @@ export default function AprobacionPage() {
                 setModalAction(null);
                 setSelectedSolicitud(null);
                 setComentario('');
+                setDetalleSolicitud([]);
               }}
             >
-              Cancelar
+              {modalAction === 'ver' ? 'Cerrar' : 'Cancelar'}
             </Button>
-            <Button
-              onClick={handleConfirmarAccion}
-              className={modalAction === 'rechazar' ? 'bg-red-600 hover:bg-red-700' : ''}
-            >
-              {modalAction === 'aprobar' ? (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Aprobar
-                </>
-              ) : (
-                <>
-                  <XCircle className="w-4 h-4 mr-2" />
-                  Rechazar
-                </>
-              )}
-            </Button>
+            {modalAction !== 'ver' && (
+              <Button
+                onClick={handleConfirmarAccion}
+                className={modalAction === 'rechazar' ? 'bg-red-600 hover:bg-red-700' : ''}
+              >
+                {modalAction === 'aprobar' ? (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Aprobar
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="w-4 h-4 mr-2" />
+                    Rechazar
+                  </>
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

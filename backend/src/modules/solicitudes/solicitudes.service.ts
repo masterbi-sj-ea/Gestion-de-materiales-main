@@ -81,6 +81,17 @@ export interface CrearSolicitudInput {
   detalle: CrearSolicitudDetalleInput[];
 }
 
+export interface ActualizarSolicitudInput {
+  idSolicitud: number;
+  fechaSolicitud?: string | null;
+  nuevoEstado?: string | null;
+  area?: string | null;
+  comentario?: string | null;
+  idArea?: number | null;
+  idCentroCosto?: number | null;
+  detalle: CrearSolicitudDetalleInput[];
+}
+
 export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSolicitud: number; CodigoSolicitud: string }> {
   if (!input.detalle || input.detalle.length === 0) {
     throw new Error('La solicitud debe tener al menos una línea de detalle');
@@ -124,6 +135,41 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   }
 
   return row;
+}
+
+export async function actualizarSolicitud(input: ActualizarSolicitudInput): Promise<void> {
+  if (!input.detalle || input.detalle.length === 0) {
+    throw new Error('La solicitud debe tener al menos una línea de detalle');
+  }
+
+  const pool = await getPool();
+
+  const tvp = new sql.Table();
+  tvp.columns.add('IdMaterial', sql.Int);
+  tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
+  tvp.columns.add('UnidadMedida', sql.NVarChar(50));
+  tvp.columns.add('ComentarioLinea', sql.NVarChar(255));
+
+  for (const d of input.detalle) {
+    tvp.rows.add(
+      d.idMaterial,
+      d.cantidadSolicitada,
+      d.unidadMedida ?? null,
+      d.comentarioLinea ?? null,
+    );
+  }
+
+  const request = pool.request();
+  request.input('IdSolicitud', sql.Int, input.idSolicitud);
+  request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
+  request.input('NuevoEstado', sql.NVarChar(30), input.nuevoEstado ?? 'PENDIENTE');
+  request.input('Area', sql.NVarChar(100), input.area ?? null);
+  request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
+  request.input('IdArea', sql.Int, input.idArea ?? null);
+  request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
+  request.input('Detalle', tvp as any);
+
+  await request.execute('sp_ActualizarSolicitudMaterial');
 }
 
 export async function listarSolicitudes(params: {

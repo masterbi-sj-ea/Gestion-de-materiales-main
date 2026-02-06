@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Plus, Edit, Trash2, MapPin } from 'lucide-react';
@@ -16,10 +17,13 @@ interface Area {
   activo: boolean;
   idCentroCosto?: number | null;
   centroCostoNombre?: string | null;
+  codigoCuenta?: string | null;
+  nombreCuenta?: string | null;
 }
 
 interface CentroCosto {
   id: number;
+  codigo: string;
   nombre: string;
 }
 
@@ -39,6 +43,7 @@ export default function AreasPage() {
   const [pageSize] = useState(10);
   const [total, setTotal] = useState(0);
   const { token } = useAuth();
+  const noneCentroCostoValue = '__none__';
 
   const cargarAreas = async () => {
     if (!token) {
@@ -62,10 +67,11 @@ export default function AreasPage() {
         activo: !!a.Activo,
         idCentroCosto: (a.IdCentroCosto as number) ?? null,
         centroCostoNombre: (a.CentroCostoNombre as string) ?? null,
+        codigoCuenta: (a.CodigoCuenta as string) ?? null,
+        nombreCuenta: (a.NombreCuenta as string) ?? null,
       }));
       setAreas(mapped);
       setTotal(mapped.length);
-      setPage(1);
     } catch (error) {
       console.error('Error al cargar áreas', error);
     }
@@ -84,6 +90,7 @@ export default function AreasPage() {
       const data = await resp.json();
       const mapped: CentroCosto[] = (data as any[]).map((c) => ({
         id: c.IdCentroCosto as number,
+        codigo: (c.Codigo as string) ?? '',
         nombre: c.Nombre as string,
       }));
       setCentrosCosto(mapped);
@@ -95,7 +102,7 @@ export default function AreasPage() {
   useEffect(() => {
     cargarAreas();
     cargarCentrosCosto();
-  }, [page, pageSize, token]);
+  }, [token]);
 
   const handleOpenDialog = (area?: Area) => {
     setEditingArea(area || null);
@@ -210,6 +217,14 @@ export default function AreasPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startIndex = (page - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const pagedAreas = areas.slice(startIndex, endIndex);
+  const getCodigoCuentaLabel = (area: Area) => {
+    if (!area.codigoCuenta) return '-';
+    if (area.nombreCuenta) return `${area.codigoCuenta} - ${area.nombreCuenta}`;
+    return area.codigoCuenta;
+  };
 
   return (
     <div className="space-y-6">
@@ -265,19 +280,24 @@ export default function AreasPage() {
               <div className="space-y-2">
                 <Label htmlFor="centro-costo-area">Centro de costo</Label>
                 <div className="flex gap-2 items-center">
-                  <select
-                    id="centro-costo-area"
-                    className="border rounded px-3 py-2 text-sm w-full"
-                    value={idCentroCosto}
-                    onChange={(e) => setIdCentroCosto(e.target.value)}
+                  <Select
+                    value={idCentroCosto || noneCentroCostoValue}
+                    onValueChange={(value: string) =>
+                      setIdCentroCosto(value === noneCentroCostoValue ? '' : value)
+                    }
                   >
-                    <option value="">(Sin centro de costo)</option>
-                    {centrosCosto.map((c) => (
-                      <option key={c.id} value={String(c.id)}>
-                        {c.nombre}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="centro-costo-area">
+                      <SelectValue placeholder="(Sin centro de costo)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={noneCentroCostoValue}>(Sin centro de costo)</SelectItem>
+                      {centrosCosto.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.codigo ? `${c.codigo} - ${c.nombre}` : c.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     type="button"
                     variant="outline"
@@ -363,49 +383,39 @@ export default function AreasPage() {
                   <TableHead>Código</TableHead>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Descripción</TableHead>
-                  <TableHead>Centro de costo</TableHead>
+                  <TableHead>Código de cuenta</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {areas.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                      No se encontraron áreas
+                {pagedAreas.map((area, index) => (
+                  <TableRow key={`${area.id}-${startIndex + index}`}>
+                    <TableCell>{area.codigo}</TableCell>
+                    <TableCell>{area.nombre}</TableCell>
+                    <TableCell>{area.descripcion || '-'}</TableCell>
+                    <TableCell>{getCodigoCuentaLabel(area)}</TableCell>
+                    <TableCell>{area.activo ? 'Activa' : 'Inactiva'}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleOpenDialog(area)}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleEliminar(area.id)}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-600" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  areas
-                    .slice((page - 1) * pageSize, page * pageSize)
-                    .map((area) => (
-                      <TableRow key={area.id}>
-                        <TableCell className="font-mono text-xs">{area.codigo}</TableCell>
-                        <TableCell className="font-medium">{area.nombre}</TableCell>
-                        <TableCell>{area.descripcion || '-'}</TableCell>
-                        <TableCell>{area.centroCostoNombre || '-'}</TableCell>
-                        <TableCell>{area.activo ? 'Activa' : 'Inactiva'}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleOpenDialog(area)}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEliminar(area.id)}
-                            >
-                              <Trash2 className="w-4 h-4 text-red-600" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                )}
+                ))}
               </TableBody>
             </Table>
           </div>

@@ -26,7 +26,6 @@ export default function Login() {
       return;
     }
  
-    toast.success('Has iniciado sesión correctamente.');
   };
 
   const demoUsers = [
