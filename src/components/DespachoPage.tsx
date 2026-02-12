@@ -77,7 +77,7 @@ interface DespachoPrintData {
 
 
 export default function DespachoPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [solicitudes, setSolicitudes] = useState<SolicitudPendiente[]>([]);
   const [historial, setHistorial] = useState<SolicitudPendiente[]>([]);
   const [activeTab, setActiveTab] = useState('pendientes');
@@ -241,24 +241,244 @@ export default function DespachoPage() {
 
       const result = await response.json();
 
-      // Preparar datos para la impresión
-      const dataToPrint: DespachoPrintData = {
-        CodigoDespacho: result.despacho.CodigoDespacho,
-        FechaDespacho: result.despacho.FechaDespacho,
-        CodigoSolicitud: selectedSolicitud.cabecera.CodigoSolicitud,
-        AreaNombre: selectedSolicitud.cabecera.AreaNombre,
-        CodigoCentroCosto: result.despacho.CodigoCentroCosto || selectedSolicitud.cabecera.CodigoCentroCosto, // Usar el devuelto o el de cabecera
-        NombreSolicitante: selectedSolicitud.cabecera.NombreSolicitante,
-        Observaciones: observacionesDespacho,
-        Detalles: result.detalle.map((d: any) => ({
-          Codigo: d.Codigo,
-          Descripcion: d.Descripcion,
-          UnidadMedida: d.UnidadMedida,
-          CantidadDespachada: d.CantidadDespachada,
-        })),
-      };
+      // Abrir vista para impresión con formato oficial Requisa
+      try {
+        const codigoDespacho = result.despacho.CodigoDespacho;
+        const fechaDespacho = result.despacho.FechaDespacho ? new Date(result.despacho.FechaDespacho).toLocaleDateString() : new Date().toLocaleDateString();
+        // Número consecutivo rojo
+        const consecutivo = codigoDespacho.split('-').pop(); 
 
-      setPrintData(dataToPrint); // Disparar la impresión
+        const ventana = window.open('', '_blank');
+        if (ventana) {
+          const filasVacias = Math.max(0, 8 - result.detalle.length);
+          const filasVaciasHtml = Array(filasVacias).fill(0).map(() => `
+            <tr>
+                   <td>&nbsp;</td>
+                   <td>&nbsp;</td>
+                   <td>&nbsp;</td>
+                   <td>&nbsp;</td>
+                   <td>&nbsp;</td>
+                   <td>&nbsp;</td>
+            </tr>
+          `).join('');
+
+          ventana.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charSet="utf-8" />
+  <title>${codigoDespacho}</title>
+  <style>
+    /* Estilos copiados de print.css para replicar RequisaPrint */
+    body {
+        background-color: #fff;
+        font-family: 'Times New Roman', serif;
+        font-size: 11pt;
+        margin: 0;
+        padding: 20px;
+    }
+    .print-container {
+        display: block;
+        width: 100%;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+    /* Header Grid */
+    .print-header {
+        display: grid;
+        grid-template-columns: 200px 1fr 100px;
+        gap: 10px;
+        margin-bottom: 5px;
+        align-items: center;
+    }
+    .header-left { display: flex; flex-direction: column; }
+    .header-box { border: 1px solid #000; }
+    .header-row { display: flex; }
+    .header-row.border-top { border-top: 1px solid #000; }
+    .header-label {
+        background-color: #ddd;
+        padding: 2px 5px;
+        border-right: 1px solid #000;
+        width: 90px;
+        font-size: 9pt;
+        font-weight: bold;
+        text-transform: uppercase;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .header-value {
+        padding: 2px 5px;
+        flex-grow: 1;
+        font-size: 9pt;
+        font-weight: bold;
+        text-align: center;
+    }
+    .header-center { text-align: center; }
+    .header-center h1 {
+        font-size: 14pt;
+        margin: 0;
+        text-transform: uppercase;
+        font-weight: normal;
+    }
+    .header-right { display: flex; justify-content: flex-end; }
+    .logo-placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        font-size: 8pt;
+    }
+    /* Table */
+    .items-section { margin-bottom: 5px; }
+    .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        border: 1px solid #000;
+    }
+    .items-table th, .items-table td {
+        border: 1px solid #000;
+        padding: 3px 5px;
+        font-size: 10pt;
+    }
+    .items-table th {
+        background-color: #ddd;
+        text-transform: uppercase;
+        font-weight: normal;
+        text-align: center;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .items-table th:nth-child(1) { width: 10%; }
+    .items-table th:nth-child(2) { width: 40%; }
+    .items-table th:nth-child(3) { width: 10%; }
+    .items-table th:nth-child(4) { width: 10%; }
+    .items-table th:nth-child(5) { width: 15%; }
+    .items-table th:nth-child(6) { width: 15%; }
+    .items-table td { height: 20px; }
+    /* Footer */
+    .observaciones-section { margin-top: 5px; margin-bottom: 20px; font-size: 10pt; }
+    .form-code { font-size: 8pt; margin-top: 2px; }
+    .print-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-top: 40px;
+    }
+    .signatures-container {
+        display: flex;
+        gap: 30px;
+        width: 80%;
+        justify-content: space-between;
+    }
+    .signature-box { text-align: center; width: 30%; }
+    .signature-line {
+        border-top: 1px solid #000;
+        margin-bottom: 5px;
+        width: 100%;
+    }
+    .signature-box p { margin: 0; font-size: 9pt; }
+    .dispatch-number { font-size: 14pt; font-weight: bold; color: #000; }
+    .red-number { color: red !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @media print {
+        @page { size: letter; margin: 0.5in; }
+        .print-container { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-container">
+      <header class="print-header">
+         <div class="header-left">
+            <div class="header-box">
+              <div class="header-row">
+                <span className="header-label" class="header-label">FECHA</span>
+                <span className="header-value">${fechaDespacho}</span>
+              </div>
+              <div class="header-row border-top">
+                <span class="header-label">SOLICITUD N°</span>
+                <span class="header-value text-xs" style="font-size: 8pt;">${selectedSolicitud.cabecera.CodigoSolicitud}</span>
+              </div>
+            </div>
+         </div>
+         <div class="header-center">
+            <h1>REQUISA SALIDA DE BODEGA EXTRACEITE</h1>
+         </div>
+         <div class="header-right">
+             <div class="logo-placeholder">
+               <div class="logo-circle">
+                 <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+               </div>
+               <span>Extraceite</span>
+             </div>
+         </div>
+      </header>
+
+      <main>
+        <div class="items-section">
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>CODIGO</th>
+                <th>DESCRIPCION DEL MATERIAL</th>
+                <th>U/MEDIDA</th>
+                <th>CANTIDAD</th>
+                <th>ACTIVIDAD</th>
+                <th>CCO</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${result.detalle.map((d: any) => `
+              <tr>
+                <td>${d.Codigo}</td>
+                <td>${d.Descripcion}</td>
+                <td>${d.UnidadMedida}</td>
+                <td style="text-align:center;">${d.CantidadDespachada}</td>
+                <td style="font-size: 0.9rem; text-align: center;">${selectedSolicitud.cabecera.AreaNombre}</td>
+                <td style="font-size: 0.9rem; text-align: center;">${result.despacho.CodigoCentroCosto || selectedSolicitud.cabecera.CodigoCentroCosto || ''}</td>
+              </tr>`).join('')}
+              ${filasVaciasHtml}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="observaciones-section">
+          <p><strong>OBSERVACIONES:</strong> ${observacionesDespacho || '__________________________________________________________________________________'}</p> 
+          <p class="form-code">FR-F-BD-025</p>
+        </div>
+      </main>
+
+      <footer class="print-footer">
+        <div class="signatures-container">
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Entrega bodega</p>
+                <p>Nombre y firma</p>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Retirado por</p>
+                <p>Nombre y firma</p>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Autorizado por</p>
+                <p>Nombre del Ingeniero</p>
+            </div>
+        </div>
+        
+        <div class="dispatch-number">
+             <p>N° <span class="red-number">${consecutivo}</span></p>
+        </div>
+      </footer>
+    </div>
+  <script>
+    window.onload = function() { window.print(); };
+  </script>
+</body>
+</html>`);
+          ventana.document.close();
+        }
+      } catch (printError) {
+        console.error('Error al generar comprobante de despacho', printError);
+      }
 
       toast.success(`Despacho ${tipo} registrado exitosamente`);
       setSolicitudes(solicitudes.filter(s => s.IdSolicitud !== selectedSolicitud.cabecera.IdSolicitud));
