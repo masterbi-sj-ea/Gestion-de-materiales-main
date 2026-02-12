@@ -1285,20 +1285,7 @@ BEGIN
 END
 GO
 
--- Tipo tabla para guardar permisos masivos
-IF TYPE_ID('dbo.TPermisosRolModulo') IS NULL
-BEGIN
-    CREATE TYPE dbo.TPermisosRolModulo AS TABLE
-    (
-        IdModulo INT NOT NULL,
-        PuedeVer BIT NOT NULL,
-        PuedeCrear BIT NOT NULL,
-        PuedeEditar BIT NOT NULL,
-        PuedeAprobar BIT NOT NULL,
-        PuedeEliminar BIT NOT NULL
-    );
-END
-GO
+
 
 -- Guardar permisos de un rol (usado por POST /api/permisos/rol/:idRol)
 CREATE OR ALTER PROCEDURE dbo.sp_GuardarPermisosRol
@@ -2355,79 +2342,7 @@ GO
 -------------------------------------------------------------
 -- Importar materiales + stock desde CSV (carga masiva)
 -------------------------------------------------------------
-CREATE OR ALTER PROCEDURE dbo.sp_ImportarMaterialesYStock
-    @Datos dbo.TMaterialCarga READONLY
-AS
-BEGIN
-    SET NOCOUNT ON;
 
-    ---------------------------------------------------------
-    -- 1) Upsert de Materiales (maestro estable)
-    ---------------------------------------------------------
-    ;
-    WITH
-        Src
-        AS
-        (
-            SELECT DISTINCT
-                NumeroArticulo,
-                DescripcionArticulo,
-                UnidadMedida,
-                GrupoArticulos
-            FROM @Datos
-        )
-    -- Actualizar existentes
-    UPDATE m
-    SET
-        m.DescripcionArticulo = s.DescripcionArticulo,
-        m.UnidadMedida        = s.UnidadMedida,
-        m.GrupoArticulos      = s.GrupoArticulos
-    FROM dbo.Materiales m
-        JOIN Src s
-        ON s.NumeroArticulo = m.NumeroArticulo;
-
-    -- Insertar nuevos
-    INSERT INTO dbo.Materiales
-        (
-        NumeroArticulo,
-        DescripcionArticulo,
-        UnidadMedida,
-        GrupoArticulos
-        )
-    SELECT
-        s.NumeroArticulo,
-        s.DescripcionArticulo,
-        s.UnidadMedida,
-        s.GrupoArticulos
-    FROM Src s
-        LEFT JOIN dbo.Materiales m
-        ON m.NumeroArticulo = s.NumeroArticulo
-    WHERE m.IdMaterial IS NULL;
-
-    ---------------------------------------------------------
-    -- 2) Truncar y recargar StockActual
-    ---------------------------------------------------------
-    TRUNCATE TABLE dbo.StockActual;
-
-    INSERT INTO dbo.StockActual
-        (
-        IdMaterial,
-        EnStock,
-        UltimaFechaCompra,
-        UltimoPrecioCompra,
-        UltimaMonedaCompra
-        )
-    SELECT
-        m.IdMaterial,
-        d.EnStock,
-        d.UltimaFechaCompra,
-        d.UltimoPrecioCompra,
-        d.UltimaMonedaCompra
-    FROM @Datos d
-        JOIN dbo.Materiales m
-        ON m.NumeroArticulo = d.NumeroArticulo;
-END
-GO
 
 
 

@@ -44,6 +44,7 @@
     "react-hook-form": "^7.55.0",
     "react-resizable-panels": "^2.1.7",
     "react-router-dom": "*",
+    "react-to-print": "^3.2.0",
     "recharts": "^2.15.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "*",

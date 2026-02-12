@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -16,127 +16,285 @@ import {
   TableHeader,
   TableRow,
 } from './ui/table';
+import { useAuth } from '../hooks/useAuth'; // Importar useAuth
+import { toast } from 'sonner'; // Importar toast para notificaciones
+import { useReactToPrint } from 'react-to-print'; // Importar hook para imprimir
+import { RequisaPrint } from './prints/RequisaPrint'; // Importar componente de impresión
+import { useRef } from 'react'; // Importar useRef
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'; // Importar Tabs
 
-interface ItemSolicitud {
-  id: string;
-  materialId: string;
-  codigo: string;
-  descripcion: string;
-  unidad: string;
-  cantidadSolicitada: number;
-  cantidadDespachada: number;
-  stock: number;
+// Interfaces actualizadas para coincidir con el backend
+interface ItemSolicitudDetalle {
+  IdDetalleSolicitud: number;
+  IdMaterial: number;
+  Codigo: string;
+  Descripcion: string;
+  UnidadMedida: string;
+  CantidadSolicitada: number;
+  CantidadAprobada: number | null;
+  EnStock: number;
 }
 
-interface Solicitud {
-  id: string;
-  numero: string;
-  fecha: string;
-  area: string;
-  solicitante: string;
-  items: ItemSolicitud[];
-  observaciones?: string;
+interface SolicitudPendiente {
+  IdSolicitud: number;
+  CodigoSolicitud: string;
+  FechaSolicitud: string;
+  AreaNombre: string;
+  NombreSolicitante: string;
+  ItemsTotal: number;
 }
 
-const mockSolicitudesAprobadas: Solicitud[] = [
-  {
-    id: '1',
-    numero: 'SOL-2025-002',
-    fecha: '2025-06-14',
-    area: 'Producción A',
-    solicitante: 'Juan Pérez',
-    items: [
-      { id: '1', materialId: 'M1', codigo: 'MAT-001', descripcion: 'Tornillos M6 x 20mm', unidad: 'Unidad', cantidadSolicitada: 500, cantidadDespachada: 0, stock: 1250 },
-      { id: '2', materialId: 'M2', codigo: 'MAT-002', descripcion: 'Pintura Industrial Blanca', unidad: 'Galón', cantidadSolicitada: 10, cantidadDespachada: 0, stock: 85 },
-      { id: '3', materialId: 'M3', codigo: 'MAT-004', descripcion: 'Aceite Lubricante SAE 40', unidad: 'Litro', cantidadSolicitada: 25, cantidadDespachada: 0, stock: 450 },
-    ]
-  },
-  {
-    id: '2',
-    numero: 'SOL-2025-010',
-    fecha: '2025-06-16',
-    area: 'Mantenimiento',
-    solicitante: 'Carlos Ruiz',
-    items: [
-      { id: '4', materialId: 'M5', codigo: 'MAT-005', descripcion: 'Cable Eléctrico 12 AWG', unidad: 'Metro', cantidadSolicitada: 150, cantidadDespachada: 0, stock: 680 },
-      { id: '5', materialId: 'M3', codigo: 'MAT-003', descripcion: 'Rodamiento 6205-2RS', unidad: 'Unidad', cantidadSolicitada: 20, cantidadDespachada: 0, stock: 320 },
-    ]
-  },
-];
+interface SolicitudDetallada {
+  cabecera: {
+    IdSolicitud: number;
+    CodigoSolicitud: string;
+    FechaSolicitud: string;
+    AreaNombre: string;
+    CodigoCentroCosto?: string; // Nuevo
+    NombreSolicitante: string;
+    ComentarioSolicitud: string | null;
+    Estado: string;
+  };
+  detalle: ItemSolicitudDetalle[];
+}
+
+// Interfaz para los datos de impresión
+interface DespachoPrintData {
+  CodigoDespacho: string;
+  FechaDespacho: string;
+  CodigoSolicitud: string;
+  AreaNombre: string;
+  CodigoCentroCosto?: string; // Nuevo
+  NombreSolicitante: string;
+  Observaciones: string | null;
+  Detalles: {
+    Codigo: string;
+    Descripcion: string;
+    UnidadMedida: string;
+    CantidadDespachada: number;
+  }[];
+}
+
 
 export default function DespachoPage() {
-  const [solicitudes, setSolicitudes] = useState<Solicitud[]>(mockSolicitudesAprobadas);
-  const [selectedSolicitud, setSelectedSolicitud] = useState<Solicitud | null>(null);
-  const [editedItems, setEditedItems] = useState<Record<string, number>>({});
+  const { token } = useAuth();
+  const [solicitudes, setSolicitudes] = useState<SolicitudPendiente[]>([]);
+  const [historial, setHistorial] = useState<SolicitudPendiente[]>([]);
+  const [activeTab, setActiveTab] = useState('pendientes');
+  const [selectedSolicitud, setSelectedSolicitud] = useState<SolicitudDetallada | null>(null);
+  const [editedItems, setEditedItems] = useState<Record<number, number>>({});
   const [observacionesDespacho, setObservacionesDespacho] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [printData, setPrintData] = useState<DespachoPrintData | null>(null); // Estado para datos de impresión
 
-  const handleOpenDespacho = (solicitud: Solicitud) => {
-    setSelectedSolicitud(solicitud);
-    // Inicializar con las cantidades solicitadas
-    const initialItems: Record<string, number> = {};
-    solicitud.items.forEach(item => {
-      initialItems[item.id] = item.cantidadSolicitada;
-    });
-    setEditedItems(initialItems);
-    setObservacionesDespacho('');
+  const printComponentRef = useRef<HTMLDivElement>(null);
+
+  const handlePrint = useReactToPrint({
+    contentRef: printComponentRef,
+    onAfterPrint: () => setPrintData(null), // Limpiar datos después de imprimir
+  });
+
+  useEffect(() => {
+    if (printData) {
+      handlePrint();
+    }
+  }, [printData, handlePrint]);
+
+  useEffect(() => {
+    const cargarSolicitudesPendientes = async () => {
+      if (!token) return;
+      setLoading(true);
+      try {
+        const response = await fetch('http://localhost:4000/api/despachos/pendientes', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!response.ok) {
+          throw new Error('Error al cargar las solicitudes pendientes');
+        }
+        const data: SolicitudPendiente[] = await response.json();
+        setSolicitudes(data);
+      } catch (error) {
+        console.error(error);
+        toast.error('No se pudieron cargar las solicitudes para despacho.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    cargarSolicitudesPendientes();
+  }, [token]);
+
+  useEffect(() => {
+    const cargarHistorial = async () => {
+      if (!token || activeTab !== 'historial') return;
+      setLoadingHistorial(true);
+      try {
+        const response = await fetch('http://localhost:4000/api/despachos/historial', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error('Error al cargar historial');
+        const data = await response.json();
+        setHistorial(data);
+      } catch (error) {
+        console.error(error);
+        toast.error('Error cargando historial de despachos');
+      } finally {
+        setLoadingHistorial(false);
+      }
+    };
+    cargarHistorial();
+  }, [token, activeTab]);
+
+  const handleOpenDespacho = async (solicitud: SolicitudPendiente) => {
+    if (!token) return;
+    setModalLoading(true);
+    setSelectedSolicitud(null); // Limpiar estado anterior
+    try {
+      const response = await fetch(`http://localhost:4000/api/despachos/pendientes/${solicitud.IdSolicitud}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error('Error al cargar el detalle de la solicitud');
+      }
+      const data: SolicitudDetallada = await response.json();
+      setSelectedSolicitud(data);
+
+      // Inicializar con las cantidades solicitadas o despachadas
+      const initialItems: Record<number, number> = {};
+      data.detalle.forEach(item => {
+        initialItems[item.IdDetalleSolicitud] = data.cabecera.Estado === 'DESPACHADA' 
+          ? (item.CantidadAprobada ?? 0) 
+          : item.CantidadSolicitada;
+      });
+      setEditedItems(initialItems);
+      setObservacionesDespacho('');
+
+    } catch (error) {
+      console.error(error);
+      toast.error('No se pudo cargar el detalle de la solicitud.');
+    } finally {
+      setModalLoading(false);
+    }
   };
 
-  const handleCantidadChange = (itemId: string, value: string) => {
+  const handleCantidadChange = (idDetalleSolicitud: number, value: string) => {
     const numValue = parseInt(value) || 0;
     setEditedItems({
       ...editedItems,
-      [itemId]: numValue
+      [idDetalleSolicitud]: numValue
     });
   };
 
-  const handleDespachar = (tipo: 'total' | 'parcial') => {
-    if (!selectedSolicitud) return;
+  const handleDespachar = async (tipo: 'total' | 'parcial') => {
+    if (!selectedSolicitud || isDispatching) return;
 
     // Validar que las cantidades no excedan el stock ni lo solicitado
-    for (const item of selectedSolicitud.items) {
-      const cantidadADespachar = editedItems[item.id] || 0;
-      if (cantidadADespachar > item.cantidadSolicitada) {
-        alert(`La cantidad a despachar de ${item.descripcion} no puede exceder lo solicitado`);
+    for (const item of selectedSolicitud.detalle) {
+      const cantidadADespachar = editedItems[item.IdDetalleSolicitud] || 0;
+      if (cantidadADespachar > item.CantidadSolicitada) {
+        toast.error(`La cantidad a despachar de ${item.Descripcion} no puede exceder lo solicitado`);
         return;
       }
-      if (cantidadADespachar > item.stock) {
-        alert(`No hay suficiente stock de ${item.descripcion}`);
+      if (cantidadADespachar > item.EnStock) {
+        toast.error(`No hay suficiente stock de ${item.Descripcion}`);
         return;
       }
     }
 
-    console.log('Despachando solicitud:', {
-      solicitud: selectedSolicitud.numero,
-      tipo,
-      items: editedItems,
-      observaciones: observacionesDespacho
-    });
+    setIsDispatching(true);
+    try {
+      const payload = {
+        idSolicitud: selectedSolicitud.cabecera.IdSolicitud,
+        observaciones: observacionesDespacho,
+        detalle: Object.entries(editedItems)
+          .map(([idDetalle, cantidad]) => {
+            const itemOriginal = selectedSolicitud.detalle.find(d => d.IdDetalleSolicitud === Number(idDetalle));
+            if (!itemOriginal || cantidad === 0) return null;
+            return {
+              idMaterial: itemOriginal.IdMaterial,
+              cantidadDespachada: cantidad,
+            };
+          })
+          .filter(Boolean), // Eliminar nulos si la cantidad es 0
+      };
 
-    setSolicitudes(solicitudes.filter(s => s.id !== selectedSolicitud.id));
-    setSelectedSolicitud(null);
-    alert(`Despacho ${tipo} registrado exitosamente`);
+      const response = await fetch('http://localhost:4000/api/despachos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Error al registrar el despacho');
+      }
+
+      const result = await response.json();
+
+      // Preparar datos para la impresión
+      const dataToPrint: DespachoPrintData = {
+        CodigoDespacho: result.despacho.CodigoDespacho,
+        FechaDespacho: result.despacho.FechaDespacho,
+        CodigoSolicitud: selectedSolicitud.cabecera.CodigoSolicitud,
+        AreaNombre: selectedSolicitud.cabecera.AreaNombre,
+        CodigoCentroCosto: result.despacho.CodigoCentroCosto || selectedSolicitud.cabecera.CodigoCentroCosto, // Usar el devuelto o el de cabecera
+        NombreSolicitante: selectedSolicitud.cabecera.NombreSolicitante,
+        Observaciones: observacionesDespacho,
+        Detalles: result.detalle.map((d: any) => ({
+          Codigo: d.Codigo,
+          Descripcion: d.Descripcion,
+          UnidadMedida: d.UnidadMedida,
+          CantidadDespachada: d.CantidadDespachada,
+        })),
+      };
+
+      setPrintData(dataToPrint); // Disparar la impresión
+
+      toast.success(`Despacho ${tipo} registrado exitosamente`);
+      setSolicitudes(solicitudes.filter(s => s.IdSolicitud !== selectedSolicitud.cabecera.IdSolicitud));
+      setSelectedSolicitud(null);
+
+    } catch (error: any) {
+      console.error('Error al despachar:', error);
+      toast.error(error.message || 'No se pudo registrar el despacho.');
+    } finally {
+      setIsDispatching(false);
+    }
   };
 
-  const getTotalItems = (items: ItemSolicitud[]) => {
-    return items.reduce((sum, item) => sum + item.cantidadSolicitada, 0);
+  const getTotalItems = (items: ItemSolicitudDetalle[]) => {
+    return items.reduce((sum, item) => sum + item.CantidadSolicitada, 0);
   };
 
   const esDespachoCompleto = () => {
     if (!selectedSolicitud) return false;
-    return selectedSolicitud.items.every(item => 
-      editedItems[item.id] === item.cantidadSolicitada
+    return selectedSolicitud.detalle.every(item => 
+      editedItems[item.IdDetalleSolicitud] === item.CantidadSolicitada
     );
   };
 
   const hayCantidadesPendientes = () => {
     if (!selectedSolicitud) return false;
-    return selectedSolicitud.items.some(item => 
-      (editedItems[item.id] || 0) < item.cantidadSolicitada
+    return selectedSolicitud.detalle.some(item => 
+      (editedItems[item.IdDetalleSolicitud] || 0) < item.CantidadSolicitada
     );
   };
 
   return (
     <div className="space-y-6">
+      {/* Contenedor para la impresión (oculto en pantalla) */}
+      <RequisaPrint ref={printComponentRef} data={printData} />
+
       {/* Header */}
       <div>
         <h1>Despacho de Bodega</h1>
@@ -145,114 +303,196 @@ export default function DespachoPage() {
         </p>
       </div>
 
-      {/* KPIs */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Por Despachar</CardTitle>
-            <Truck className="w-4 h-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">{solicitudes.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Solicitudes aprobadas
-            </p>
-          </CardContent>
-        </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList>
+          <TabsTrigger value="pendientes">Pendientes ({solicitudes.length})</TabsTrigger>
+          <TabsTrigger value="historial">Historial Despachadas</TabsTrigger>
+        </TabsList>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Items Totales</CardTitle>
-            <Package className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">
-              {solicitudes.reduce((sum, s) => sum + getTotalItems(s.items), 0)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Unidades por despachar
-            </p>
-          </CardContent>
-        </Card>
+        <TabsContent value="pendientes" className="space-y-6">
+          {/* KPIs */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm">Por Despachar</CardTitle>
+                <Truck className="w-4 h-4 text-blue-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl">{loading ? '...' : solicitudes.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Solicitudes aprobadas
+                </p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Despachados Hoy</CardTitle>
-            <CheckCircle className="w-4 h-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">8</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Despachos completados
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm">Items Totales</CardTitle>
+                <Package className="w-4 h-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl">
+                  {loading ? '...' : solicitudes.reduce((sum, s) => sum + s.ItemsTotal, 0)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Unidades por despachar
+                </p>
+              </CardContent>
+            </Card>
 
-      {/* Tabla de Solicitudes */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Solicitudes Aprobadas</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Número</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Área</TableHead>
-                  <TableHead>Solicitante</TableHead>
-                  <TableHead className="text-center">Items</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {solicitudes.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                      No hay solicitudes pendientes de despacho
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  solicitudes.map((solicitud) => (
-                    <TableRow key={solicitud.id}>
-                      <TableCell className="font-medium">{solicitud.numero}</TableCell>
-                      <TableCell>{new Date(solicitud.fecha).toLocaleDateString()}</TableCell>
-                      <TableCell>{solicitud.area}</TableCell>
-                      <TableCell>{solicitud.solicitante}</TableCell>
-                      <TableCell className="text-center">{solicitud.items.length}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          onClick={() => handleOpenDespacho(solicitud)}
-                        >
-                          <Truck className="w-4 h-4 mr-2" />
-                          Despachar
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm">Despachados Hoy</CardTitle>
+                <CheckCircle className="w-4 h-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl">8</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Despachos completados
+                </p>
+              </CardContent>
+            </Card>
           </div>
-        </CardContent>
-      </Card>
+
+          {/* Tabla de Solicitudes */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Solicitudes Aprobadas</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Número</TableHead>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Área</TableHead>
+                      <TableHead>Solicitante</TableHead>
+                      <TableHead className="text-center">Items</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                          Cargando solicitudes...
+                        </TableCell>
+                      </TableRow>
+                    ) : solicitudes.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                          No hay solicitudes pendientes de despacho
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      solicitudes.map((solicitud) => (
+                        <TableRow key={solicitud.IdSolicitud}>
+                          <TableCell className="font-medium">{solicitud.CodigoSolicitud}</TableCell>
+                          <TableCell>{new Date(solicitud.FechaSolicitud).toLocaleDateString()}</TableCell>
+                          <TableCell>{solicitud.AreaNombre}</TableCell>
+                          <TableCell>{solicitud.NombreSolicitante}</TableCell>
+                          <TableCell className="text-center">{solicitud.ItemsTotal}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              onClick={() => handleOpenDespacho(solicitud)}
+                              disabled={modalLoading}
+                            >
+                              <Truck className="w-4 h-4 mr-2" />
+                              {modalLoading && selectedSolicitud?.cabecera.IdSolicitud !== solicitud.IdSolicitud ? 'Cargando...' : 'Despachar'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="historial" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Historial de Despachos Realizados</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Número</TableHead>
+                      <TableHead>Fecha Solicitud</TableHead>
+                      <TableHead>Área</TableHead>
+                      <TableHead>Solicitante</TableHead>
+                      <TableHead className="text-center">Items</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loadingHistorial ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                          Cargando historial...
+                        </TableCell>
+                      </TableRow>
+                    ) : historial.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                          No se han encontrado despachos realizados.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      historial.map((solicitud) => (
+                        <TableRow key={solicitud.IdSolicitud}>
+                          <TableCell className="font-medium">{solicitud.CodigoSolicitud}</TableCell>
+                          <TableCell>{new Date(solicitud.FechaSolicitud).toLocaleDateString()}</TableCell>
+                          <TableCell>{solicitud.AreaNombre}</TableCell>
+                          <TableCell>{solicitud.NombreSolicitante}</TableCell>
+                          <TableCell className="text-center">{solicitud.ItemsTotal}</TableCell>
+                          <TableCell className="text-right">
+                             <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleOpenDespacho(solicitud)}
+                            >
+                              Ver Detalle
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Modal de Despacho */}
-      <Dialog open={!!selectedSolicitud} onOpenChange={() => {
-        setSelectedSolicitud(null);
-        setEditedItems({});
-        setObservacionesDespacho('');
+      <Dialog open={!!selectedSolicitud || modalLoading} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          setSelectedSolicitud(null);
+          setEditedItems({});
+          setObservacionesDespacho('');
+        }
       }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Registrar Despacho</DialogTitle>
             <DialogDescription>
-              {selectedSolicitud?.numero} - {selectedSolicitud?.area}
+              {selectedSolicitud?.cabecera.CodigoSolicitud} - {selectedSolicitud?.cabecera.AreaNombre}
             </DialogDescription>
           </DialogHeader>
+
+          {modalLoading && !selectedSolicitud && (
+            <div className="flex items-center justify-center h-64">
+              <p>Cargando detalle de la solicitud...</p>
+            </div>
+          )}
 
           {selectedSolicitud && (
             <div className="space-y-4">
@@ -260,12 +500,12 @@ export default function DespachoPage() {
               <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
                 <div>
                   <div className="text-sm text-muted-foreground">Solicitante</div>
-                  <div className="font-medium">{selectedSolicitud.solicitante}</div>
+                  <div className="font-medium">{selectedSolicitud.cabecera.NombreSolicitante}</div>
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground">Fecha Solicitud</div>
                   <div className="font-medium">
-                    {new Date(selectedSolicitud.fecha).toLocaleDateString()}
+                    {new Date(selectedSolicitud.cabecera.FechaSolicitud).toLocaleDateString()}
                   </div>
                 </div>
               </div>
@@ -286,31 +526,33 @@ export default function DespachoPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {selectedSolicitud.items.map((item) => {
-                        const cantidadADespachar = editedItems[item.id] || 0;
-                        const excedeStock = cantidadADespachar > item.stock;
-                        const excedeSolicitado = cantidadADespachar > item.cantidadSolicitada;
+                      {selectedSolicitud.detalle.map((item) => {
+                        const isAprobada = selectedSolicitud.cabecera.Estado === 'APROBADA';
+                        const cantidadADespachar = editedItems[item.IdDetalleSolicitud] || 0;
+                        const excedeStock = isAprobada && cantidadADespachar > item.EnStock;
+                        const excedeSolicitado = cantidadADespachar > item.CantidadSolicitada;
                         
                         return (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">{item.codigo}</TableCell>
-                            <TableCell>{item.descripcion}</TableCell>
+                          <TableRow key={item.IdDetalleSolicitud}>
+                            <TableCell className="font-medium">{item.Codigo}</TableCell>
+                            <TableCell>{item.Descripcion}</TableCell>
                             <TableCell className="text-center">
-                              {item.cantidadSolicitada} {item.unidad}
+                              {item.CantidadSolicitada} {item.UnidadMedida}
                             </TableCell>
                             <TableCell className="text-center">
-                              <Badge variant={item.stock >= item.cantidadSolicitada ? 'secondary' : 'destructive'}>
-                                {item.stock}
+                              <Badge variant={!isAprobada || item.EnStock >= item.CantidadSolicitada ? 'secondary' : 'destructive'}>
+                                {item.EnStock}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-center">
                               <Input
                                 type="number"
                                 min="0"
-                                max={Math.min(item.cantidadSolicitada, item.stock)}
-                                value={editedItems[item.id] || 0}
-                                onChange={(e) => handleCantidadChange(item.id, e.target.value)}
+                                max={Math.min(item.CantidadSolicitada, item.EnStock)}
+                                value={editedItems[item.IdDetalleSolicitud] || 0}
+                                onChange={(e) => handleCantidadChange(item.IdDetalleSolicitud, e.target.value)}
                                 className="w-24 text-center"
+                                disabled={!isAprobada}
                               />
                             </TableCell>
                             <TableCell>
@@ -326,15 +568,20 @@ export default function DespachoPage() {
                                   Excede
                                 </Badge>
                               )}
-                              {!excedeStock && !excedeSolicitado && cantidadADespachar === item.cantidadSolicitada && (
+                              {!excedeStock && !excedeSolicitado && cantidadADespachar === item.CantidadSolicitada && (
                                 <Badge variant="secondary" className="gap-1">
                                   <CheckCircle className="w-3 h-3" />
                                   Completo
                                 </Badge>
                               )}
-                              {!excedeStock && !excedeSolicitado && cantidadADespachar > 0 && cantidadADespachar < item.cantidadSolicitada && (
+                              {!excedeStock && !excedeSolicitado && cantidadADespachar > 0 && cantidadADespachar < item.CantidadSolicitada && (
                                 <Badge className="gap-1 bg-yellow-100 text-yellow-700">
                                   Parcial
+                                </Badge>
+                              )}
+                              {!excedeStock && !excedeSolicitado && cantidadADespachar === 0 && (
+                                <Badge className="gap-1 bg-red-100 text-red-700">
+                                  No despachado
                                 </Badge>
                               )}
                             </TableCell>
@@ -351,7 +598,9 @@ export default function DespachoPage() {
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>
-                    Hay items con cantidades pendientes. Este será un despacho parcial.
+                    {selectedSolicitud.cabecera.Estado === 'APROBADA'
+                      ? "Hay items con cantidades pendientes. Este será un despacho parcial."
+                      : "Esta solicitud fue despachada parcialmente."}
                   </AlertDescription>
                 </Alert>
               )}
@@ -365,6 +614,7 @@ export default function DespachoPage() {
                   value={observacionesDespacho}
                   onChange={(e) => setObservacionesDespacho(e.target.value)}
                   rows={3}
+                  disabled={selectedSolicitud.cabecera.Estado !== 'APROBADA'}
                 />
               </div>
             </div>
@@ -378,26 +628,38 @@ export default function DespachoPage() {
                 setEditedItems({});
                 setObservacionesDespacho('');
               }}
+              disabled={isDispatching}
             >
-              Cancelar
+              {selectedSolicitud?.cabecera.Estado === 'APROBADA' ? 'Cancelar' : 'Cerrar'}
             </Button>
-            {hayCantidadesPendientes() && (
+            {selectedSolicitud?.cabecera.Estado === 'APROBADA' && hayCantidadesPendientes() && (
               <Button
                 variant="outline"
                 className="border-yellow-600 text-yellow-700 hover:bg-yellow-50"
                 onClick={() => handleDespachar('parcial')}
+                disabled={isDispatching}
               >
-                <Package className="w-4 h-4 mr-2" />
-                Despacho Parcial
+                {isDispatching ? 'Procesando...' : (
+                  <>
+                    <Package className="w-4 h-4 mr-2" />
+                    Despacho Parcial
+                  </>
+                )}
               </Button>
             )}
-            <Button
-              onClick={() => handleDespachar('total')}
-              disabled={!esDespachoCompleto()}
-            >
-              <CheckCircle className="w-4 h-4 mr-2" />
-              Despacho Completo
-            </Button>
+            {selectedSolicitud?.cabecera.Estado === 'APROBADA' && (
+              <Button
+                onClick={() => handleDespachar('total')}
+                disabled={!esDespachoCompleto() || isDispatching}
+              >
+                {isDispatching ? 'Procesando...' : (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Despacho Completo
+                  </>
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -12,6 +12,7 @@ export interface SolicitudResumen {
   RolSolicitante: string | null;
   IdArea: number | null;
   AreaNombre: string | null;
+  AreaCodigoCuenta: string | null;
   IdCentroCosto: number | null;
   CentroCostoCodigo: string | null;
   CentroCostoNombre: string | null;
@@ -105,6 +106,7 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
   tvp.columns.add('UnidadMedida', sql.NVarChar(50));
   tvp.columns.add('ComentarioLinea', sql.NVarChar(255));
+  tvp.columns.add('IdArea', sql.Int);
 
   for (const d of input.detalle) {
     tvp.rows.add(
@@ -112,6 +114,7 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
       d.cantidadSolicitada,
       d.unidadMedida ?? null,
       d.comentarioLinea ?? null,
+      input.idArea ?? null
     );
   }
 
@@ -149,6 +152,7 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
   tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
   tvp.columns.add('UnidadMedida', sql.NVarChar(50));
   tvp.columns.add('ComentarioLinea', sql.NVarChar(255));
+  tvp.columns.add('IdArea', sql.Int);
 
   for (const d of input.detalle) {
     tvp.rows.add(
@@ -156,6 +160,7 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
       d.cantidadSolicitada,
       d.unidadMedida ?? null,
       d.comentarioLinea ?? null,
+      input.idArea ?? null
     );
   }
 

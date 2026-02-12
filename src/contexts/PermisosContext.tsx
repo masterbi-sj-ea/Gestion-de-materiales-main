@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { useAuth, UserRole } from '../App';
+import { UserRole } from '../types';
+import { useAuth } from '../hooks/useAuth';
 
 export interface Modulo {
   id: string;
@@ -139,8 +140,8 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   const actualizarPermisos = (rol: UserRole, modulosSeleccionados: string[]) => {
-    setPermisos(prevPermisos => 
-      prevPermisos.map(p => 
+    setPermisos(prevPermisos =>
+      prevPermisos.map(p =>
         p.rol === rol ? { ...p, modulosPermitidos: modulosSeleccionados } : p
       )
     );

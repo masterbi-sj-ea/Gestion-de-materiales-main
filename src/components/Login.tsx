@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '../App';
+import { useAuth } from '../hooks/useAuth';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../App';
+import { useAuth } from '../hooks/useAuth';
 import { usePermisos } from '../contexts/PermisosContext';
 import { Button } from './ui/button';
 import { 

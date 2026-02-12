@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../App';
+import { useAuth } from '../hooks/useAuth';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -79,6 +79,7 @@ export default function CrearSolicitudPage() {
   const [idAreaDestino, setIdAreaDestino] = useState<string>('');
   const [idRecurso, setIdRecurso] = useState<string>('');
   const [codigoCuenta, setCodigoCuenta] = useState<string>('');
+  const [idCentroCostoCalculado, setIdCentroCostoCalculado] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -294,6 +295,7 @@ export default function CrearSolicitudPage() {
     const cargarCodigoCuenta = async () => {
       if (!idAreaDestino || !idRecurso) {
         setCodigoCuenta('');
+        setIdCentroCostoCalculado(null);
         return;
       }
 
@@ -307,14 +309,17 @@ export default function CrearSolicitudPage() {
 
         if (!resp.ok) {
           setCodigoCuenta('');
+          setIdCentroCostoCalculado(null);
           return;
         }
 
         const data = await resp.json();
         setCodigoCuenta(data?.codigoCuenta ?? '');
+        setIdCentroCostoCalculado(data?.idCentroCosto ?? null);
       } catch (e) {
         console.error('Error al cargar código de cuenta', e);
         setCodigoCuenta('');
+        setIdCentroCostoCalculado(null);
       }
     };
 
@@ -429,7 +434,7 @@ export default function CrearSolicitudPage() {
         idCorteStock: null,
         idArea: areaSeleccionada ? areaSeleccionada.id : null,
         idRecurso: idRecurso ? Number(idRecurso) : null,
-        idCentroCosto: areaSeleccionada ? areaSeleccionada.idCentroCosto : null,
+        idCentroCosto: idCentroCostoCalculado || (areaSeleccionada ? areaSeleccionada.idCentroCosto : null),
         ot: ot || null,
         detalle: items.map((it) => ({
           idMaterial: it.idMaterial,

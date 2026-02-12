@@ -1,0 +1,198 @@
+/* Estilos para la impresión de la Requisa - Media Página */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 0.2in;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background-color: #fff;
+    font-family: 'Times New Roman', serif; /* Más parecido a formato oficial */
+    font-size: 11pt;
+    margin: 0;
+    padding: 0;
+  }
+
+  body > *:not(.print-container) {
+    display: none !important;
+  }
+
+  .print-container {
+    display: block !important;
+    position: relative;
+    width: 100%;
+    /* Altura aproximada de media hoja carta en landscape puede ser todo el ancho, 
+       pero si es media hoja vertical (5.5x8.5), la altura es limitada. 
+       Asumiremos formato media hoja horizontal apaisado dentro de una hoja. */
+    height: 100%; 
+    padding: 10px;
+    box-sizing: border-box;
+  }
+
+  /* Header Grid Layout */
+  .print-header {
+    display: grid;
+    grid-template-columns: 200px 1fr 100px;
+    gap: 10px;
+    margin-bottom: 5px;
+    align-items: center;
+    border-bottom: none;
+  }
+
+  .header-left {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .header-box {
+    border: 1px solid #000;
+  }
+
+  .header-row {
+    display: flex;
+  }
+  
+  .header-row.border-top {
+      border-top: 1px solid #000;
+  }
+
+  .header-label {
+    background-color: #ddd;
+    padding: 2px 5px;
+    border-right: 1px solid #000;
+    width: 90px;
+    font-size: 9pt;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+
+  .header-value {
+    padding: 2px 5px;
+    flex-grow: 1;
+    font-size: 9pt;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  .header-center {
+    text-align: center;
+  }
+
+  .header-center h1 {
+    font-size: 14pt;
+    margin: 0;
+    text-transform: uppercase;
+    font-weight: normal; /* Times New Roman regular */
+  }
+
+  .header-right {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .logo-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-size: 8pt;
+  }
+
+  /* Table Styles */
+  .items-section {
+    margin-bottom: 5px;
+  }
+
+  .items-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #000;
+  }
+
+  .items-table th, 
+  .items-table td {
+    border: 1px solid #000;
+    padding: 3px 5px;
+    font-size: 10pt;
+  }
+
+  .items-table th {
+    background-color: #ddd;
+    text-transform: uppercase;
+    font-weight: normal;
+    text-align: center;
+  }
+
+  /* Column widths */
+  .items-table th:nth-child(1) { width: 10%; } /* Codigo */
+  .items-table th:nth-child(2) { width: 40%; } /* Descripcion */
+  .items-table th:nth-child(3) { width: 10%; } /* U/M */
+  .items-table th:nth-child(4) { width: 10%; } /* Cantidad */
+  .items-table th:nth-child(5) { width: 15%; } /* Actividad */
+  .items-table th:nth-child(6) { width: 15%; } /* CCO */
+
+  .items-table td {
+      height: 20px; /* Altura fija para filas vacias */
+  }
+
+  /* Footer Section */
+  .observaciones-section {
+    margin-top: 5px;
+    margin-bottom: 20px;
+    font-size: 10pt;
+  }
+  
+  .form-code {
+      font-size: 8pt;
+      margin-top: 2px;
+  }
+
+  .print-footer {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 20px;
+  }
+
+  .signatures-container {
+      display: flex;
+      gap: 30px;
+      width: 80%;
+      justify-content: space-between;
+  }
+
+  .signature-box {
+      text-align: center;
+      width: 30%;
+  }
+
+  .signature-line {
+      border-top: 1px solid #000;
+      margin-bottom: 5px;
+      width: 100%;
+  }
+
+  .signature-box p {
+      margin: 0;
+      font-size: 9pt;
+  }
+
+  .dispatch-number {
+      font-size: 14pt;
+      font-weight: bold;
+      color: #000;
+  }
+  
+  .red-number {
+      color: red !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+  }
+}
+
+/* Ocultar el contenedor de impresión en la vista de pantalla normal */
+.print-container {
+  display: none;
+}

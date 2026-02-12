@@ -10,8 +10,8 @@ export async function obtenerCodigoCuentaController(req: Request, res: Response)
   }
 
   try {
-    const codigoCuenta = await obtenerCodigoCuenta(idArea, idRecurso);
-    return res.json({ codigoCuenta });
+    const data = await obtenerCodigoCuenta(idArea, idRecurso);
+    return res.json(data);
   } catch (error: any) {
     console.error('Error en obtenerCodigoCuentaController', error);
     return res.status(500).json({ message: 'Error al obtener código de cuenta' });

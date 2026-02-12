@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Alert, AlertDescription } from './ui/alert';
 import { Shield, Save, RotateCcw, CheckCircle, XCircle, Info } from 'lucide-react';
 import { usePermisos } from '../contexts/PermisosContext';
-import { UserRole } from '../App';
+import { UserRole } from '../types';
 import {
   Table,
   TableBody,

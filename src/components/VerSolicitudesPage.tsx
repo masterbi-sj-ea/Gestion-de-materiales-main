@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../App';
+import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -22,6 +22,7 @@ interface Solicitud {
   numero: string;
   fecha: string;
   area: string;
+  cuenta?: string;
   solicitante: string;
   estado: 'borrador' | 'pendiente' | 'aprobada' | 'rechazada' | 'en_despacho' | 'despachada_parcial' | 'despachada_total';
   items: number;
@@ -49,6 +50,7 @@ interface SolicitudResumenApi {
   RolSolicitante: string | null;
   IdArea: number | null;
   AreaNombre: string | null;
+  AreaCodigoCuenta: string | null;
   IdCentroCosto: number | null;
   CentroCostoCodigo: string | null;
   CentroCostoNombre: string | null;
@@ -177,6 +179,7 @@ export default function VerSolicitudesPage() {
           numero: s.CodigoSolicitud,
           fecha: s.FechaSolicitud,
           area: s.AreaNombre ?? '-',
+          cuenta: s.AreaCodigoCuenta ?? '-',
           solicitante: s.NombreSolicitante,
           estado: mapEstadoDesdeBackend(s.Estado),
           items: s.TotalItems ?? 0,
@@ -345,6 +348,7 @@ export default function VerSolicitudesPage() {
                 <TableRow>
                   <TableHead>Número</TableHead>
                   <TableHead>Fecha</TableHead>
+                  <TableHead>Cuenta</TableHead>
                   <TableHead>Área</TableHead>
                   <TableHead>Solicitante</TableHead>
                   <TableHead className="text-center">Items</TableHead>
@@ -369,6 +373,7 @@ export default function VerSolicitudesPage() {
                       <TableRow key={solicitud.id}>
                         <TableCell className="font-medium">{solicitud.numero}</TableCell>
                         <TableCell>{new Date(solicitud.fecha).toLocaleDateString(undefined, { timeZone: 'UTC' })}</TableCell>
+                        <TableCell>{solicitud.cuenta}</TableCell>
                         <TableCell>{solicitud.area}</TableCell>
                         <TableCell>{solicitud.solicitante}</TableCell>
                         <TableCell className="text-center">{solicitud.items}</TableCell>

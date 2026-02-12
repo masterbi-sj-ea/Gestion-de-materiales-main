@@ -20,32 +20,9 @@ import RolesPage from './components/RolesPage';
 import AreasPage from './components/AreasPage';
 import CortesPage from './components/CortesPage';
 
-// El rol de usuario se trata ahora como string libre, para coincidir exactamente
-// con los nombres de rol que vengan desde la base de datos.
-export type UserRole = string;
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  area?: string;
-}
-
-interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
-  return context;
-};
+import { User, UserRole } from './types';
+import { AuthContext } from './contexts/AuthContext';
+import { useAuth } from './hooks/useAuth';
 
 function App() {
   const [user, setUser] = useState<User | null>(() => {
