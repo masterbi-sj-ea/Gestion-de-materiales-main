@@ -8,9 +8,10 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
+import { BuscarMaterial } from './BuscarMaterial';
 import { AlertCircle, Plus, Trash2, DollarSign, Package, Save, Send, User, CalendarDays, Tag, Loader2, Pencil, Check, X } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
-import { toast } from 'sonner';
+import { sileo as toast } from 'sileo';
 import {
   Table,
   TableBody,
@@ -200,7 +201,8 @@ export default function CrearSolicitudPage() {
 
         const estado = String(cabecera.Estado ?? '').toUpperCase();
         if (estado !== 'RECHAZADA' && estado !== 'BORRADOR') {
-          toast.error('No se puede editar esta solicitud', {
+          toast.error({
+            title: 'No se puede editar esta solicitud',
             description: 'Solo se permiten editar solicitudes rechazadas o en borrador.',
           });
           navigate('/solicitudes');
@@ -334,7 +336,8 @@ export default function CrearSolicitudPage() {
 
     const cantidadNumber = Number(cantidad);
     if (material.enStock != null && cantidadNumber > material.enStock) {
-      toast.warning('La cantidad solicitada excede el stock disponible', {
+      toast.warning({
+        title: 'La cantidad solicitada excede el stock disponible',
         description: 'Ajusta la cantidad según el stock actual.',
       });
       return;
@@ -355,8 +358,10 @@ export default function CrearSolicitudPage() {
     };
 
     setItems((prev) => [...prev, nuevoItem]);
-    setSelectedMaterialId('');
-    setCantidad('');
+
+    // Limpiar campos pero mantener info de material seleccionado visible
+  setCantidad('');
+  setSelectedMaterialId('');
   };
 
   const handleEliminarItem = (index: number) => {
@@ -382,7 +387,8 @@ export default function CrearSolicitudPage() {
 
     const item = items[editingIndex];
     if (item?.stockDisponible != null && nuevaCantidad > item.stockDisponible) {
-      toast.warning('La cantidad solicitada excede el stock disponible', {
+      toast.warning({
+        title: 'La cantidad solicitada excede el stock disponible',
         description: `Stock disponible: ${item.stockDisponible}`,
       });
       return;
@@ -406,14 +412,16 @@ export default function CrearSolicitudPage() {
 
   const handleEnviarSolicitud = async (comoBorrador = false) => {
     if (!token) {
-      toast.error('No hay sesión activa', {
+      toast.error({
+        title: 'No hay sesión activa',
         description: 'Inicia sesión nuevamente para continuar.',
       });
       return;
     }
 
     if (items.length === 0) {
-      toast.info('Agrega materiales a la solicitud', {
+      toast.info({
+        title: 'Agrega materiales a la solicitud',
         description: 'Debes incluir al menos un material antes de enviar.',
       });
       return;
@@ -601,25 +609,24 @@ export default function CrearSolicitudPage() {
         }
       }
 
-      toast.success(
-        editId
+      toast.success({
+        title: editId
           ? 'Solicitud actualizada correctamente'
           : comoBorrador
             ? 'Solicitud guardada correctamente'
             : 'Solicitud creada correctamente',
-        {
-          description: editId
-            ? 'La solicitud quedó actualizada y enviada a revisión.'
-            : comoBorrador
-              ? 'El borrador quedó disponible en el listado de solicitudes.'
-              : 'Se registró y quedó en estado pendiente.',
-        },
-      );
+        description: editId
+          ? 'La solicitud quedó actualizada y enviada a revisión.'
+          : comoBorrador
+            ? 'El borrador quedó disponible en el listado de solicitudes.'
+            : 'Se registró y quedó en estado pendiente.',
+      });
       navigate('/solicitudes');
     } catch (e: any) {
       console.error('Error al crear solicitud', e);
       setError(e?.message || 'Error al crear la solicitud');
-      toast.error('No se pudo crear la solicitud', {
+      toast.error({
+        title: 'No se pudo crear la solicitud',
         description: 'Intenta nuevamente o contacta al administrador.',
       });
     } finally {
@@ -764,40 +771,29 @@ export default function CrearSolicitudPage() {
             <div className="grid gap-4 md:grid-cols-[1fr_1fr_140px_120px]">
               <div className="space-y-2">
                 <Label>Grupo de artículos</Label>
-                <Select value={selectedGrupo} onValueChange={setSelectedGrupo}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar grupo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {gruposUnicos.map((g) => (
-                      <SelectItem key={g} value={g}>
-                        {g}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <BuscarMaterial
+                  materiales={gruposUnicos.map((g, idx) => ({
+                    idMaterial: idx,
+                    numeroArticulo: '',
+                    descripcionArticulo: g,
+                    enStock: null,
+                  }))}
+                  value={selectedGrupo}
+                  onChange={(_id) => {
+                    const idx = Number(_id);
+                    if (!isNaN(idx) && gruposUnicos[idx]) setSelectedGrupo(gruposUnicos[idx]);
+                  }}
+                  disabled={gruposUnicos.length === 0}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Material</Label>
-                <Select value={selectedMaterialId} onValueChange={setSelectedMaterialId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar material..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {materialesFiltrados.map((material) => (
-                      <SelectItem key={material.idMaterial} value={String(material.idMaterial)}>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>
-                            {material.numeroArticulo} - {material.descripcionArticulo}
-                          </span>
-                          <Badge variant="outline" className="ml-2">
-                            Stock: {material.enStock ?? 0}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <BuscarMaterial
+                  materiales={materialesFiltrados}
+                  value={selectedMaterialId}
+                  onChange={setSelectedMaterialId}
+                  disabled={materialesFiltrados.length === 0}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Cantidad</Label>

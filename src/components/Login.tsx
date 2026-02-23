@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Alert, AlertDescription } from './ui/alert';
 import { Package, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { toast } from 'sonner';
+import { sileo as toast } from 'sileo';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -22,7 +22,7 @@ export default function Login() {
     const success = await login(email, password);
     if (!success) {
       setError('Credenciales inválidas. Verifica tu email y contraseña.');
-      toast.error('Credenciales inválidas. Verifica tu email y contraseña.');
+      toast.error({ title: "Error de acceso", description: 'Credenciales inválidas. Verifica tu email y contraseña.'});
       return;
     }
  

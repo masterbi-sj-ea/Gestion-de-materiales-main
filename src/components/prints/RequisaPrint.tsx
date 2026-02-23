@@ -12,8 +12,12 @@ interface DespachoPrintData {
   CodigoDespacho: string;
   FechaDespacho: string;
   CodigoSolicitud: string;
-  AreaNombre: string;
-  CodigoCentroCosto?: string; // Add optional prop
+  // Actividad muestra el área destino (ej: "BPM - BUENAS PRACTICAS DE MANUFACTURA")
+  Actividad?: string;
+  // Código de cuenta/CCO a imprimir (ej: 51103903)
+  CodigoCuenta?: string;
+  AreaNombre?: string; // backward compat
+  CodigoCentroCosto?: string; // backward compat
   NombreSolicitante: string;
   Observaciones: string | null;
   Detalles: DetalleDespachoPrint[];
@@ -25,18 +29,30 @@ interface RequisaPrintProps {
 
 export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(({ data }, ref) => {
   const { user } = useAuth(); // Obtener usuario para 'Entregado por' si se desea
-  if (!data) return null;
+  // IMPORTANTE: no devolver null. Mantener el nodo montado evita errores de react-to-print (contentWindow)
+  // cuando el contenido se monta/desmonta alrededor del ciclo de impresión.
+  if (!data) {
+    return <div ref={ref} className="print-container" style={{ display: 'none' }} />;
+  }
 
   const {
     CodigoDespacho,
     FechaDespacho,
     CodigoSolicitud,
+    Actividad,
+    CodigoCuenta,
     AreaNombre,
-    CodigoCentroCosto, // Extract this
+    CodigoCentroCosto, // legacy
     NombreSolicitante,
     Observaciones,
     Detalles,
   } = data;
+
+  // Formatear número consecutivo del despacho (solo dígitos al final)
+  const numeroDespacho = (CodigoDespacho?.match(/\d+/g)?.pop()) ?? '';
+
+  // La fecha ya viene formateada desde el flujo de despacho; evitar reparseo que causa "Invalid Date"
+  const fechaImpresion = FechaDespacho || '';
 
   return (
     <div ref={ref} className="print-container">
@@ -45,7 +61,7 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
             <div className="header-box">
               <div className="header-row">
                 <span className="header-label">FECHA</span>
-                <span className="header-value">{new Date(FechaDespacho).toLocaleDateString()}</span>
+                <span className="header-value">{fechaImpresion}</span>
               </div>
               <div className="header-row border-top">
                 <span className="header-label">SOLICITUD N°</span>
@@ -58,10 +74,12 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
          </div>
          <div className="header-right">
              <div className="logo-placeholder">
-               {/* <img src="/logo.png" alt="Logo" /> */}
-               <div className="logo-circle">
-                 <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-               </div>
+               {/* Logo inline para evitar errores de carga en impresión */}
+               <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                 <path d="M2 17l10 5 10-5" />
+                 <path d="M2 12l10 5 10-5" />
+               </svg>
                <span>Extraceite</span>
              </div>
          </div>
@@ -87,12 +105,12 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
                   <td>{item.Descripcion}</td>
                   <td>{item.UnidadMedida}</td>
                   <td>{item.CantidadDespachada}</td>
-                  <td style={{fontSize: '0.9rem', textAlign: 'center'}}>{AreaNombre}</td>
-                  <td style={{fontSize: '0.9rem', textAlign: 'center'}}>{CodigoCentroCosto || ''}</td>
+                  <td style={{fontSize: '0.9rem', textAlign: 'center'}}>{Actividad || AreaNombre || ''}</td>
+                  <td style={{fontSize: '0.9rem', textAlign: 'center'}}>{CodigoCuenta || CodigoCentroCosto || ''}</td>
                 </tr>
               ))}
-              {/* Rellenar hasta 10 filas para mantener altura fija de media pagina */}
-              {Array.from({ length: Math.max(0, 8 - Detalles.length) }).map((_, i) => (
+              {/* Rellenar hasta 10 filas para mantener altura fija como el formulario físico */}
+              {Array.from({ length: Math.max(0, 10 - Detalles.length) }).map((_, i) => (
                 <tr key={`empty-${i}`}>
                    <td>&nbsp;</td>
                    <td>&nbsp;</td>
@@ -132,7 +150,7 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
         </div>
         
         <div className="dispatch-number">
-             <p>N° <span className="red-number">{CodigoDespacho.split('-').pop()}</span></p>
+             <p>N° <span className="red-number">{numeroDespacho}</span></p>
         </div>
       </footer>
     </div>

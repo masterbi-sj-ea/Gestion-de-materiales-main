@@ -187,3 +187,73 @@
 html {
   font-size: var(--font-size);
 }
+
+/* --------------------------------------------------------------------------
+   SILEO OVERRIDES - Mensajes en azul (profesional)
+
+   La librería `sileo` define variables CSS para los estados (por ejemplo
+   --sileo-state-success). En lugar de editar los archivos dentro de
+   node_modules, sobrescribimos esas variables desde nuestros estilos
+   globales para mantener la actualización de dependencias segura y fácil
+   de revertir.
+*/
+
+:root {
+  /* Paleta profesional adaptada a la app */
+  /* Éxito: verde corporativo, legible en fondo claro */
+  --sileo-state-success: #22c55e; /* green-500 */
+  /* Información: azul principal para mensajes neutros */
+  --sileo-state-info: #2563eb; /* blue-600 */
+  /* Advertencia: ámbar para llamar atención sin ser agresivo */
+  --sileo-state-warning: #f59e0b; /* amber-500 */
+  /* Error: rojo claro y visible */
+  --sileo-state-error: #ef4444; /* red-500 */
+  /* Acción: azul cielo para CTA (botones del toast) */
+  --sileo-state-action: #0ea5e9; /* sky-500 */
+
+  /* Altura/anchura explícitas para evitar cálculos negativos en SVGs de sileo */
+  --sileo-height: 40px;
+  --sileo-width: 340px;
+}
+
+/* Forzar contraste en header/badge/title si hacen falta (opcional) */
+[data-sileo-badge],
+[data-sileo-title] {
+  /* Opción 1: azul corporativo con header en blanco para máxima legibilidad */
+  color: #ffffff !important;
+}
+
+/* Fix directo: forzar variables de tamaño en cada toast para Sileo */
+[data-sileo-toast] {
+  --sileo-height: 40px !important;
+  --sileo-width: 340px !important;
+  /* Sombra sutil y elegante alrededor de la silueta del toast */
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.18));
+}
+
+/* Forzar el centrado superior de los toasts de Sileo */
+[data-sileo-viewport][data-position="top-center"] {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  right: auto;
+  align-items: center;
+  flex-direction: column-reverse;
+  z-index: 9999;
+}
+
+/* Texto del contenido en blanco para máxima legibilidad sobre fondo azul */
+[data-sileo-description] {
+  color: #ffffff !important;
+}
+
+/* Modo oscuro: usar versión adaptada del azul para buen contraste */
+.dark {
+  /* Ajustes para modo oscuro: tonos más claros para buen contraste */
+  --sileo-state-success: #34d399; /* green-400 */
+  --sileo-state-info: #60a5fa;    /* blue-400 */
+  --sileo-state-warning: #fbbf24; /* amber-400 */
+  --sileo-state-error: #f87171;   /* red-400 */
+  --sileo-state-action: #38bdf8;  /* sky-400 */
+}
+
