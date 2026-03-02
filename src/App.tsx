@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, createContext, useContext } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Bell } from 'lucide-react';
 import { sileo as toast } from 'sileo';
+import { io, Socket } from 'socket.io-client';
 import { PermisosProvider } from './contexts/PermisosContext';
 import Login from './components/Login';
 import Layout from './components/Layout';
@@ -11,6 +12,7 @@ import CrearSolicitudPage from './components/CrearSolicitudPage';
 import VerSolicitudesPage from './components/VerSolicitudesPage';
 import AprobacionPage from './components/AprobacionPage';
 import DespachoPage from './components/DespachoPage';
+import { KardexPage } from './components/KardexPage';
 import PresupuestoPage from './components/PresupuestoPage';
 import AuditoriaPage from './components/AuditoriaPage';
 import ReportesPage from './components/ReportesPage';
@@ -27,7 +29,7 @@ import { useAuth } from './hooks/useAuth';
 function App() {
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window === 'undefined') return null;
-    const stored = localStorage.getItem('authUser');
+    const stored = sessionStorage.getItem('authUser');
     try {
       return stored ? (JSON.parse(stored) as User) : null;
     } catch (e) {
@@ -38,9 +40,47 @@ function App() {
 
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('authToken');
+    return sessionStorage.getItem('authToken');
   });
+  
+  const socketRef = useRef<Socket | null>(null);
   const lastToastUserId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (user && token) {
+      // Inicializar Socket.io
+      const socket = io('http://localhost:4000');
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        console.log('socket.io conectado');
+        // Unirse a salas según rol si es necesario
+        if (user.role === 'Bodeguero' || user.role === 'Administrador') {
+          socket.emit('join', 'bodega');
+        }
+      });
+
+      socket.on('nueva_solicitud', (data) => {
+        toast.show({
+          title: "Nueva Solicitud",
+          description: `Se ha creado la solicitud ${data.codigo} de ${data.area}`,
+          // duration: 6000,
+        });
+      });
+
+      socket.on('solicitud_aprobada', (data) => {
+        toast.show({
+          title: "Solicitud Aprobada",
+          description: `Tu solicitud ${data.codigo} ha sido aprobada.`,
+          // duration: 6000,
+        });
+      });
+
+      return () => {
+        socket.disconnect();
+      };
+    }
+  }, [user, token]);
 
   useEffect(() => {
     if (!user) {
@@ -90,16 +130,16 @@ function App() {
       setUser(mappedUser);
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('authUser', JSON.stringify(mappedUser));
+          sessionStorage.setItem('authUser', JSON.stringify(mappedUser));
         } catch (e) {
-          console.error('Error saving user to localStorage', e);
+          console.error('Error saving user to sessionStorage', e);
         }
       }
       const token = data.token as string | undefined;
       if (token) {
         setToken(token);
         if (typeof window !== 'undefined') {
-          localStorage.setItem('authToken', token);
+          sessionStorage.setItem('authToken', token);
         }
       }
 
@@ -114,8 +154,8 @@ function App() {
     setUser(null);
     setToken(null);
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('authUser');
+      sessionStorage.removeItem('authToken');
+      sessionStorage.removeItem('authUser');
     }
   };
 
@@ -134,6 +174,7 @@ function App() {
                 <Route path="/solicitudes" element={<VerSolicitudesPage />} />
                 <Route path="/aprobaciones" element={<AprobacionPage />} />
                 <Route path="/despacho" element={<DespachoPage />} />
+                <Route path="/kardex" element={<KardexPage />} />
                 <Route path="/presupuesto" element={<PresupuestoPage />} />
                 <Route path="/cortes" element={<CortesPage />} />
                 <Route path="/auditoria" element={<AuditoriaPage />} />

@@ -1,0 +1,32 @@
+import { callSpMany } from '../../infra/spCaller';
+
+export interface MovimientoInventario {
+  IdMovimiento: number;
+  IdMaterial: number;
+  NumeroArticulo: string;
+  DescripcionArticulo: string;
+  TipoMovimiento: string;
+  Cantidad: number;
+  StockAnterior: number;
+  StockNuevo: number;
+  FechaMovimiento: string;
+  IdUsuario: number | null;
+  NombreUsuario: string | null;
+  Referencia: string | null;
+  CodigoCuenta: string | null;
+  AreaDestino: string | null;
+}
+
+export async function listarMovimientosInventario(filtros: {
+  IdMaterial?: number;
+  TipoMovimiento?: string;
+  FechaInicio?: string;
+  FechaFin?: string;
+}): Promise<MovimientoInventario[]> {
+  return callSpMany<MovimientoInventario>('sp_ListarMovimientosInventario', {
+    IdMaterial: filtros.IdMaterial ?? null,
+    TipoMovimiento: filtros.TipoMovimiento ?? null,
+    FechaInicio: filtros.FechaInicio ?? null,
+    FechaFin: filtros.FechaFin ?? null,
+  });
+}

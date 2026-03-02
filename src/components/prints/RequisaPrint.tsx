@@ -28,9 +28,8 @@ interface RequisaPrintProps {
 }
 
 export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(({ data }, ref) => {
-  const { user } = useAuth(); // Obtener usuario para 'Entregado por' si se desea
-  // IMPORTANTE: no devolver null. Mantener el nodo montado evita errores de react-to-print (contentWindow)
-  // cuando el contenido se monta/desmonta alrededor del ciclo de impresión.
+  const { user } = useAuth();
+  
   if (!data) {
     return <div ref={ref} className="print-container" style={{ display: 'none' }} />;
   }
@@ -42,48 +41,45 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
     Actividad,
     CodigoCuenta,
     AreaNombre,
-    CodigoCentroCosto, // legacy
+    CodigoCentroCosto,
     NombreSolicitante,
     Observaciones,
     Detalles,
   } = data;
 
-  // Formatear número consecutivo del despacho (solo dígitos al final)
-  const numeroDespacho = (CodigoDespacho?.match(/\d+/g)?.pop()) ?? '';
-
-  // La fecha ya viene formateada desde el flujo de despacho; evitar reparseo que causa "Invalid Date"
+  const numeroDespacho = (CodigoDespacho?.match(/\d+/g)?.pop()) ?? '098145';
   const fechaImpresion = FechaDespacho || '';
 
   return (
     <div ref={ref} className="print-container">
       <header className="print-header">
          <div className="header-left">
-            <div className="header-box">
-              <div className="header-row">
-                <span className="header-label">FECHA</span>
-                <span className="header-value">{fechaImpresion}</span>
-              </div>
-              <div className="header-row border-top">
-                <span className="header-label">SOLICITUD N°</span>
-                <span className="header-value text-xs">{CodigoSolicitud}</span>
-              </div>
+            <div className="logo-placeholder">
+               <img src="/logo_extraceite.png" alt="Extraceite" style={{ width: '50px', height: 'auto' }} />
+               <span style={{ fontWeight: 'bold', fontSize: '10pt' }}>Extraceite</span>
             </div>
          </div>
          <div className="header-center">
-            <h1>REQUISA SALIDA DE BODEGA EXTRACEITE</h1>
+            <h1 style={{ fontSize: '16pt', fontWeight: 'bold' }}>SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.</h1>
          </div>
-         <div className="header-right">
-             <div className="logo-placeholder">
-               {/* Logo inline para evitar errores de carga en impresión */}
-               <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                 <path d="M2 17l10 5 10-5" />
-                 <path d="M2 12l10 5 10-5" />
-               </svg>
-               <span>Extraceite</span>
-             </div>
+         <div className="header-right" style={{ textAlign: 'right' }}>
+             <p style={{ margin: 0, fontSize: '8pt', color: '#666' }}>FR-F-BD-022</p>
+             <p style={{ margin: 0, fontSize: '14pt', fontWeight: 'bold' }}>
+               Nº <span className="red-number">{numeroDespacho}</span>
+             </p>
          </div>
       </header>
+
+      <div className="info-grid">
+        <div className="info-item">
+          <span className="info-label">FECHA:</span>
+          <span className="info-underline">{fechaImpresion}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">REQUISA DE SALIDA No. :</span>
+          <span className="info-underline">{CodigoSolicitud}</span>
+        </div>
+      </div>
 
       <main>
         <div className="items-section">
@@ -91,25 +87,24 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
             <thead>
               <tr>
                 <th>CODIGO</th>
-                <th>DESCRIPCION DEL MATERIAL</th>
+                <th>DESCRIPCION MATERIAL</th>
                 <th>U/MEDIDA</th>
                 <th>CANTIDAD</th>
                 <th>ACTIVIDAD</th>
-                <th>CCO</th>
+                <th>CODIGO DE CUENTA</th>
               </tr>
             </thead>
             <tbody>
               {Detalles.map((item, index) => (
                 <tr key={index}>
-                  <td>{item.Codigo}</td>
+                  <td style={{ textAlign: 'center' }}>{item.Codigo}</td>
                   <td>{item.Descripcion}</td>
-                  <td>{item.UnidadMedida}</td>
-                  <td>{item.CantidadDespachada}</td>
-                  <td style={{fontSize: '0.9rem', textAlign: 'center'}}>{Actividad || AreaNombre || ''}</td>
-                  <td style={{fontSize: '0.9rem', textAlign: 'center'}}>{CodigoCuenta || CodigoCentroCosto || ''}</td>
+                  <td style={{ textAlign: 'center' }}>{item.UnidadMedida}</td>
+                  <td style={{ textAlign: 'center' }}>{item.CantidadDespachada}</td>
+                  <td style={{ fontSize: '0.8rem', textAlign: 'center' }}>{Actividad || AreaNombre || ''}</td>
+                  <td style={{ fontSize: '0.8rem', textAlign: 'center' }}>{CodigoCuenta || CodigoCentroCosto || ''}</td>
                 </tr>
               ))}
-              {/* Rellenar hasta 10 filas para mantener altura fija como el formulario físico */}
               {Array.from({ length: Math.max(0, 10 - Detalles.length) }).map((_, i) => (
                 <tr key={`empty-${i}`}>
                    <td>&nbsp;</td>
@@ -123,34 +118,33 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
             </tbody>
           </table>
         </div>
-
-        <div className="observaciones-section">
-          <p><strong>OBSERVACIONES:</strong> {Observaciones || '__________________________________________________________________________________'}</p> 
-          <p className="form-code">FR-F-BD-025</p>
-        </div>
       </main>
 
-      <footer className="print-footer">
-        <div className="signatures-container">
-            <div className="signature-box">
-            <div className="signature-line"></div>
-            <p>Entrega bodega</p>
-            <p>Nombre y firma</p>
+      <footer className="print-footer-new">
+        <div className="extra-info">
+          <div className="info-row">
+            <span className="info-label">Hora de inicio de despacho:</span>
+            <span className="info-underline" style={{ width: '150px' }}></span>
+            <span className="info-label" style={{ marginLeft: '20px' }}>Hora de finalización de despacho:</span>
+            <span className="info-underline" style={{ width: '150px' }}></span>
+          </div>
+        </div>
+
+        <div className="signatures-grid">
+            <div className="signature-item">
+              <div className="signature-line"></div>
+              <p>Autorizado por</p>
+              <p>Nombre y firma del jefe de área</p>
             </div>
-            <div className="signature-box">
-            <div className="signature-line"></div>
-            <p>Retirado por</p>
-            <p>Nombre y firma</p>
-            </div>
-            <div className="signature-box">
-            <div className="signature-line"></div>
-            <p>Autorizado por</p>
-            <p>Nombre del Ingeniero</p>
+            <div className="signature-item">
+              <div className="signature-line"></div>
+              <p>Autorizado por</p>
+              <p>de la persona que retira</p>
             </div>
         </div>
         
-        <div className="dispatch-number">
-             <p>N° <span className="red-number">{numeroDespacho}</span></p>
+        <div className="footer-bottom">
+          <p style={{ fontSize: '7pt', margin: 0 }}>180B 50J (2) 005501 - 104500 Sep/2024</p>
         </div>
       </footer>
     </div>

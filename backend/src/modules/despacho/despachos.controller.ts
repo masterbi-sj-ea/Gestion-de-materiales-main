@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middleware/auth';
 import * as despachoService from './despachos.service';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
 
+
 export async function listarPendientesController(req: AuthRequest, res: Response) {
   try {
     const pendientes = await despachoService.listarSolicitudesPendientes();
@@ -61,7 +62,8 @@ export async function registrarDespachoController(req: AuthRequest, res: Respons
     const resultado = await despachoService.registrarDespacho({
       idSolicitud: idSolicitudNum,
       observaciones: typeof observaciones === 'string' ? observaciones : '',
-      detalle
+      detalle,
+      idUsuario: req.userId // Pasamos el ID del usuario que despacha
     });
 
     // Auditoría
@@ -92,5 +94,20 @@ export async function contarDespachosHoyController(req: AuthRequest, res: Respon
   } catch (error) {
     console.error('Error al contar despachos de hoy:', error);
     return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+}
+
+export async function generarPdfController(req: AuthRequest, res: Response) {
+  try {
+    const { id } = req.params;
+    const stream = await despachoService.generarPdfDespacho(Number(id));
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Requisa-${id}.pdf`);
+
+    stream.pipe(res);
+  } catch (error: any) {
+    console.error('Error al generar PDF de despacho:', error);
+    return res.status(500).json({ message: error.message || 'Error al generar PDF' });
   }
 }

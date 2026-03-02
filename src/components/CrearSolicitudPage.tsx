@@ -38,6 +38,10 @@ interface ItemSolicitud {
   numeroArticulo: string;
   descripcionArticulo: string;
   unidadMedida: string;
+  idArea?: number | null;
+  idRecurso?: number | null; // <-- Agregar
+  codigoCuenta?: string | null; // <-- Agregar
+  areaNombre?: string | null; // <-- Opcional para mostrar en tabla
   cantidad: number;
   stockDisponible: number | null;
   costoUnitario: number;
@@ -228,6 +232,7 @@ export default function CrearSolicitudPage() {
             numeroArticulo: d.NumeroArticulo ?? '',
             descripcionArticulo: d.DescripcionArticulo ?? '',
             unidadMedida: d.UnidadMedidaDetalle ?? d.UnidadMedidaMaterial ?? '',
+            idArea: d.IdArea != null ? Number(d.IdArea) : d.IdAreaDestino != null ? Number(d.IdAreaDestino) : null,
             cantidad,
             stockDisponible: d.EnStock ?? null,
             costoUnitario,
@@ -344,6 +349,7 @@ export default function CrearSolicitudPage() {
     }
 
     const costoUnitario = material.ultimoPrecioCompra ?? 0;
+    const areaNombreActual = idAreaDestino ? areas.find(a => String(a.id) === idAreaDestino)?.nombre : null;
 
     const nuevoItem: ItemSolicitud = {
       idMaterial: material.idMaterial,
@@ -351,6 +357,10 @@ export default function CrearSolicitudPage() {
       numeroArticulo: material.numeroArticulo,
       descripcionArticulo: material.descripcionArticulo,
       unidadMedida: material.unidadMedida,
+      idArea: idAreaDestino ? Number(idAreaDestino) : null,
+      idRecurso: idRecurso ? Number(idRecurso) : null,
+      codigoCuenta: codigoCuenta || null,
+      areaNombre: areaNombreActual,
       cantidad: cantidadNumber,
       stockDisponible: material.enStock,
       costoUnitario,
@@ -449,6 +459,10 @@ export default function CrearSolicitudPage() {
           cantidadSolicitada: it.cantidad,
           unidadMedida: it.unidadMedida,
           comentarioLinea: null,
+          idArea: it.idArea ?? (areaSeleccionada ? areaSeleccionada.id : null),
+          idRecurso: it.idRecurso ?? (idRecurso ? Number(idRecurso) : null),
+          areaNombre: it.areaNombre || (areaSeleccionada ? areaSeleccionada.nombre : null),
+          codigoCuenta: it.codigoCuenta || null, // <-- Ahora sí it.codigoCuenta existe y tiene valor por línea
         })),
       };
 
@@ -470,142 +484,26 @@ export default function CrearSolicitudPage() {
       }
       const data = await resp.json();
 
-      // Abrir vista elegante para impresión / PDF (solo en creación)
-      if (!editId) {
+      // Descargar PDF automáticamente (igual que en Despacho) tras la creación
+      const idSolicitudFinal = data.IdSolicitud ?? data.idSolicitud ?? null;
+      if (idSolicitudFinal && !editId && !comoBorrador) {
         try {
-          const idSolicitud = data.IdSolicitud ?? data.idSolicitud ?? null;
-          const codigoSolicitud = data.CodigoSolicitud ?? data.codigoSolicitud ?? 'Solicitud';
-
-        const areaSeleccionada = idAreaDestino ? areas.find((a) => String(a.id) === idAreaDestino) : null;
-
-        const ventana = window.open('', '_blank');
-        if (ventana) {
-          // `fechaSolicitud` es YYYY-MM-DD. `new Date('YYYY-MM-DD')` se interpreta como UTC
-          // y en zonas horarias negativas puede “retroceder” al día anterior.
-          // Parseamos como fecha local para impresión.
-          const [yy, mm, dd] = (fechaSolicitud || '').split('-').map((n) => Number(n));
-          const fechaDate = yy && mm && dd ? new Date(yy, mm - 1, dd) : new Date();
-          const fechaLocal = fechaDate.toLocaleDateString();
-          const totalLocal = total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-          ventana.document.write(`<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charSet="utf-8" />
-  <title>${codigoSolicitud}</title>
-  <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f5f7; margin:0; padding:32px; }
-    .page { max-width:900px; margin:0 auto; background:white; border-radius:16px; box-shadow:0 20px 45px rgba(15,23,42,0.18); padding:32px 40px; }
-    .header { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:24px; }
-    .title { font-size:24px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase; color:#111827; }
-    .subtitle { font-size:12px; text-transform:uppercase; color:#6b7280; letter-spacing:0.08em; }
-    .badge { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; font-size:11px; font-weight:500; background:#FEF3C7; color:#92400E; }
-    .section { margin-top:24px; border-radius:12px; border:1px solid #E5E7EB; padding:16px 18px; background:#F9FAFB; }
-    .section-title { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:#6B7280; margin-bottom:8px; }
-    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 24px; font-size:13px; color:#111827; }
-    .label { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:#9CA3AF; }
-    table { width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }
-    th, td { padding:8px 10px; text-align:left; }
-    th { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:#9CA3AF; border-bottom:1px solid #E5E7EB; }
-    tr:nth-child(even) td { background:#F9FAFB; }
-    .text-right { text-align:right; }
-    .footer { margin-top:24px; display:flex; justify-content:space-between; align-items:flex-end; gap:16px; }
-    .total-label { font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:#9CA3AF; }
-    .total-value { font-size:22px; font-weight:600; color:#111827; }
-    .muted { font-size:11px; color:#9CA3AF; }
-  </style>
-</head>
-<body>
-  <div class="page">
-    <div class="header">
-      <div>
-        <div class="subtitle">Solicitud de materiales</div>
-        <div class="title">${codigoSolicitud}</div>
-        <div style="margin-top:8px; font-size:12px; color:#6B7280;">Generada por ${user?.name ?? ''}</div>
-      </div>
-      <div style="text-align:right; font-size:12px; color:#4B5563;">
-        <div><span style="color:#9CA3AF;">Fecha:</span> ${fechaLocal}</div>
-        <div><span style="color:#9CA3AF;">Estado:</span> <span class="badge">Pendiente</span></div>
-        ${ot ? `<div><span style="color:#9CA3AF;">OT:</span> ${ot}</div>` : ''}
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Información del solicitante</div>
-      <div class="grid">
-        <div>
-          <div class="label">Nombre</div>
-          <div>${user?.name ?? ''}</div>
-        </div>
-        <div>
-          <div class="label">Correo</div>
-          <div>${user?.email ?? ''}</div>
-        </div>
-        <div>
-          <div class="label">Rol</div>
-          <div>${user?.role ?? ''}</div>
-        </div>
-        <div>
-          <div class="label">Área destino</div>
-          <div>${areaSeleccionada ? `${areaSeleccionada.codigo} - ${areaSeleccionada.nombre}` : ''}</div>
-        </div>
-        <div>
-          <div class="label">Código de cuenta</div>
-          <div>${codigoCuenta ?? ''}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="section" style="margin-top:20px;">
-      <div class="section-title">Detalle de materiales</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Grupo</th>
-            <th>N° Artículo</th>
-            <th>Descripción</th>
-            <th>Unidad</th>
-            <th class="text-right">Stock</th>
-            <th class="text-right">Cantidad</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items
-              .map(
-                (it) => `
-          <tr>
-            <td>${it.grupoArticulos ?? '-'}</td>
-            <td>${it.numeroArticulo}</td>
-            <td>${it.descripcionArticulo}</td>
-            <td>${it.unidadMedida}</td>
-            <td class="text-right">${it.stockDisponible ?? 0}</td>
-            <td class="text-right">${it.cantidad}</td>
-          </tr>`,
-              )
-              .join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="footer">
-      <div class="muted">
-        Este documento es un resumen de solicitud de materiales. Utilice la opción "Imprimir" del navegador para guardar como PDF.
-      </div>
-      <div>
-        <div class="total-label">Total estimado</div>
-        <div class="total-value">${totalLocal}</div>
-      </div>
-    </div>
-  </div>
-  <script>
-    window.onload = function() { window.print(); };
-  </script>
-</body>
-</html>`);
-          ventana.document.close();
-        }
-        } catch (printError) {
-          console.error('Error al abrir vista de impresión de solicitud', printError);
+          const pdfResp = await fetch(`http://localhost:4000/api/solicitudes/${idSolicitudFinal}/pdf`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (pdfResp.ok) {
+            const blob = await pdfResp.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Solicitud_${idSolicitudFinal}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+          }
+        } catch (pdfErr) {
+          console.error('Error al descargar PDF:', pdfErr);
         }
       }
 
@@ -879,6 +777,7 @@ export default function CrearSolicitudPage() {
                       <TableHead>Grupo</TableHead>
                       <TableHead>N° Artículo</TableHead>
                       <TableHead>Descripción</TableHead>
+                      <TableHead>Área Destino</TableHead>
                       <TableHead>Unidad</TableHead>
                       <TableHead className="text-right">Stock</TableHead>
                       <TableHead className="text-right">Cantidad</TableHead>
@@ -891,6 +790,14 @@ export default function CrearSolicitudPage() {
                         <TableCell className="font-medium">{item.grupoArticulos || '-'}</TableCell>
                         <TableCell>{item.numeroArticulo}</TableCell>
                         <TableCell>{item.descripcionArticulo}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[10px] uppercase font-bold">
+                            {item.areaNombre || '-'}
+                          </Badge>
+                          <div className="text-[9px] text-muted-foreground mt-1">
+                            {item.codigoCuenta || ''}
+                          </div>
+                        </TableCell>
                         <TableCell>{item.unidadMedida}</TableCell>
                         <TableCell className="text-right">{item.stockDisponible ?? 0}</TableCell>
                         <TableCell className="text-right">

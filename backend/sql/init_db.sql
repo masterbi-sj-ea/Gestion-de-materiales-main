@@ -459,6 +459,8 @@ IF OBJECT_ID('dbo.DetalleSolicitudesMaterial', 'U') IS NULL
     IdSolicitud INT NOT NULL,
     IdMaterial INT NOT NULL,
     -- referencia a Materiales
+    IdArea INT NULL,
+    IdRecurso INT NULL,
     CantidadSolicitada DECIMAL(18,4) NOT NULL,
     CantidadAprobada DECIMAL(18,4) NULL,
     UnidadMedida NVARCHAR(50) NULL,
@@ -2093,25 +2095,26 @@ BEGIN
 END
 GO
 
-CREATE OR ALTER PROCEDURE dbo.sp_ListarModulos
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    SELECT
-        IdModulo,
-        Codigo,
-        Nombre,
-        Path,
-        Descripcion,
-        Icono
-    FROM dbo.Modulos
-    ORDER BY Codigo;
-END
-GO
-
-
-
+  -- Kardex
+  IF NOT EXISTS (SELECT 1
+  FROM dbo.Modulos
+  WHERE Codigo = 'kardex')
+  BEGIN
+      INSERT INTO dbo.Modulos
+          (Codigo, Nombre, Path, Descripcion, Icono)
+      VALUES
+          ('kardex', 'Kardex', '/kardex', 'Movimientos de Inventario', 'Activity');
+  END
+  ELSE
+  BEGIN
+      UPDATE dbo.Modulos
+      SET Nombre = 'Kardex',
+          Path = '/kardex',
+          Descripcion = 'Movimientos de Inventario',
+          Icono = 'Activity'
+      WHERE Codigo = 'kardex';
+  END
+  GO
 
 CREATE OR ALTER PROCEDURE dbo.sp_RegistrarAuditoriaAccion
     @IdUsuario  INT = NULL,
@@ -2352,7 +2355,8 @@ GO
 
 
 CREATE OR ALTER PROCEDURE dbo.sp_ImportarMaterialesYStock
-    @Datos dbo.TMaterialCarga READONLY
+    @Datos dbo.TMaterialCarga READONLY,
+    @IdUsuario INT = NULL -- Agregado para registrar en Kardex
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -2404,7 +2408,36 @@ BEGIN
     WHERE m.IdMaterial IS NULL;
 
     ---------------------------------------------------------
-    -- 2) Truncar y recargar StockActual
+    -- 2) Registrar Movimientos en Kardex (AJUSTE)
+    ---------------------------------------------------------
+    -- Calculamos la diferencia entre el stock nuevo y el actual
+    -- Si no hay stock actual, asumimos 0.
+    INSERT INTO dbo.MovimientosInventario (
+        IdMaterial,
+        TipoMovimiento,
+        Cantidad,
+        StockAnterior,
+        StockNuevo,
+        FechaMovimiento,
+        IdUsuario,
+        Referencia
+    )
+    SELECT 
+        m.IdMaterial,
+        'AJUSTE',
+        d.EnStock - ISNULL(sa.EnStock, 0), -- Cantidad ajustada (puede ser positiva o negativa)
+        ISNULL(sa.EnStock, 0),             -- Stock Anterior
+        d.EnStock,                         -- Stock Nuevo
+        SYSDATETIME(),
+        @IdUsuario,
+        'CARGA_CSV'
+    FROM @Datos d
+    JOIN dbo.Materiales m ON m.NumeroArticulo = d.NumeroArticulo
+    LEFT JOIN dbo.StockActual sa ON sa.IdMaterial = m.IdMaterial
+    WHERE d.EnStock <> ISNULL(sa.EnStock, 0); -- Solo registrar si hubo cambio
+
+    ---------------------------------------------------------
+    -- 3) Truncar y recargar StockActual
     ---------------------------------------------------------
     TRUNCATE TABLE dbo.StockActual;
 
@@ -2461,7 +2494,9 @@ BEGIN
         IdMaterial INT NOT NULL,
         CantidadSolicitada DECIMAL(18,4) NOT NULL,
         UnidadMedida NVARCHAR(50) NULL,
-        ComentarioLinea NVARCHAR(255) NULL
+        ComentarioLinea NVARCHAR(255) NULL,
+        IdArea INT NULL,
+        IdRecurso INT NULL
     );
 END
 GO
@@ -2561,6 +2596,8 @@ BEGIN
         (
         IdSolicitud,
         IdMaterial,
+        IdArea,
+        IdRecurso,
         CantidadSolicitada,
         CantidadAprobada,
         UnidadMedida,
@@ -2569,6 +2606,8 @@ BEGIN
     SELECT
         @IdSolicitud,
         d.IdMaterial,
+        d.IdArea,
+        d.IdRecurso,
         d.CantidadSolicitada,
         NULL, -- CantidadAprobada se llenará en aprobación/despacho
         d.UnidadMedida,
@@ -2882,6 +2921,120 @@ BEGIN
 END
 GO
 
+-------------------------------------------------------------
+-- 8) Tablas y Tipos para Despachos (MEJORADO)
+-------------------------------------------------------------
+
+IF OBJECT_ID('dbo.Despachos', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.Despachos (
+        IdDespacho INT IDENTITY(1,1) PRIMARY KEY,
+        IdSolicitud INT NOT NULL,
+        IdUsuarioDespacha INT NOT NULL,
+        FechaDespacho DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
+        Observaciones NVARCHAR(500) NULL,
+        Estado NVARCHAR(30) NOT NULL DEFAULT('COMPLETO'), -- COMPLETO, PARCIAL
+        CONSTRAINT FK_Despachos_Solicitudes FOREIGN KEY (IdSolicitud) REFERENCES dbo.SolicitudesMaterial(IdSolicitud),
+        CONSTRAINT FK_Despachos_Usuarios FOREIGN KEY (IdUsuarioDespacha) REFERENCES dbo.Usuarios(IdUsuario)
+    );
+END
+GO
+
+IF OBJECT_ID('dbo.DetalleDespachos', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DetalleDespachos (
+        IdDetalleDespacho INT IDENTITY(1,1) PRIMARY KEY,
+        IdDespacho INT NOT NULL,
+        IdMaterial INT NOT NULL,
+        CantidadDespachada DECIMAL(18,4) NOT NULL,
+        CONSTRAINT FK_DetalleDespachos_Despachos FOREIGN KEY (IdDespacho) REFERENCES dbo.Despachos(IdDespacho),
+        CONSTRAINT FK_DetalleDespachos_Materiales FOREIGN KEY (IdMaterial) REFERENCES dbo.Materiales(IdMaterial)
+    );
+END
+GO
+
+IF TYPE_ID('dbo.TDetalleDespacho') IS NULL
+BEGIN
+    CREATE TYPE dbo.TDetalleDespacho AS TABLE (
+        IdDetalleSolicitud INT NOT NULL,
+        CantidadDespachada DECIMAL(18,4) NOT NULL
+    );
+END
+GO
+
+-------------------------------------------------------------
+-- 9) Procedimiento de Registro de Despacho (MEJORADO)
+-------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.sp_RegistrarDespacho
+    @IdSolicitud INT,
+    @IdUsuarioDespacha INT,
+    @Observaciones NVARCHAR(500),
+    @Detalle dbo.TDetalleDespacho READONLY
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 1. Insertar cabecera de despacho
+        INSERT INTO dbo.Despachos (IdSolicitud, IdUsuarioDespacha, Observaciones, Estado)
+        VALUES (@IdSolicitud, @IdUsuarioDespacha, @Observaciones, 'COMPLETO');
+
+        DECLARE @IdDespacho INT = SCOPE_IDENTITY();
+
+        -- 2. Insertar detalle de despacho
+        -- Obtenemos IdMaterial desde DetalleSolicitudesMaterial para el registro
+        INSERT INTO dbo.DetalleDespachos (IdDespacho, IdMaterial, CantidadDespachada)
+        SELECT @IdDespacho, ds.IdMaterial, d.CantidadDespachada
+        FROM @Detalle d
+        JOIN dbo.DetalleSolicitudesMaterial ds ON d.IdDetalleSolicitud = ds.IdDetalleSolicitud;
+
+        -- 3. Actualizar CantidadAprobada en DetalleSolicitudesMaterial (acumulativo)
+        UPDATE ds
+        SET ds.CantidadAprobada = ISNULL(ds.CantidadAprobada, 0) + d.CantidadDespachada
+        FROM dbo.DetalleSolicitudesMaterial ds
+        JOIN @Detalle d ON ds.IdDetalleSolicitud = d.IdDetalleSolicitud
+        WHERE ds.IdSolicitud = @IdSolicitud;
+
+        -- 4. Descontar del StockActual
+        UPDATE sa
+        SET sa.EnStock = sa.EnStock - d.CantidadDespachada,
+            sa.FechaActualizacion = SYSDATETIME()
+        FROM dbo.StockActual sa
+        JOIN dbo.DetalleSolicitudesMaterial ds ON sa.IdMaterial = ds.IdMaterial
+        JOIN @Detalle d ON ds.IdDetalleSolicitud = d.IdDetalleSolicitud;
+
+        -- 5. Determinar nuevo estado de la solicitud
+        DECLARE @TotalSolicitado DECIMAL(18,4);
+        DECLARE @TotalDespachado DECIMAL(18,4);
+
+        SELECT @TotalSolicitado = SUM(CantidadSolicitada) FROM dbo.DetalleSolicitudesMaterial WHERE IdSolicitud = @IdSolicitud;
+        SELECT @TotalDespachado = SUM(ISNULL(CantidadAprobada, 0)) FROM dbo.DetalleSolicitudesMaterial WHERE IdSolicitud = @IdSolicitud;
+
+        DECLARE @NuevoEstado NVARCHAR(30) = 'DESPACHADA';
+        IF @TotalDespachado < @TotalSolicitado
+        BEGIN
+            SET @NuevoEstado = 'PARCIALMENTE_DESPACHADA';
+            UPDATE dbo.Despachos SET Estado = 'PARCIAL' WHERE IdDespacho = @IdDespacho;
+        END
+
+        UPDATE dbo.SolicitudesMaterial
+        SET Estado = @NuevoEstado
+        WHERE IdSolicitud = @IdSolicitud;
+
+        SELECT @NuevoEstado AS NuevoEstado, @IdDespacho AS IdDespachoGenerado;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(@ErrorMessage, 16, 1);
+    END CATCH
+END
+GO
 
 -- Agregar columna OT a SolicitudesMaterial si no existe
 IF COL_LENGTH('dbo.SolicitudesMaterial', 'OT') IS NULL

@@ -31,164 +31,111 @@
     box-sizing: border-box;
   }
 
-  /* Header Grid Layout */
+  /* Header New Layout */
   .print-header {
-    display: grid;
-    grid-template-columns: 200px 1fr 100px;
-    gap: 10px;
-    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    border-bottom: none;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #000;
+    padding-bottom: 10px;
   }
 
-  .header-left {
+  .info-grid {
     display: flex;
-    flex-direction: column;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    font-size: 10pt;
   }
 
-  .header-box {
-    border: 1px solid #000;
-  }
-
-  .header-row {
+  .info-item {
     display: flex;
-  }
-  
-  .header-row.border-top {
-      border-top: 1px solid #000;
+    align-items: baseline;
+    gap: 5px;
   }
 
-  .header-label {
-    background-color: #ddd;
-    padding: 2px 5px;
-    border-right: 1px solid #000;
-    width: 90px;
-    font-size: 9pt;
+  .info-label {
     font-weight: bold;
-    text-transform: uppercase;
+    white-space: nowrap;
   }
 
-  .header-value {
-    padding: 2px 5px;
-    flex-grow: 1;
-    font-size: 9pt;
-    font-weight: bold;
-    text-align: center;
-  }
-
-  .header-center {
-    text-align: center;
-  }
-
-  .header-center h1 {
-    font-size: 14pt;
-    margin: 0;
-    text-transform: uppercase;
-    font-weight: normal; /* Times New Roman regular */
-  }
-
-  .header-right {
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .logo-placeholder {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      font-size: 8pt;
+  .info-underline {
+    border-bottom: 1px solid #000;
+    min-width: 150px;
+    padding: 0 5px;
+    display: inline-block;
   }
 
   /* Table Styles */
   .items-section {
-    margin-bottom: 5px;
+    margin-bottom: 15px;
   }
 
   .items-table {
     width: 100%;
     border-collapse: collapse;
-    border: 1px solid #000;
+    border: 2px solid #000;
   }
 
   .items-table th, 
   .items-table td {
     border: 1px solid #000;
-    padding: 3px 5px;
-    font-size: 10pt;
+    padding: 4px 6px;
+    font-size: 9pt;
   }
 
   .items-table th {
-    background-color: #ddd;
+    background-color: #f0f0f0;
     text-transform: uppercase;
-    font-weight: normal;
+    font-weight: bold;
     text-align: center;
   }
 
-  /* Column widths */
-  .items-table th:nth-child(1) { width: 10%; } /* Codigo */
-  .items-table th:nth-child(2) { width: 40%; } /* Descripcion */
-  .items-table th:nth-child(3) { width: 10%; } /* U/M */
-  .items-table th:nth-child(4) { width: 10%; } /* Cantidad */
-  .items-table th:nth-child(5) { width: 15%; } /* Actividad */
-  .items-table th:nth-child(6) { width: 15%; } /* CCO */
-
-  .items-table td {
-      height: 20px; /* Altura fija para filas vacias */
-  }
-
-  /* Footer Section */
-  .observaciones-section {
-    margin-top: 5px;
-    margin-bottom: 20px;
-    font-size: 10pt;
-  }
-  
-  .form-code {
-      font-size: 8pt;
-      margin-top: 2px;
-  }
-
-  .print-footer {
-    position: relative;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
+  /* Footer New Layout */
+  .print-footer-new {
     margin-top: 20px;
   }
 
-  .signatures-container {
-      display: flex;
-      gap: 30px;
-      width: 80%;
-      justify-content: space-between;
+  .extra-info {
+    margin-bottom: 30px;
   }
 
-  .signature-box {
-      text-align: center;
-      width: 30%;
+  .info-row {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+
+  .signatures-grid {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 40px;
+    margin-bottom: 20px;
+  }
+
+  .signature-item {
+    text-align: center;
+    width: 250px;
   }
 
   .signature-line {
-      border-top: 1px solid #000;
-      margin-bottom: 5px;
-      width: 100%;
+    border-top: 1px solid #000;
+    margin-bottom: 5px;
   }
 
-  .signature-box p {
-      margin: 0;
-      font-size: 9pt;
+  .signature-item p {
+    margin: 0;
+    font-size: 9pt;
   }
 
-  .dispatch-number {
-      font-size: 14pt;
-      font-weight: bold;
-      color: #000;
+  .footer-bottom {
+    margin-top: 10px;
+    text-align: left;
   }
-  
+
   .red-number {
-      color: red !important;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+    color: #e11d48 !important; /* rose-600 */
+    font-family: monospace;
   }
 }
 
@@ -196,3 +143,21 @@
 .print-container {
   display: none;
 }
+
+  /* Ajustar wrappers para centrado vertical y overflow */
+  .text-cell-wrapper {
+    display: flex;
+    align-items: center; /* Centrar verticalmente */
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis; /* Poner puntos si no cabe */
+    /* permitimos wrap pero muy controlado por el font-size */
+  }
+
+  /* Asegurar que las celdas tengan algo de flexibilidad si es CRITICO, pero preferimos mantener altura fija */
+  .items-table td {
+     padding-top: 1px !important;
+     padding-bottom: 1px !important;
+  }
+

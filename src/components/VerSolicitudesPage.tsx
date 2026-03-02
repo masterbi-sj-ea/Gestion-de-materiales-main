@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
+import { Skeleton } from './ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Search, Eye, Edit, FileText, Clock, CheckCircle, XCircle, Truck, Package } from 'lucide-react';
 import {
@@ -333,7 +334,6 @@ export default function VerSolicitudesPage() {
         <CardHeader>
           <CardTitle>
             Solicitudes ({filteredSolicitudes.length})
-            {loading && <span className="ml-2 text-sm text-muted-foreground">Cargando...</span>}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -358,9 +358,23 @@ export default function VerSolicitudesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSolicitudes.length === 0 ? (
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                      <TableCell><Skeleton className="h-6 w-24" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-8 w-[100px] ml-auto" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : filteredSolicitudes.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
                       No se encontraron solicitudes
                     </TableCell>
                   </TableRow>

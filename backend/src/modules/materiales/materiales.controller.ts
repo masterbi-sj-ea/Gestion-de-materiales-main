@@ -221,7 +221,7 @@ export async function importarMaterialesController(req: AuthRequest, res: Respon
       return res.status(400).json({ message: 'El CSV no contiene filas válidas de materiales' });
     }
 
-    await importarMaterialesYStock(datos);
+    await importarMaterialesYStock(datos, req.userId);
 
     try {
       await registrarAuditoria(req.userId ?? null, 'IMPORTAR_MATERIALES_STOCK', {

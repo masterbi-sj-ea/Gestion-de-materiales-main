@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
-import { Truck, Package, CheckCircle, AlertCircle, Search } from 'lucide-react';
+import { Truck, Package, CheckCircle, AlertCircle, Search, FileText } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import {
   Table,
@@ -33,7 +33,8 @@ interface ItemSolicitudDetalle {
   Descripcion: string;
   UnidadMedida: string;
   CantidadSolicitada: number;
-  CantidadAprobada: number | null;
+  CantidadAprobada: number;
+  CantidadPendiente: number;
   EnStock: number;
 }
 
@@ -56,7 +57,6 @@ interface SolicitudDetallada {
     FechaSolicitud: string;
     AreaNombre: string; // ej: "BPM - BUENAS PRACTICAS DE MANUFACTURA"
     // Campos adicionales que pueden llegar desde el backend
-    AreaCodigoCuenta?: string | null; // ej: "51103903"
     CentroCostoCodigo?: string | null;
     CodigoCuenta?: string | null;
     CodigoCentroCosto?: string; // legacy
@@ -102,7 +102,7 @@ const LOGO_URL = "/logo_extraceite.png"; // Asegúrate de poner tu archivo en la
 export default function DespachoPage() {
   const { token, user } = useAuth();
   const [solicitudes, setSolicitudes] = useState<SolicitudPendiente[]>([]);
-  const [historial, setHistorial] = useState<SolicitudPendiente[]>([]);
+  const [historial, setHistorial] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('pendientes');
   const [selectedSolicitud, setSelectedSolicitud] = useState<SolicitudDetallada | null>(null);
   const [editedItems, setEditedItems] = useState<Record<number, number>>({});
@@ -113,6 +113,35 @@ export default function DespachoPage() {
   const [isDispatching, setIsDispatching] = useState(false);
   const [printData, setPrintData] = useState<DespachoPrintData | null>(null); // Estado para datos de impresión
   const [despachosHoy, setDespachosHoy] = useState<number>(0);
+  const [downloadingPdf, setDownloadingPdf] = useState<number | null>(null);
+
+  const downloadDespachoPdf = async (idDespacho: number) => {
+    try {
+      setDownloadingPdf(idDespacho);
+      const response = await fetch(`${API_BASE}/api/despachos/${idDespacho}/pdf`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('No se pudo generar el PDF');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Requisa_Despacho_${idDespacho}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error descargando PDF:', error);
+      toast.error({ title: 'Error', description: 'No se pudo descargar el PDF.' });
+    } finally {
+      setDownloadingPdf(null);
+    }
+  };
   const [loadingDespachosHoy, setLoadingDespachosHoy] = useState<boolean>(false);
   const [selectedDetalleId, setSelectedDetalleId] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState<string>('');
@@ -131,14 +160,8 @@ export default function DespachoPage() {
     },
   });
 
-  useEffect(() => {
-    if (printData) {
-      const raf = requestAnimationFrame(() => {
-        handlePrint();
-      });
-      return () => cancelAnimationFrame(raf);
-    }
-  }, [printData, handlePrint]);
+  // Eliminamos el useEffect que disparaba handlePrint automáticamente al cambiar printData
+  // porque ahora lo disparamos manualmente después de setear el estado en handleDespachar
 
   useEffect(() => {
     const controller = new AbortController();
@@ -229,12 +252,10 @@ export default function DespachoPage() {
       const data: SolicitudDetallada = await response.json();
       setSelectedSolicitud(data);
 
-      // Inicializar con las cantidades solicitadas o despachadas
+      // Inicializar con la cantidad pendiente real desde el backend
       const initialItems: Record<number, number> = {};
       data.detalle.forEach(item => {
-        initialItems[item.IdDetalleSolicitud] = data.cabecera.Estado === 'DESPACHADA' 
-          ? (item.CantidadAprobada ?? 0) 
-          : item.CantidadSolicitada;
+        initialItems[item.IdDetalleSolicitud] = item.CantidadPendiente ?? 0;
       });
       setEditedItems(initialItems);
       setObservacionesDespacho('');
@@ -250,8 +271,7 @@ export default function DespachoPage() {
   };
 
   const handleCantidadChange = (idDetalleSolicitud: number, value: string) => {
-    // Asegurar no-negativos aunque el input tenga min=0
-    const parsed = parseInt(value);
+    const parsed = parseFloat(value);
     const numValue = isNaN(parsed) ? 0 : Math.max(0, parsed);
     setEditedItems({
       ...editedItems,
@@ -262,11 +282,15 @@ export default function DespachoPage() {
   const handleDespachar = async (tipo: 'total' | 'parcial') => {
     if (!selectedSolicitud || isDispatching) return;
 
-    // Validar que las cantidades no excedan el stock ni lo solicitado
+    // Validar que las cantidades no excedan el stock ni lo pendiente
     for (const item of selectedSolicitud.detalle) {
       const cantidadADespachar = editedItems[item.IdDetalleSolicitud] || 0;
-      if (cantidadADespachar > item.CantidadSolicitada) {
-        toast.error({ title: "Error", description: `La cantidad a despachar de ${item.Descripcion} no puede exceder lo solicitado`});
+      if (cantidadADespachar <= 0) continue;
+
+      const pendiente = item.CantidadPendiente;
+
+      if (cantidadADespachar > pendiente) {
+        toast.error({ title: "Error", description: `La cantidad de ${item.Descripcion} excede el saldo pendiente (${pendiente})`});
         return;
       }
       if (cantidadADespachar > item.EnStock) {
@@ -282,14 +306,15 @@ export default function DespachoPage() {
           const itemOriginal = selectedSolicitud.detalle.find(d => d.IdDetalleSolicitud === Number(idDetalle));
           if (!itemOriginal || (cantidad ?? 0) <= 0) return null;
           return {
-            idMaterial: itemOriginal.IdMaterial,
+            idDetalleSolicitud: Number(idDetalle),
             cantidadDespachada: cantidad,
           };
         })
-        .filter(Boolean) as Array<{ idMaterial: number; cantidadDespachada: number }>;
+        .filter(Boolean);
 
       if (detalleDespacho.length === 0) {
         toast.error({ title: 'Sin ítems', description: 'Debes ingresar al menos una cantidad a despachar.' });
+        setIsDispatching(false);
         return;
       }
 
@@ -315,41 +340,13 @@ export default function DespachoPage() {
 
       const result: any = await response.json();
 
-      // Preparar datos para impresión usando componente RequisaPrint
-      const fechaDespachoStr = result?.despacho?.FechaDespacho
-        ? new Date(result.despacho.FechaDespacho).toLocaleDateString()
-        : new Date().toLocaleDateString();
-
-      // Requisa: la fuente de verdad es la solicitud (cabecera) y sus datos.
-      // El despacho devuelve alias útiles, pero la requisa debe imprimir lo correspondiente a la solicitud.
-      const codigoCuentaSolicitud =
-        selectedSolicitud.cabecera.CodigoCuenta ||
-        selectedSolicitud.cabecera.CentroCostoCodigo ||
-        selectedSolicitud.cabecera.CodigoCentroCosto ||
-        selectedSolicitud.cabecera.AreaCodigoCuenta ||
-        '';
-
-      setPrintData({
-        CodigoDespacho: result?.despacho?.CodigoDespacho ?? '',
-        FechaDespacho: fechaDespachoStr,
-        CodigoSolicitud: selectedSolicitud.cabecera.CodigoSolicitud,
-        Actividad:
-          (selectedSolicitud.cabecera.AreaNombre || '').split(' - ').pop()?.trim() ||
-          selectedSolicitud.cabecera.AreaNombre,
-        CodigoCuenta: String(codigoCuentaSolicitud),
-        // Backward-compat para plantillas antiguas
-        CodigoCentroCosto: String(codigoCuentaSolicitud),
-        NombreSolicitante: selectedSolicitud.cabecera.NombreSolicitante,
-        Observaciones: observacionesDespacho || null,
-        Detalles: (result?.detalle ?? []).map((d: any) => ({
-          Codigo: d.Codigo,
-          Descripcion: d.Descripcion,
-          UnidadMedida: d.UnidadMedida,
-          CantidadDespachada: d.CantidadDespachada,
-        })),
-      });
-
       toast.success({ title: "Éxito", description: `Despacho ${tipo} registrado exitosamente`});
+      
+      // Descargar el PDF generado por el backend
+      if (result.idDespachoGenerado) {
+        await downloadDespachoPdf(result.idDespachoGenerado);
+      }
+
       // Forzar recarga desde el backend para reflejar estado real (parcial o total)
       try {
         const responsePend = await fetch(`${API_BASE}/api/despachos/pendientes`, {
@@ -399,16 +396,19 @@ export default function DespachoPage() {
 
   const esDespachoCompleto = () => {
     if (!selectedSolicitud) return false;
-    return selectedSolicitud.detalle.every(item => 
-      editedItems[item.IdDetalleSolicitud] === item.CantidadSolicitada
-    );
+    return selectedSolicitud.detalle.every(item => {
+      const pendiente = item.CantidadPendiente;
+      return (editedItems[item.IdDetalleSolicitud] || 0) === pendiente;
+    });
   };
 
   const hayCantidadesPendientes = () => {
     if (!selectedSolicitud) return false;
-    return selectedSolicitud.detalle.some(item => 
-      (editedItems[item.IdDetalleSolicitud] || 0) < item.CantidadSolicitada
-    );
+    return selectedSolicitud.detalle.some(item => {
+      const pendiente = item.CantidadPendiente;
+      const actual = editedItems[item.IdDetalleSolicitud] || 0;
+      return actual < pendiente;
+    });
   };
 
   // Mejora UX: detectar excedentes de stock y despacho vacío
@@ -433,24 +433,27 @@ export default function DespachoPage() {
       cabecera.CodigoCuenta ||
       cabecera.CentroCostoCodigo ||
       cabecera.CodigoCentroCosto ||
-      cabecera.AreaCodigoCuenta ||
       ''
     );
   };
 
   const getItemEstado = (item: ItemSolicitudDetalle) => {
-    const isAprobada = selectedSolicitud?.cabecera.Estado === 'APROBADA';
-    const cantidadADespachar = editedItems[item.IdDetalleSolicitud] || 0;
-    const excedeStock = isAprobada && cantidadADespachar > item.EnStock;
-    const excedeSolicitado = cantidadADespachar > item.CantidadSolicitada;
+    const isDispatchingState = ['APROBADA', 'PARCIALMENTE_DESPACHADA'].includes(selectedSolicitud?.cabecera.Estado || '');
+    const pendiente = item.CantidadPendiente;
+    const actual = editedItems[item.IdDetalleSolicitud] || 0;
+
+    const excedeStock = isDispatchingState && actual > item.EnStock;
+    const excedePendiente = actual > pendiente;
 
     if (excedeStock) return { label: 'Sin stock', tone: 'error' as const };
-    if (excedeSolicitado) return { label: 'Excede', tone: 'error' as const };
-    if (cantidadADespachar === item.CantidadSolicitada && cantidadADespachar > 0)
+    if (excedePendiente) return { label: 'Excede', tone: 'error' as const };
+    if (pendiente === 0) return { label: 'Entregado', tone: 'success' as const };
+    if (actual === pendiente && actual > 0)
       return { label: 'Completo', tone: 'success' as const };
-    if (cantidadADespachar > 0 && cantidadADespachar < item.CantidadSolicitada)
+    if (actual > 0 && actual < pendiente)
       return { label: 'Parcial', tone: 'warning' as const };
-    return { label: 'Sin despacho', tone: 'muted' as const };
+    
+    return { label: 'Pendiente', tone: 'muted' as const };
   };
 
   return (
@@ -592,42 +595,51 @@ export default function DespachoPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Número</TableHead>
-                      <TableHead>Fecha Solicitud</TableHead>
+                      <TableHead>N° Despacho</TableHead>
+                      <TableHead>Fecha Despacho</TableHead>
+                      <TableHead>Solicitud</TableHead>
                       <TableHead>Área</TableHead>
-                      <TableHead>Solicitante</TableHead>
+                      <TableHead>Despachador</TableHead>
                       <TableHead className="text-center">Items</TableHead>
+                      <TableHead className="text-center">Estado</TableHead>
                       <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {loadingHistorial ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                           Cargando historial...
                         </TableCell>
                       </TableRow>
                     ) : historial.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                           No se han encontrado despachos realizados.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      historial.map((solicitud) => (
-                        <TableRow key={solicitud.IdSolicitud}>
-                          <TableCell className="font-medium">{solicitud.CodigoSolicitud}</TableCell>
-                          <TableCell>{new Date(solicitud.FechaSolicitud).toLocaleDateString()}</TableCell>
-                          <TableCell>{solicitud.AreaNombre}</TableCell>
-                          <TableCell>{solicitud.NombreSolicitante}</TableCell>
-                          <TableCell className="text-center">{solicitud.ItemsTotal}</TableCell>
+                      historial.map((despacho) => (
+                        <TableRow key={despacho.IdDespacho}>
+                          <TableCell className="font-medium">DESP-{despacho.IdDespacho}</TableCell>
+                          <TableCell>{new Date(despacho.FechaDespacho).toLocaleString()}</TableCell>
+                          <TableCell>{despacho.CodigoSolicitud}</TableCell>
+                          <TableCell>{despacho.AreaNombre}</TableCell>
+                          <TableCell>{despacho.NombreDespachador}</TableCell>
+                          <TableCell className="text-center">{despacho.ItemsDespachados}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="secondary">{despacho.EstadoDespacho}</Badge>
+                          </TableCell>
                           <TableCell className="text-right">
-                             <Button
+                            <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenDespacho(solicitud)}
+                              className="text-primary hover:text-primary hover:bg-primary/10 transition-colors"
+                              onClick={() => downloadDespachoPdf(despacho.IdDespacho)}
+                              disabled={downloadingPdf === despacho.IdDespacho}
                             >
-                              Ver Detalle
+                              <FileText className="w-4 h-4 mr-2" />
+                              {downloadingPdf === despacho.IdDespacho ? '...' : 'PDF'}
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -654,20 +666,22 @@ export default function DespachoPage() {
           }
         }}
       >
-        <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] max-w-4xl h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[85vh] flex flex-col p-4 sm:p-6">
-          <DialogHeader className="border-b pb-3">
-            <DialogTitle>Registrar Despacho</DialogTitle>
+        <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] max-w-4xl h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[85vh] flex flex-col p-0 sm:p-0 shadow-2xl rounded-3xl animate-fade-in-up">
+          <DialogHeader className="sticky top-0 z-20 bg-gradient-to-b from-slate-50 to-white/90 backdrop-blur border-b border-slate-200 rounded-t-3xl shadow-xl animate-fade-in px-6 pt-6 pb-3">
+            <DialogTitle className="flex items-center gap-3 text-2xl font-extrabold tracking-tight text-slate-900">
+              <Truck className="w-7 h-7 text-primary drop-shadow" /> Registrar Despacho
+            </DialogTitle>
             <DialogDescription className="space-y-0.5 break-words">
               {selectedSolicitud && (
                 <>
-                  <p className="font-medium text-slate-900">
+                  <span className="font-medium text-slate-900">
                     {selectedSolicitud.cabecera.CodigoSolicitud} ·{' '}
                     {(selectedSolicitud.cabecera.AreaNombre || '').split(' - ').pop()?.trim() ||
                       selectedSolicitud.cabecera.AreaNombre}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
+                  </span>
+                  <span className="text-xs text-muted-foreground">
                     Área: {selectedSolicitud.cabecera.AreaNombre}
-                  </p>
+                  </span>
                 </>
               )}
             </DialogDescription>
@@ -680,9 +694,9 @@ export default function DespachoPage() {
           )}
 
           {selectedSolicitud && (
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
+            <div className="flex-1 overflow-y-auto py-6 px-6 space-y-6">
               {/* Información de la solicitud */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl shadow-sm">
                 <div className="space-y-1">
                   <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
                     Solicitante
@@ -720,75 +734,33 @@ export default function DespachoPage() {
               </div>
 
               {/* Split view: lista izquierda + detalle derecha */}
-              <div className="mt-2 flex flex-col gap-4 md:flex-row">
+              <div className="mt-4 flex flex-col gap-6 md:flex-row">
                 {/* Lista de items */}
-                <div className="md:w-5/12 lg:w-4/12">
+                <div className="md:w-5/12 lg:w-4/12 flex flex-col min-h-0">
                   <Label className="mb-2 block text-xs font-semibold tracking-wide uppercase text-slate-600">
                     Materiales
                   </Label>
-                  <div className="mb-2 flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
-                    <Search className="h-4 w-4 text-slate-400" />
-                    <input
-                      type="text"
+                  <div className="relative mb-3">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                    <Input
+                      placeholder="Buscar por código o nombre..."
+                      className="pl-9 h-10 text-xs shadow-sm bg-white"
                       value={itemSearch}
                       onChange={(e) => setItemSearch(e.target.value)}
-                      placeholder="Buscar por código o descripción..."
-                      className="flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400"
                     />
                   </div>
                   <div
-                    className="rounded-xl border border-slate-200 bg-white max-h-64 overflow-y-auto"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (!selectedSolicitud) return;
-                      const detalle = selectedSolicitud.detalle;
-                      const filtered = detalle.filter((item) => {
-                        const term = itemSearch.toLowerCase().trim();
-                        if (!term) return true;
-                        return (
-                          item.Codigo.toLowerCase().includes(term) ||
-                          item.Descripcion.toLowerCase().includes(term)
-                        );
-                      });
-                      const currentIndex = filtered.findIndex(
-                        (d) => d.IdDetalleSolicitud === selectedDetalleId
-                      );
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        const next =
-                          currentIndex === -1
-                            ? 0
-                            : Math.min(currentIndex + 1, filtered.length - 1);
-                        const target = filtered[next];
-                        if (target) setSelectedDetalleId(target.IdDetalleSolicitud);
-                      }
-                      if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        const prev =
-                          currentIndex === -1
-                            ? 0
-                            : Math.max(currentIndex - 1, 0);
-                        const target = filtered[prev];
-                        if (target) setSelectedDetalleId(target.IdDetalleSolicitud);
-                      }
-                    }}
+                    className="rounded-xl border border-slate-200 bg-white flex-1 overflow-y-auto shadow-sm min-h-[300px]"
                   >
                     {selectedSolicitud.detalle
-                      .filter((item) => {
-                        const term = itemSearch.toLowerCase().trim();
-                        if (!term) return true;
-                        return (
-                          item.Codigo.toLowerCase().includes(term) ||
-                          item.Descripcion.toLowerCase().includes(term)
-                        );
-                      })
+                      .filter(item => 
+                        item.Descripcion.toLowerCase().includes(itemSearch.toLowerCase()) ||
+                        item.Codigo.toLowerCase().includes(itemSearch.toLowerCase())
+                      )
                       .map((item) => {
-                        const cantidadADespachar =
-                          editedItems[item.IdDetalleSolicitud] || 0;
+                        const cantidadADespachar = editedItems[item.IdDetalleSolicitud] || 0;
                         const { label, tone } = getItemEstado(item);
-                        const isSelected =
-                          item.IdDetalleSolicitud === selectedDetalleId;
-
+                        const isSelected = item.IdDetalleSolicitud === selectedDetalleId;
                         const toneClasses =
                           tone === 'error'
                             ? 'bg-red-50 text-red-700 border-red-200'
@@ -797,34 +769,33 @@ export default function DespachoPage() {
                             : tone === 'warning'
                             ? 'bg-amber-50 text-amber-800 border-amber-200'
                             : 'bg-slate-50 text-slate-700 border-slate-200';
-
                         return (
                           <button
                             key={item.IdDetalleSolicitud}
                             type="button"
                             onClick={() => setSelectedDetalleId(item.IdDetalleSolicitud)}
-                            className={`flex w-full items-start gap-2 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-slate-50 ${
-                              isSelected ? 'bg-slate-100' : ''
+                            className={`flex w-full items-start gap-3 border-b px-4 py-3 text-left text-xs last:border-b-0 hover:bg-slate-50 transition-colors ${
+                              isSelected ? 'bg-slate-100 ring-1 ring-inset ring-primary/20' : ''
                             }`}
                           >
-                            <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
-                              {item.Codigo}
+                            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-700 border border-slate-200">
+                              {item.Codigo.slice(-3)}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-2">
-                                <p className="truncate text-xs font-semibold text-slate-900">
+                                <p className="truncate text-xs font-bold text-slate-900">
                                   {item.Descripcion}
                                 </p>
                                 <span
-                                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${toneClasses}`}
+                                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${toneClasses}`}
                                 >
                                   {label}
                                 </span>
                               </div>
-                              <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
-                                <span>Sol: {item.CantidadSolicitada}</span>
-                                <span>Stock: {item.EnStock}</span>
-                                <span>Desp: {cantidadADespachar}</span>
+                              <div className="mt-1 flex items-center gap-3 text-[10px] text-slate-500 font-medium">
+                                <span>Aprobado: <span className="text-slate-900">{item.CantidadAprobada}</span></span>
+                                <span>Pendiente: <span className="text-blue-600 font-bold">{item.CantidadPendiente}</span></span>
+                                <span>A Despachar: <span className="text-emerald-600 font-bold">{cantidadADespachar}</span></span>
                               </div>
                             </div>
                           </button>
@@ -852,11 +823,12 @@ export default function DespachoPage() {
                     }
 
                     const isAprobada =
-                      selectedSolicitud.cabecera.Estado === 'APROBADA';
+                      ['APROBADA', 'PARCIALMENTE_DESPACHADA'].includes(selectedSolicitud.cabecera.Estado);
                     const cantidadADespachar =
                       editedItems[current.IdDetalleSolicitud] || 0;
+                    const pendiente = current.CantidadPendiente;
                     const maxPermitido = Math.min(
-                      current.CantidadSolicitada,
+                      pendiente,
                       current.EnStock
                     );
                     const actividad =
@@ -881,152 +853,83 @@ export default function DespachoPage() {
                         : 'bg-slate-50 text-slate-700 border-slate-200';
 
                     return (
-                      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-                              <span>{current.Codigo}</span>
-                              <span className="rounded-full bg-white/10 px-2 text-[10px]">
-                                {current.UnidadMedida || 'U/M'}
-                              </span>
+                      <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        {/* Resumen principal */}
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-100">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1 text-[11px] font-bold text-white shadow-sm ring-1 ring-slate-900/10 uppercase tracking-tight">
+                                    {current.Codigo}
+                                </span>
+                                <span className="rounded-md bg-slate-100 border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600 uppercase">
+                                    {current.UnidadMedida || 'UND'}
+                                </span>
                             </div>
-                            <p className="text-sm font-semibold text-slate-900">
-                              {current.Descripcion}
-                            </p>
+                            <h3 className="text-lg font-extrabold text-slate-900 leading-tight">
+                                {current.Descripcion}
+                            </h3>
                           </div>
-                          <div
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${toneClasses}`}
-                          >
+                          <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-black uppercase tracking-wider ${toneClasses} shadow-sm`}>
+                            {tone === 'success' && <CheckCircle className="w-4 h-4 text-emerald-500" />}
+                            {tone === 'error' && <AlertCircle className="w-4 h-4 text-red-500" />}
+                            {tone === 'warning' && <AlertCircle className="w-4 h-4 text-amber-500" />}
                             {label}
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                          <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                            <div className="text-[11px] font-medium text-slate-500">
-                              Solicitado
+                        {/* Tabla de campos numéricos */}
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                            <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-center">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Aprobado</div>
+                                <div className="text-sm font-black text-slate-900">{current.CantidadAprobada}</div>
                             </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-900">
-                              {current.CantidadSolicitada}
+                            <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-center">
+                                <div className="text-[10px] font-bold text-blue-400 uppercase mb-1">Pendiente</div>
+                                <div className="text-sm font-black text-blue-700">{pendiente}</div>
                             </div>
-                          </div>
-                          <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                            <div className="text-[11px] font-medium text-slate-500">
-                              Stock
+                            <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-center">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Stock</div>
+                                <div className="text-sm font-black text-slate-900">{current.EnStock}</div>
                             </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-900">
-                              {current.EnStock}
+                            <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-center">
+                                <div className="text-[10px] font-bold text-emerald-400 uppercase mb-1">Max Hoy</div>
+                                <div className="text-sm font-black text-emerald-700">{maxPermitido}</div>
                             </div>
-                          </div>
-                          <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                            <div className="text-[11px] font-medium text-slate-500">
-                              Máx. despacho
+                            <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-center col-span-2 sm:col-span-1">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Cuenta</div>
+                                <div className="text-xs font-bold text-slate-900 truncate">{codigoCuenta || '-'}</div>
                             </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-900">
-                              {maxPermitido}
-                            </div>
-                          </div>
-                          <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                            <div className="text-[11px] font-medium text-slate-500">
-                              Código de cuenta
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-900 break-words">
-                              {codigoCuenta || '-'}
-                            </div>
-                          </div>
-                          <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 col-span-2 sm:col-span-4">
-                            <div className="text-[11px] font-medium text-slate-500">
-                              Actividad
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-900 break-words">
-                              {actividad || '-'}
-                            </div>
-                          </div>
                         </div>
 
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                              Cantidad a despachar
-                            </div>
-                            <div className="flex gap-1">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 px-2 text-[11px]"
-                                disabled={!isAprobada}
-                                onClick={() =>
-                                  handleCantidadChange(
-                                    current.IdDetalleSolicitud,
-                                    '0'
-                                  )
-                                }
-                              >
-                                0
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 px-2 text-[11px]"
-                                disabled={!isAprobada}
-                                onClick={() =>
-                                  handleCantidadChange(
-                                    current.IdDetalleSolicitud,
-                                    String(current.CantidadSolicitada)
-                                  )
-                                }
-                              >
-                                = Sol
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 px-2 text-[11px]"
-                                disabled={!isAprobada}
-                                onClick={() =>
-                                  handleCantidadChange(
-                                    current.IdDetalleSolicitud,
-                                    String(maxPermitido)
-                                  )
-                                }
-                              >
-                                Máx
-                              </Button>
-                            </div>
+                        {/* Input grande centrado para cantidad a despachar */}
+                        <div className="flex flex-col items-center justify-center pt-4 group">
+                          <Label className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-3 group-hover:text-primary transition-colors">Cantidad a despachar ahora</Label>
+                          <div className="flex items-center gap-1.5 p-1.5 bg-slate-50 rounded-2xl border border-slate-200 border-b-4 border-b-slate-300">
+                            <Button type="button" variant="ghost" className="h-10 w-10 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl" disabled={!isAprobada} title="Poner en 0" onClick={() => handleCantidadChange(current.IdDetalleSolicitud, '0')}>0</Button>
+                            <Input 
+                                type="number" 
+                                step="any" 
+                                min="0" 
+                                max={maxPermitido} 
+                                value={cantidadADespachar} 
+                                onChange={(e) => handleCantidadChange(current.IdDetalleSolicitud, e.target.value)} 
+                                onBlur={(e) => { 
+                                    const val = parseFloat(e.target.value); 
+                                    const clamped = isNaN(val) ? 0 : Math.max(0, Math.min(maxPermitido, val)); 
+                                    handleCantidadChange(current.IdDetalleSolicitud, clamped.toString()); 
+                                }} 
+                                disabled={!isAprobada} 
+                                className="h-16 w-32 border-0 bg-transparent text-center text-3xl font-black text-primary focus-visible:ring-0 focus-visible:ring-offset-0 transition-all placeholder:text-slate-200" 
+                            />
+                            <Button type="button" variant="outline" className="h-12 px-4 text-[11px] font-black border-2 border-primary/20 text-primary hover:bg-primary hover:text-white rounded-xl shadow-sm transition-all active:scale-95" disabled={!isAprobada} title="Máximo permitido" onClick={() => handleCantidadChange(current.IdDetalleSolicitud, String(maxPermitido))}>MAX</Button>
                           </div>
-                          <Input
-                            type="number"
-                            min="0"
-                            max={maxPermitido}
-                            value={cantidadADespachar}
-                            onChange={(e) =>
-                              handleCantidadChange(
-                                current.IdDetalleSolicitud,
-                                e.target.value
-                              )
-                            }
-                            onBlur={(e) => {
-                              const val = parseInt(e.target.value);
-                              const clamped = isNaN(val)
-                                ? 0
-                                : Math.max(0, Math.min(maxPermitido, val));
-                              handleCantidadChange(
-                                current.IdDetalleSolicitud,
-                                clamped.toString()
-                              );
-                            }}
-                            disabled={!isAprobada}
-                            className="h-12 text-center text-base font-semibold tracking-wide"
-                          />
+                          {pendiente === 0 && (
+                            <div className="mt-3 flex items-center gap-1.5 text-emerald-600">
+                                <CheckCircle className="w-4 h-4" />
+                                <span className="text-[11px] font-bold uppercase">Este item ya fue entregado por completo.</span>
+                            </div>
+                          )}
                         </div>
-
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          Validación automática: no se permite exceder la cantidad
-                          solicitada ni el stock disponible.
-                        </p>
                       </div>
                     );
                   })()}
@@ -1035,92 +938,86 @@ export default function DespachoPage() {
 
               {/* Alertas */}
               {hayExcedeStock() && (
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Hay ítems que exceden el stock disponible. Ajusta las cantidades antes de continuar.
+                <Alert className="border-red-500 bg-red-50 text-red-900 rounded-xl">
+                  <AlertCircle className="h-5 w-5 text-red-500" />
+                  <AlertDescription className="font-bold">
+                    Uno o más materiales exceden el stock disponible. Debes ajustar las cantidades.
                   </AlertDescription>
                 </Alert>
               )}
               {hayCantidadesPendientes() && (
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    {selectedSolicitud.cabecera.Estado === 'APROBADA'
-                      ? "Hay items con cantidades pendientes. Este será un despacho parcial."
-                      : "Esta solicitud fue despachada parcialmente."}
+                <Alert className="border-amber-400 bg-amber-50 text-amber-900 rounded-xl">
+                  <AlertCircle className="h-5 w-5 text-amber-500" />
+                  <AlertDescription className="font-bold">
+                    El despacho actual es parcial. Se generará una entrega pero la solicitud continuará pendiente de saldo.
                   </AlertDescription>
                 </Alert>
               )}
 
               {/* Observaciones */}
-              <div className="space-y-2">
+              <div className="space-y-2 mt-4">
                 <Label
                   htmlFor="observaciones"
                   className="text-xs font-semibold tracking-wide uppercase text-slate-600"
                 >
                   Observaciones del despacho
                 </Label>
-                <div className="border border-slate-200 rounded-xl bg-slate-50 p-1.5">
+                <div className="border border-slate-200 rounded-xl bg-slate-50 p-1.5 shadow-inner transition-all hover:bg-slate-100/50">
                   <Textarea
                     id="observaciones"
-                    placeholder="Ingresa observaciones sobre el despacho (condiciones especiales, retiro, etc.)"
+                    placeholder="Escribe aquí cualquier observación relevante sobre la entrega..."
                     value={observacionesDespacho}
                     onChange={(e) => setObservacionesDespacho(e.target.value)}
                     rows={3}
-                    disabled={selectedSolicitud.cabecera.Estado !== 'APROBADA'}
-                    className="bg-transparent border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none"
+                    disabled={!['APROBADA', 'PARCIALMENTE_DESPACHADA'].includes(selectedSolicitud.cabecera.Estado)}
+                    className="bg-transparent border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none transition-all placeholder:text-slate-400 font-medium text-slate-700"
                   />
                 </div>
               </div>
             </div>
           )}
 
-          <DialogFooter className="mt-4 border-t pt-3 flex-col sm:flex-row gap-2 sm:gap-2">
-            <Button
-              variant="outline"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setSelectedSolicitud(null);
-                setEditedItems({});
-                setObservacionesDespacho('');
-              }}
-              disabled={isDispatching}
-            >
-              {selectedSolicitud?.cabecera.Estado === 'APROBADA' ? 'Cancelar' : 'Cerrar'}
-            </Button>
-            {selectedSolicitud?.cabecera.Estado === 'APROBADA' && hayCantidadesPendientes() && (
-              <Button
-                variant="outline"
-                className="w-full sm:w-auto border-yellow-600 text-yellow-700 hover:bg-yellow-50"
-                onClick={() => handleDespachar('parcial')}
-                disabled={isDispatching || hayDespachoVacio()}
-              >
-                {isDispatching ? (
-                  'Procesando...'
-                ) : (
-                  <>
-                    <Package className="w-4 h-4 mr-2" />
-                    Despacho Parcial
-                  </>
+          <DialogFooter className="mt-6 border-t-2 border-slate-100 pt-5 bg-white rounded-b-3xl px-6 pb-6">
+            {['APROBADA', 'PARCIALMENTE_DESPACHADA'].includes(selectedSolicitud?.cabecera.Estado || '') && (
+              <div className="flex flex-col sm:flex-row gap-3 w-full">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-14 border-2 border-slate-200 text-slate-600 hover:bg-slate-50 font-bold shadow-sm rounded-xl transition-all"
+                  onClick={() => {
+                    setSelectedSolicitud(null);
+                    setEditedItems({});
+                    setObservacionesDespacho('');
+                  }}
+                  disabled={isDispatching}
+                >
+                  Cancelar
+                </Button>
+
+                {hayCantidadesPendientes() && (
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-14 border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 font-black shadow-md flex items-center justify-center gap-2 rounded-xl transition-all active:scale-95"
+                    onClick={() => handleDespachar('parcial')}
+                    disabled={isDispatching || hayDespachoVacio() || hayExcedeStock()}
+                  >
+                    <Package className="w-5 h-5" />
+                    Registrar Despacho Parcial
+                  </Button>
                 )}
-              </Button>
-            )}
-            {selectedSolicitud?.cabecera.Estado === 'APROBADA' && (
-              <Button
-                className="w-full sm:w-auto"
-                onClick={() => handleDespachar('total')}
-                disabled={!esDespachoCompleto() || isDispatching || hayExcedeStock()}
-              >
-                {isDispatching ? (
-                  'Procesando...'
-                ) : (
-                  <>
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Despacho Completo
-                  </>
-                )}
-              </Button>
+
+                <Button
+                  className={`flex-[1.5] h-14 text-white font-black shadow-lg flex items-center justify-center gap-3 text-lg rounded-xl transition-all active:scale-95 ${
+                    esDespachoCompleto() 
+                    ? 'bg-primary hover:bg-primary/90' 
+                    : 'bg-slate-400 cursor-not-allowed opacity-70'
+                  }`}
+                  onClick={() => handleDespachar('total')}
+                  disabled={!esDespachoCompleto() || isDispatching || hayExcedeStock()}
+                >
+                  <CheckCircle className="w-6 h-6" />
+                  Finalizar Despacho Total
+                </Button>
+              </div>
             )}
           </DialogFooter>
         </DialogContent>

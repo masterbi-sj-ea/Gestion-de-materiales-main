@@ -73,7 +73,7 @@ export async function eliminarMaterial(idMaterial: number): Promise<void> {
   await callSpOne('sp_EliminarMaterial', { IdMaterial: idMaterial });
 }
 
-export async function importarMaterialesYStock(datos: MaterialImportRow[]): Promise<void> {
+export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsuario?: number): Promise<void> {
   const pool = await getPool();
   const tvp = new sql.Table();
 
@@ -132,5 +132,8 @@ export async function importarMaterialesYStock(datos: MaterialImportRow[]): Prom
 
   const request = pool.request();
   request.input('Datos', tvp as any);
+  if (idUsuario) {
+    request.input('IdUsuario', sql.Int, idUsuario);
+  }
   await request.execute('sp_ImportarMaterialesYStock');
 }

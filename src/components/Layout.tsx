@@ -17,7 +17,8 @@ import {
   Menu,
   X,
   ChevronDown,
-  Shield
+  Shield,
+  Activity
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -40,6 +41,7 @@ const iconMap: Record<string, React.ReactNode> = {
   FileBarChart: <FileBarChart className="w-5 h-5" />,
   Users: <Users className="w-5 h-5" />,
   Shield: <Shield className="w-5 h-5" />,
+  Activity: <Activity className="w-5 h-5" />,
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {

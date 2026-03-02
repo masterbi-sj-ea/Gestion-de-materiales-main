@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import Fuse from 'fuse.js';
 
 interface MaterialOption {
   idMaterial: number;
@@ -36,15 +37,29 @@ export const BuscarMaterial: React.FC<BuscarMaterialProps> = ({ materiales, valu
     }
   }, [value, materiales]);
 
-  // Filtrado profesional, por nombre o número de artículo
+  // Filtrado profesional con búsqueda difusa (Fuzzy Search)
+  const fuse = useMemo(() => {
+    return new Fuse(materiales, {
+      keys: ['numeroArticulo', 'descripcionArticulo'],
+      threshold: 0.35,
+      distance: 100,
+      minMatchCharLength: 1
+    });
+  }, [materiales]);
+
   const resultados = useMemo(() => {
-    if (!inputValue) return materiales;
-    return materiales.filter(
-      (mat) =>
-        mat.descripcionArticulo.toLowerCase().includes(inputValue.toLowerCase()) ||
-        mat.numeroArticulo.toLowerCase().includes(inputValue.toLowerCase())
+    if (!inputValue || inputValue === (materiales.find(m => String(m.idMaterial) === value)?.descripcionArticulo || "")) {
+      return materiales.slice(0, 50); // Mostrar top 50 por defecto
+    }
+    
+    // Si parece una selección exacta, no filtramos agresivamente
+    const match = materiales.find(m => 
+      `${m.numeroArticulo} - ${m.descripcionArticulo}` === inputValue
     );
-  }, [inputValue, materiales]);
+    if (match) return materiales.slice(0, 50);
+
+    return fuse.search(inputValue).map(result => result.item);
+  }, [inputValue, materiales, fuse, value]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(e.target.value);

@@ -4,7 +4,8 @@ import {
   listarDespachadasController,
   obtenerDetalleController, 
   registrarDespachoController,
-  contarDespachosHoyController 
+  contarDespachosHoyController,
+  generarPdfController
 } from './despachos.controller';
 
 const router = Router();
@@ -14,5 +15,6 @@ router.get('/historial', listarDespachadasController);
 router.get('/pendientes/:id', obtenerDetalleController);
 router.post('/', registrarDespachoController);
 router.get('/metrics/hoy', contarDespachosHoyController);
+router.get('/:id/pdf', generarPdfController);
 
 export default router;

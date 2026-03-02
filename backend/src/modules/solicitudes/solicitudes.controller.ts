@@ -9,6 +9,7 @@ import {
   listarAprobacionesPorSolicitud,
   actualizarEstadoSolicitud,
   registrarDespachoSolicitud,
+  generarPdfSolicitud,
 } from './solicitudes.service';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
 
@@ -25,12 +26,19 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
     comentario,
     idCorteStock,
     idArea,
+    idRecurso,
     idCentroCosto,
     detalle,
   } = req.body || {};
 
   if (!Array.isArray(detalle) || !detalle.length) {
     return res.status(400).json({ message: 'La solicitud debe tener al menos una línea de detalle' });
+  }
+
+  // Multi-área real: cada línea debe traer su IdArea.
+  // Si necesitas compatibilidad hacia atrás, cambia esta validación a un fallback.
+  if (detalle.some((d: any) => d?.idArea == null)) {
+    return res.status(400).json({ message: 'Cada línea debe tener un Área destino (idArea).' });
   }
 
   try {
@@ -42,12 +50,15 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
       comentario: comentario ?? null,
       idCorteStock: idCorteStock ?? null,
       idArea: idArea ?? null,
+      idRecurso: idRecurso ?? null,
       idCentroCosto: idCentroCosto ?? null,
       detalle: detalle.map((d: any) => ({
         idMaterial: d.idMaterial,
         cantidadSolicitada: d.cantidadSolicitada,
         unidadMedida: d.unidadMedida,
         comentarioLinea: d.comentarioLinea,
+        idArea: d.idArea ?? null,
+        idRecurso: d.idRecurso ?? null,
       })),
     });
 
@@ -120,6 +131,7 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
     fechaSolicitud,
     comentario,
     idArea,
+    idRecurso,
     idCentroCosto,
     detalle,
     nuevoEstado,
@@ -129,6 +141,10 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
     return res.status(400).json({ message: 'La solicitud debe tener al menos una línea de detalle' });
   }
 
+  if (detalle.some((d: any) => d?.idArea == null)) {
+    return res.status(400).json({ message: 'Cada línea debe tener un Área destino (idArea).' });
+  }
+
   try {
     await actualizarSolicitud({
       idSolicitud,
@@ -136,6 +152,7 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
       nuevoEstado: nuevoEstado ?? 'PENDIENTE',
       comentario: comentario ?? null,
       idArea: idArea ?? null,
+      idRecurso: idRecurso ?? null,
       idCentroCosto: idCentroCosto ?? null,
       area: null,
       detalle: detalle.map((d: any) => ({
@@ -143,6 +160,8 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
         cantidadSolicitada: d.cantidadSolicitada,
         unidadMedida: d.unidadMedida,
         comentarioLinea: d.comentarioLinea,
+        idArea: d.idArea ?? null,
+        idRecurso: d.idRecurso ?? null,
       })),
     });
 
@@ -294,5 +313,20 @@ export async function registrarDespachoSolicitudController(req: AuthRequest, res
   } catch (error: any) {
     console.error('Error en registrarDespachoSolicitudController', error);
     return res.status(500).json({ message: 'Error al registrar despacho de solicitud' });
+  }
+}
+
+export async function generarPdfSolicitudController(req: AuthRequest, res: Response) {
+  try {
+    const { id } = req.params;
+    const stream = await generarPdfSolicitud(Number(id));
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Solicitud-${id}.pdf`);
+
+    stream.pipe(res);
+  } catch (error: any) {
+    console.error('Error al generar PDF de solicitud:', error);
+    return res.status(500).json({ message: error.message || 'Error al generar PDF' });
   }
 }
