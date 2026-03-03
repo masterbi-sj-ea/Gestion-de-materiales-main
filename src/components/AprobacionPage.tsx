@@ -164,19 +164,22 @@ export default function AprobacionPage() {
     setComentario('');
   };
 
+  const formatDate = (iso: string) => new Date(String(iso).replace('Z', '')).toLocaleDateString();
+  const formatCurrency = (value: number) => `$${Number(value || 0).toLocaleString()}`;
+
   const renderTable = (solicitudes: Solicitud[], showActions: boolean = false) => (
-    <div className="border rounded-lg overflow-hidden">
+    <div className="rounded-lg border bg-card">
       <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Número</TableHead>
-            <TableHead>Fecha</TableHead>
-            <TableHead>Área</TableHead>
-            <TableHead>Solicitante</TableHead>
-            <TableHead className="text-center">Items</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead>Estado Presup.</TableHead>
-            {showActions && <TableHead className="text-right">Acciones</TableHead>}
+        <TableHeader className="bg-muted/30">
+          <TableRow className="hover:bg-muted/30">
+            <TableHead className="text-xs font-semibold text-muted-foreground">Número</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground">Fecha</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground">Área</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground">Solicitante</TableHead>
+            <TableHead className="text-center text-xs font-semibold text-muted-foreground">Items</TableHead>
+            <TableHead className="text-right text-xs font-semibold text-muted-foreground">Total</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground">Estado Presup.</TableHead>
+            {showActions && <TableHead className="text-right text-xs font-semibold text-muted-foreground">Acciones</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -188,30 +191,30 @@ export default function AprobacionPage() {
             </TableRow>
           ) : (
             solicitudes.map((solicitud) => {
-              const disponible = solicitud.presupuestoArea - solicitud.consumoAcumulado;
-              const saldoDespues = disponible - solicitud.total;
               const tienePresupuesto = solicitud.presupuestoArea > 0;
-              
+
               return (
                 <TableRow key={solicitud.id}>
-                  <TableCell className="font-medium">{solicitud.numero}</TableCell>
-                  <TableCell>{new Date(solicitud.fecha.replace('Z', '')).toLocaleDateString()}</TableCell>
-                  <TableCell>{solicitud.area}</TableCell>
-                  <TableCell>{solicitud.solicitante}</TableCell>
-                  <TableCell className="text-center">{solicitud.items}</TableCell>
-                  <TableCell className="text-right">${solicitud.total.toLocaleString()}</TableCell>
+                  <TableCell className="font-medium tabular-nums">{solicitud.numero}</TableCell>
+                  <TableCell className="tabular-nums">{formatDate(solicitud.fecha)}</TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={solicitud.area}>
+                    {solicitud.area}
+                  </TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={solicitud.solicitante}>
+                    {solicitud.solicitante}
+                  </TableCell>
+                  <TableCell className="text-center tabular-nums">{solicitud.items}</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">{formatCurrency(solicitud.total)}</TableCell>
                   <TableCell>
                     {!tienePresupuesto ? (
-                      <Badge variant="outline" className="gap-1">
-                        N/D
-                      </Badge>
+                      <Badge variant="outline">N/D</Badge>
                     ) : solicitud.excedePresupuesto ? (
-                      <Badge variant="destructive" className="gap-1">
+                      <Badge variant="destructive">
                         <AlertCircle className="w-3 h-3" />
                         Excede
                       </Badge>
                     ) : (
-                      <Badge variant="secondary" className="gap-1">
+                      <Badge variant="secondary">
                         <CheckCircle className="w-3 h-3" />
                         OK
                       </Badge>
@@ -219,26 +222,32 @@ export default function AprobacionPage() {
                   </TableCell>
                   {showActions && (
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-1">
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
+                          aria-label="Ver detalle"
+                          title="Ver detalle"
                           onClick={() => handleOpenModal(solicitud, 'ver')}
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
-                          className="text-green-600 hover:text-green-700"
+                          className="text-primary hover:text-primary"
+                          aria-label="Aprobar"
+                          title="Aprobar"
                           onClick={() => handleOpenModal(solicitud, 'aprobar')}
                         >
                           <CheckCircle className="w-4 h-4" />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
-                          className="text-red-600 hover:text-red-700"
+                          className="text-destructive hover:text-destructive"
+                          aria-label="Rechazar"
+                          title="Rechazar"
                           onClick={() => handleOpenModal(solicitud, 'rechazar')}
                         >
                           <XCircle className="w-4 h-4" />
@@ -278,7 +287,7 @@ export default function AprobacionPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Pendientes</CardTitle>
-            <Clock className="w-4 h-4 text-yellow-600" />
+            <Clock className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl">{pendientes.length}</div>
@@ -291,7 +300,7 @@ export default function AprobacionPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Aprobadas Hoy</CardTitle>
-            <CheckCircle className="w-4 h-4 text-green-600" />
+            <CheckCircle className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl">{aprobadasHoy.length}</div>
@@ -304,7 +313,7 @@ export default function AprobacionPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Rechazadas</CardTitle>
-            <XCircle className="w-4 h-4 text-red-600" />
+            <XCircle className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl">{rechazadas.length}</div>
@@ -389,7 +398,13 @@ export default function AprobacionPage() {
               </div>
 
               {/* Análisis presupuestario */}
-              <Card className={selectedSolicitud.excedePresupuesto ? 'border-red-300 bg-red-50' : 'border-blue-300 bg-blue-50'}>
+              <Card
+                className={
+                  selectedSolicitud.excedePresupuesto
+                    ? 'border-destructive/30 bg-destructive/5'
+                    : 'border-primary/30 bg-primary/5'
+                }
+              >
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
                     <DollarSign className="w-4 h-4" />
@@ -407,13 +422,13 @@ export default function AprobacionPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm">Disponible actual:</span>
-                    <span className="font-medium text-green-600">
+                    <span className="font-medium text-primary">
                       ${(selectedSolicitud.presupuestoArea - selectedSolicitud.consumoAcumulado).toLocaleString()}
                     </span>
                   </div>
                   <div className="flex justify-between pt-2 border-t">
                     <span className="text-sm">Saldo después de aprobación:</span>
-                    <span className={`font-medium ${selectedSolicitud.excedePresupuesto ? 'text-red-600' : 'text-blue-600'}`}>
+                    <span className={`font-medium ${selectedSolicitud.excedePresupuesto ? 'text-destructive' : 'text-primary'}`}>
                       ${(selectedSolicitud.presupuestoArea - selectedSolicitud.consumoAcumulado - selectedSolicitud.total).toLocaleString()}
                     </span>
                   </div>
@@ -430,7 +445,7 @@ export default function AprobacionPage() {
 
               {/* Items de la solicitud */}
               <div className="border rounded-md overflow-hidden">
-                <div className="bg-slate-100 p-2 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <div className="bg-muted p-2 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Materiales solicitados
                 </div>
                 <div className="max-h-60 overflow-y-auto">
@@ -523,7 +538,7 @@ export default function AprobacionPage() {
             {modalAction !== 'ver' && (
               <Button
                 onClick={handleConfirmarAccion}
-                className={modalAction === 'rechazar' ? 'bg-red-600 hover:bg-red-700' : ''}
+                variant={modalAction === 'rechazar' ? 'destructive' : 'default'}
               >
                 {modalAction === 'aprobar' ? (
                   <>

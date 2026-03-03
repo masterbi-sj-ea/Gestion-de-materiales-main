@@ -1,0 +1,72 @@
+node_modules/@tanstack/query-core/build/legacy/focusManager.d.ts(6,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(9,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(115,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(156,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(205,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(266,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(427,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/hydration-BlEVG2Lp.d.ts(444,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/onlineManager.d.ts(6,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/queriesObserver.d.ts(11,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/removable.d.ts(2,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@tanstack/query-core/build/legacy/timeoutManager.d.ts(41,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/react-router-dom/dist/index.d.ts(1,69): error TS2307: Cannot find module 'react-router/dom' or its corresponding type declarations.
+  There are types at 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/node_modules/react-router/dist/development/dom-export.d.mts', but this result could not be resolved under your current 'moduleResolution' setting. Consider updating to 'node16', 'nodenext', or 'bundler'.
+node_modules/react-router/dist/development/index.d.ts(4,8): error TS1259: Module '"C:/Users/drivas/Desktop/Gestion-de-materiales-main1/node_modules/@types/react/index"' can only be default-imported using the 'esModuleInterop' flag
+node_modules/react-router/dist/development/instrumentation-Unc20tLk.d.ts(364,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+src/components/CrearSolicitudPage.tsx(2,25): error TS6142: Module '../hooks/useAuth' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/hooks/useAuth.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(6,58): error TS6142: Module './ui/card' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/card.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(7,24): error TS6142: Module './ui/button' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/button.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(8,23): error TS6142: Module './ui/input' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/input.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(9,23): error TS6142: Module './ui/label' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/label.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(10,26): error TS6142: Module './ui/textarea' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/textarea.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(11,79): error TS6142: Module './ui/select' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/select.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(12,23): error TS6142: Module './ui/badge' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/badge.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(13,35): error TS6142: Module './solicitudes/features/FormularioDestino' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/solicitudes/features/FormularioDestino.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(14,39): error TS6142: Module './solicitudes/features/TablaDetalleSolicitud' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/solicitudes/features/TablaDetalleSolicitud.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(15,43): error TS6142: Module './solicitudes/features/FormularioAgregarMaterial' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/solicitudes/features/FormularioAgregarMaterial.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(17,41): error TS6142: Module './ui/alert' was resolved to 'C:/Users/drivas/Desktop/Gestion-de-materiales-main1/src/components/ui/alert.tsx', but '--jsx' is not set.
+src/components/CrearSolicitudPage.tsx(367,5): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(369,7): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(370,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(371,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(372,11): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(374,13): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(375,15): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(378,15): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(379,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(380,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(381,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(382,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(383,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(390,23): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(400,13): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(401,15): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(402,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(403,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(404,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(406,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(407,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(408,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(415,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(416,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(417,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(428,13): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(429,15): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(430,15): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(437,7): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(448,7): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(464,7): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(477,7): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(478,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(479,11): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(481,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(482,11): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(492,7): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(493,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(496,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(497,11): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(500,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/CrearSolicitudPage.tsx(501,11): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/services/apiClient.ts(3,19): error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+src/services/apiClient.ts(3,31): error TS2339: Property 'env' does not exist on type 'ImportMeta'.

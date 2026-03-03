@@ -620,6 +620,25 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
     const xAct = xCant + wCant;
     const xCCO = xAct + wAct;
 
+    const drawCellText = (
+      text: any,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      align: 'left' | 'center' | 'right' = 'left',
+      padY: number = 3,
+    ) => {
+      const value = text == null ? '' : String(text);
+      doc.text(value, x, y + padY, {
+        width: w,
+        height: Math.max(0, h - (padY * 2)),
+        align,
+        lineBreak: true,
+        ellipsis: true,
+      });
+    };
+
     fillStrokeBox(left, tableY, contentW, headerH);
     doc.font("Helvetica").fontSize(9).fillColor("#000");
     doc.text("CODIGO", xCodigo, tableY + 6, { width: wCodigo, align: "center" });
@@ -627,7 +646,9 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
     doc.text("U/MEDIDA", xUM, tableY + 6, { width: wUM, align: "center" });
     doc.text("CANTIDAD", xCant, tableY + 6, { width: wCant, align: "center" });
     doc.text("ACTIVIDAD", xAct, tableY + 6, { width: wAct, align: "center" });
-    doc.text("CODIGO DE CUENTA", xCCO, tableY + 6, { width: wCCO, align: "center" });
+    doc.fontSize(7);
+    drawCellText("CODIGO DE CUENTA", xCCO, tableY, wCCO, headerH, "center", 2);
+    doc.fontSize(9);
 
     const rowsLimit = 10;
     const tableH = headerH + (rowsLimit * rowHTable);
@@ -666,7 +687,9 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
         const actividadText = String(cab?.AreaNombre || "").split(' - ').pop() || "";
         doc.text(actividadText, xAct + 2, rowTextY - 1, { width: wAct - 4, align: "center", lineGap: -2 });
         
-        doc.text(String(itemCco), xCCO + 2, rowTextY, { width: wCCO - 4, align: "center" });
+        doc.fontSize(7);
+        drawCellText(String(itemCco), xCCO + 2, y, wCCO - 4, rowHTable, "center", 3);
+        doc.fontSize(9);
       }
     }
 

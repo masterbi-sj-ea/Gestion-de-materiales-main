@@ -472,6 +472,53 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     const rowHTable = 20;
     const rowsLimit = 10;
 
+    const cellPadY = 3;
+    const cellH = rowHTable - (cellPadY * 2);
+    const baseFontSize = 8;
+    const minFontSize = 6;
+    const drawCellTextFit = (
+      text: any,
+      x: number,
+      y: number,
+      w: number,
+      align: 'left' | 'center' | 'right' = 'left',
+      fit: boolean = false,
+      baseSizeOverride?: number,
+      minSizeOverride?: number,
+    ) => {
+      const value = text == null ? '' : String(text);
+      const measureOpts = { width: w, lineBreak: true } as const;
+
+      const localBase = baseSizeOverride ?? baseFontSize;
+      const localMin = minSizeOverride ?? minFontSize;
+
+      let fontSize = localBase;
+      if (fit && value) {
+        for (let fs = localBase; fs >= localMin; fs -= 1) {
+          doc.fontSize(fs);
+          const h = doc.heightOfString(value, measureOpts as any);
+          if (h <= cellH) {
+            fontSize = fs;
+            break;
+          }
+          fontSize = fs;
+        }
+      }
+
+      doc.fontSize(fontSize);
+      const fits = !value ? true : doc.heightOfString(value, measureOpts as any) <= cellH;
+
+      doc.text(value, x, y + cellPadY, {
+        width: w,
+        height: cellH,
+        align,
+        lineBreak: true,
+        ellipsis: !fits,
+      });
+
+      doc.fontSize(baseFontSize);
+    };
+
     const wCodigo = 60;
     const wDesc = 200;
     const wUM = 50;
@@ -485,7 +532,8 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     doc.text("U/MEDIDA", left + wCodigo + wDesc, tableY + 6, { width: wUM, align: 'center' });
     doc.text("CANTIDAD", left + wCodigo + wDesc + wUM, tableY + 6, { width: wCant, align: 'center' });
     doc.text("ACTIVIDAD", left + wCodigo + wDesc + wUM + wCant, tableY + 6, { width: wAct, align: 'center' });
-    doc.text("CODIGO DE CUENTA", left + wCodigo + wDesc + wUM + wCant + wAct, tableY + 6, { width: wCCO, align: 'center' });
+    doc.fontSize(7).text("CODIGO DE CUENTA", left + wCodigo + wDesc + wUM + wCant + wAct, tableY + 6, { width: wCCO, align: 'center' });
+    doc.fontSize(8);
 
     for (let i = 0; i <= rowsLimit; i++) {
       const y = tableY + headerH + (i * rowHTable);
@@ -494,12 +542,13 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
         const it = detalle[i];
         if (it) {
           doc.font("Helvetica").fontSize(8);
-          doc.text(it.Codigo, left, y + 6, { width: wCodigo, align: 'center' });
-          doc.text(it.Descripcion, left + wCodigo + 5, y + 6, { width: wDesc - 10 });
-          doc.text(it.UnidadMedida, left + wCodigo + wDesc, y + 6, { width: wUM, align: 'center' });
-          doc.text(String(it.CantidadSolicitada), left + wCodigo + wDesc + wUM, y + 6, { width: wCant, align: 'center' });
-          doc.text(it.Actividad || cab.AreaNombre || '', left + wCodigo + wDesc + wUM + wCant, y + 6, { width: wAct, align: 'center' });
-          doc.text(it.CodigoCuenta || cab.CodigoCC || '', left + wCodigo + wDesc + wUM + wCant + wAct, y + 6, { width: wCCO, align: 'center' });
+
+          drawCellTextFit(it.Codigo, left, y, wCodigo, 'center');
+          drawCellTextFit(it.Descripcion, left + wCodigo + 5, y, wDesc - 10, 'left', true);
+          drawCellTextFit(it.UnidadMedida, left + wCodigo + wDesc, y, wUM, 'center');
+          drawCellTextFit(String(it.CantidadSolicitada), left + wCodigo + wDesc + wUM, y, wCant, 'center');
+          drawCellTextFit(it.Actividad || cab.AreaNombre || '', left + wCodigo + wDesc + wUM + wCant, y, wAct, 'center', true);
+          drawCellTextFit(it.CodigoCuenta || cab.CodigoCC || '', left + wCodigo + wDesc + wUM + wCant + wAct, y, wCCO, 'center', true, 7, 6);
         }
       }
     }

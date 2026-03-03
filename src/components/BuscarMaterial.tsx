@@ -17,7 +17,7 @@ interface BuscarMaterialProps {
   disabled?: boolean;
 }
 
-export const BuscarMaterial: React.FC<BuscarMaterialProps> = ({ materiales, value, onChange, disabled }) => {
+export const BuscarMaterial = React.forwardRef<HTMLInputElement, BuscarMaterialProps>(({ materiales, value, onChange, disabled }, ref) => {
   const [inputValue, setInputValue] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
 
@@ -75,6 +75,7 @@ export const BuscarMaterial: React.FC<BuscarMaterialProps> = ({ materiales, valu
   return (
     <div style={{ position: "relative" }}>
       <Input
+        ref={ref}
         value={inputValue}
         onChange={handleInputChange}
         placeholder="Seleccionar material..."
@@ -125,4 +126,6 @@ export const BuscarMaterial: React.FC<BuscarMaterialProps> = ({ materiales, valu
       )}
     </div>
   );
-};
+});
+
+BuscarMaterial.displayName = "BuscarMaterial";
