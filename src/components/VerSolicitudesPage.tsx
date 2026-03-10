@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { API_BASE_URL } from '../services/apiConfig';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -161,7 +162,7 @@ export default function VerSolicitudesPage() {
           params.set('estado', estadoBackend);
         }
 
-        const response = await fetch(`http://localhost:4000/api/solicitudes?${params.toString()}`, {
+        const response = await fetch(`${API_BASE_URL}/solicitudes?${params.toString()}`, {
           method: 'GET',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -229,7 +230,7 @@ export default function VerSolicitudesPage() {
     setAprobacionesError(null);
     setAprobacionesLoading(true);
 
-    fetch(`http://localhost:4000/api/solicitudes/${solicitud.id}`, {
+    fetch(`${API_BASE_URL}/solicitudes/${solicitud.id}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -250,7 +251,7 @@ export default function VerSolicitudesPage() {
         setDetalleLoading(false);
       });
 
-    fetch(`http://localhost:4000/api/solicitudes/${solicitud.id}/aprobaciones`, {
+    fetch(`${API_BASE_URL}/solicitudes/${solicitud.id}/aprobaciones`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -279,15 +280,15 @@ export default function VerSolicitudesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1>Mis Solicitudes</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl font-bold">Mis Solicitudes</h1>
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">
             Historial y seguimiento de solicitudes
           </p>
         </div>
         {user?.role === 'solicitante' && (
-          <Button onClick={() => navigate('/solicitudes/crear')}>
+          <Button onClick={() => navigate('/solicitudes/crear')} className="w-full lg:w-auto">
             <FileText className="w-4 h-4 mr-2" />
             Nueva Solicitud
           </Button>
@@ -300,18 +301,18 @@ export default function VerSolicitudesPage() {
           <CardTitle>Filtros</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-4 md:flex-row">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar por número o área..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
+                className="pl-9 w-full"
               />
             </div>
             <Select value={selectedEstado} onValueChange={setSelectedEstado}>
-              <SelectTrigger className="w-full md:w-[200px]">
+              <SelectTrigger className="w-full sm:w-[200px]">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
@@ -342,19 +343,19 @@ export default function VerSolicitudesPage() {
               {error}
             </div>
           )}
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Número</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Cuenta</TableHead>
-                  <TableHead>Área</TableHead>
-                  <TableHead>Solicitante</TableHead>
-                  <TableHead className="text-center">Items</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
+                  <TableHead className="min-w-[120px]">Número</TableHead>
+                  <TableHead className="min-w-[100px]">Fecha</TableHead>
+                  <TableHead className="min-w-[120px]">Cuenta</TableHead>
+                  <TableHead className="min-w-[150px]">Área</TableHead>
+                  <TableHead className="min-w-[150px]">Solicitante</TableHead>
+                  <TableHead className="text-center min-w-[80px]">Items</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Total</TableHead>
+                  <TableHead className="min-w-[150px]">Estado</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

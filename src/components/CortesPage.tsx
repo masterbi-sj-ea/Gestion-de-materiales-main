@@ -17,6 +17,7 @@ import {
 } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Plus, Calendar, FileText, Edit, Trash2 } from 'lucide-react';
+import { API_BASE_URL } from '../services/apiConfig';
 
 interface CorteStock {
   id: number;
@@ -47,7 +48,7 @@ export default function CortesPage() {
     if (!token) return;
 
     try {
-      const resp = await fetch('http://localhost:4000/api/cortes', {
+      const resp = await fetch(`${API_BASE_URL}/cortes`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -88,8 +89,8 @@ export default function CortesPage() {
     try {
       const isEdit = !!editingCorte;
       const url = isEdit
-        ? `http://localhost:4000/api/cortes/${editingCorte!.id}`
-        : 'http://localhost:4000/api/cortes';
+        ? `${API_BASE_URL}/cortes/${editingCorte!.id}`
+        : `${API_BASE_URL}/cortes`;
       const method = isEdit ? 'PUT' : 'POST';
 
       const resp = await fetch(url, {
@@ -166,7 +167,7 @@ export default function CortesPage() {
     if (!confirmar) return;
 
     try {
-      const resp = await fetch(`http://localhost:4000/api/cortes/${corte.id}`, {
+      const resp = await fetch(`${API_BASE_URL}/cortes/${corte.id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,

@@ -59,18 +59,18 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
           </div>
         ) : (
           <>
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Grupo</TableHead>
-                    <TableHead>N° Artículo</TableHead>
-                    <TableHead>Descripción</TableHead>
-                    <TableHead>Área Destino</TableHead>
-                    <TableHead>Unidad</TableHead>
-                    <TableHead className="text-right">Stock</TableHead>
-                    <TableHead className="text-right">Cantidad</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
+                    <TableHead className="min-w-[100px]">Grupo</TableHead>
+                    <TableHead className="min-w-[100px]">N° Artículo</TableHead>
+                    <TableHead className="min-w-[200px]">Descripción</TableHead>
+                    <TableHead className="min-w-[150px]">Área Destino</TableHead>
+                    <TableHead className="min-w-[80px]">Unidad</TableHead>
+                    <TableHead className="text-right min-w-[80px]">Stock</TableHead>
+                    <TableHead className="text-right min-w-[120px]">Cantidad</TableHead>
+                    <TableHead className="text-right min-w-[100px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

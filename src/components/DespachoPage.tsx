@@ -22,8 +22,10 @@ import { useReactToPrint } from 'react-to-print'; // Importar hook para imprimir
 import { RequisaPrint } from './prints/RequisaPrint'; // Importar componente de impresión
 import { useRef } from 'react'; // Importar useRef
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'; // Importar Tabs
-// Base de API configurable vía Vite
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+import { API_ORIGIN } from '../services/apiConfig';
+
+// Base del backend (sin /api)
+const API_BASE = API_ORIGIN;
 
 // Interfaces actualizadas para coincidir con el backend
 interface ItemSolicitudDetalle {
@@ -145,8 +147,38 @@ export default function DespachoPage() {
   const [loadingDespachosHoy, setLoadingDespachosHoy] = useState<boolean>(false);
   const [selectedDetalleId, setSelectedDetalleId] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState<string>('');
+  const [scannerMode, setScannerMode] = useState(true);
 
   const printComponentRef = useRef<HTMLDivElement>(null);
+
+  const handleScannerInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && selectedSolicitud) {
+      const barcode = itemSearch.trim();
+      if (!barcode) return;
+
+      const item = selectedSolicitud.detalle.find(
+        d => d.Codigo.toLowerCase() === barcode.toLowerCase()
+      );
+
+      if (item) {
+        const currentQty = editedItems[item.IdDetalleSolicitud] || 0;
+        const newQty = Math.min(currentQty + 1, item.CantidadPendiente, item.EnStock);
+        
+        if (newQty > currentQty) {
+          handleCantidadChange(item.IdDetalleSolicitud, newQty.toString());
+          toast.success({ title: "Material Identificado", description: `${item.Descripcion} (+1)` });
+        } else {
+          toast.warning({ 
+            title: "Límite alcanzado", 
+            description: `No se puede despachar más de ${item.Descripcion} (Pendiente: ${item.CantidadPendiente}, Stock: ${item.EnStock})` 
+          });
+        }
+      } else {
+        toast.error({ title: "Error de Escaneo", description: "El material no pertenece a esta solicitud." });
+      }
+      setItemSearch('');
+    }
+  };
 
   const handlePrint = useReactToPrint({
     contentRef: printComponentRef,
@@ -333,18 +365,29 @@ export default function DespachoPage() {
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Error al registrar el despacho');
-      }
-
       const result: any = await response.json();
 
-      toast.success({ title: "Éxito", description: `Despacho ${tipo} registrado exitosamente`});
+      if (!response.ok) {
+        // Manejo de errores específicos del SP (THROW 50004, 50010, etc)
+        const errorMessage = result.message || 'Error al registrar el despacho';
+        
+        if (errorMessage.includes('Stock insuficiente')) {
+          toast.error({ title: "Error de Inventario", description: "No hay stock suficiente para completar esta acción." });
+        } else if (errorMessage.includes('CódigoCuenta')) {
+          toast.error({ title: "Configuración Contable", description: "Falta configurar la cuenta para esta área en la base de datos." });
+        } else {
+          toast.error({ title: "Error del Servidor", description: errorMessage });
+        }
+        setIsDispatching(false);
+        return;
+      }
+
+      toast.success({ title: "Despacho Registrado", description: `Requisa generada correctamente.`});
       
       // Descargar el PDF generado por el backend
-      if (result.idDespachoGenerado) {
-        await downloadDespachoPdf(result.idDespachoGenerado);
+      if (result.IdDespachoGenerado || result.idDespachoGenerado) {
+        const idDesp = result.IdDespachoGenerado || result.idDespachoGenerado;
+        await downloadDespachoPdf(idDesp);
       }
 
       // Forzar recarga desde el backend para reflejar estado real (parcial o total)
@@ -695,6 +738,48 @@ export default function DespachoPage() {
 
           {selectedSolicitud && (
             <div className="flex-1 overflow-y-auto py-6 px-6 space-y-6">
+              {/* Modo de entrada: Manual vs Scanner */}
+              <div className="flex items-center justify-between p-4 bg-primary/5 border border-primary/20 rounded-2xl shadow-sm animate-in fade-in slide-in-from-top-4 duration-500">
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-xl transition-colors duration-300 ${scannerMode ? 'bg-primary text-white shadow-lg ring-4 ring-primary/20' : 'bg-slate-200 text-slate-500'}`}>
+                    <Search className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 leading-tight">Entrada de Materiales</h4>
+                    <p className="text-xs text-slate-500 font-medium">Búsqueda rápida o escaneo de código</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <div className="relative group">
+                    <Input
+                      autoFocus
+                      placeholder={scannerMode ? "Escaneo de código..." : "Buscar material..."}
+                      value={itemSearch}
+                      onChange={(e) => setItemSearch(e.target.value)}
+                      onKeyDown={handleScannerInput}
+                      className="w-48 sm:w-64 bg-white border-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-all duration-300 rounded-xl font-medium placeholder:text-slate-400"
+                    />
+                    {scannerMode && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
+                        <span className="w-1.5 h-4 bg-primary/20 rounded-full animate-pulse" />
+                        <span className="w-1.5 h-4 bg-primary/40 rounded-full animate-pulse delay-75" />
+                        <span className="w-1.5 h-4 bg-primary/20 rounded-full animate-pulse delay-150" />
+                      </div>
+                    )}
+                  </div>
+                  <Button 
+                    variant={scannerMode ? "default" : "outline"}
+                    size="icon"
+                    onClick={() => setScannerMode(!scannerMode)}
+                    className="rounded-xl shadow-sm transition-all active:scale-95"
+                    title={scannerMode ? "Desactivar Modo Scanner" : "Activar Modo Scanner"}
+                  >
+                    <Truck className={`w-4 h-4 ${scannerMode ? 'animate-bounce' : ''}`} />
+                  </Button>
+                </div>
+              </div>
+
               {/* Información de la solicitud */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl shadow-sm">
                 <div className="space-y-1">

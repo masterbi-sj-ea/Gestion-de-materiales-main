@@ -59,7 +59,7 @@ export function FormularioAgregarMaterial({
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-[1fr_1fr_140px_120px]">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_140px_120px]">
             <div className="space-y-2">
               <Label>Grupo de artículos</Label>
               <BuscarMaterial
@@ -112,8 +112,7 @@ export function FormularioAgregarMaterial({
                 min="1"
               />
             </div>
-            <div className="space-y-2">
-              <Label className="opacity-0">Acción</Label>
+            <div className="flex items-end">
               <Button onClick={onAgregarItem} className="w-full">
                 <Plus className="w-4 h-4 mr-2" />
                 Agregar
@@ -122,7 +121,7 @@ export function FormularioAgregarMaterial({
           </div>
 
           {materialSeleccionado && (
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">
                   N° artículo

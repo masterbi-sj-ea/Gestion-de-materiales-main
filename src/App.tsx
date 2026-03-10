@@ -25,6 +25,7 @@ import CortesPage from './components/CortesPage';
 import { User, UserRole } from './types';
 import { AuthContext } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
+import { API_BASE_URL, API_ORIGIN } from './services/apiConfig';
 
 function App() {
   const [user, setUser] = useState<User | null>(() => {
@@ -49,7 +50,7 @@ function App() {
   useEffect(() => {
     if (user && token) {
       // Inicializar Socket.io
-      const socket = io('http://localhost:4000');
+      const socket = io(API_ORIGIN);
       socketRef.current = socket;
 
       socket.on('connect', () => {
@@ -100,7 +101,7 @@ function App() {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:4000/api/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

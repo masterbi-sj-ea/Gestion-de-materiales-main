@@ -17,7 +17,9 @@ import { Skeleton } from './ui/skeleton';
 import { Badge } from './ui/badge';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+import { API_ORIGIN } from '../services/apiConfig';
+
+const API_BASE = API_ORIGIN;
 
 interface MovimientoInventario {
   IdMovimiento: number;
@@ -133,30 +135,30 @@ export function KardexPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Kardex de Inventario</h1>
-          <p className="text-gray-500">Consulta y auditoría de movimientos de materiales</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Kardex de Inventario</h1>
+          <p className="text-sm md:text-base text-gray-500">Consulta y auditoría de movimientos de materiales</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={handlePrint} variant="outline" className="flex items-center gap-2 border-gray-300">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Button onClick={handlePrint} variant="outline" size="sm" className="flex-1 sm:flex-none items-center gap-2 border-gray-300">
             <Printer className="h-4 w-4" />
-            Imprimir
+            <span className="hidden xs:inline">Imprimir</span>
           </Button>
-          <Button onClick={exportToCSV} variant="outline" className="flex items-center gap-2 border-green-600 text-green-700 hover:bg-green-50">
+          <Button onClick={exportToCSV} variant="outline" size="sm" className="flex-1 sm:flex-none items-center gap-2 border-green-600 text-green-700 hover:bg-green-50">
             <Download className="h-4 w-4" />
-            Exportar CSV
+            <span className="hidden xs:inline">Exportar CSV</span>
           </Button>
-          <Button onClick={fetchMovimientos} variant="default" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
+          <Button onClick={fetchMovimientos} variant="default" size="sm" className="flex-1 sm:flex-none items-center gap-2 bg-blue-600 hover:bg-blue-700">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Sincronizar
+            <span className="hidden xs:inline">Sincronizar</span>
           </Button>
         </div>
       </div>
 
       {/* Resumen de Movimientos */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="bg-white border-l-4 border-l-blue-500 shadow-sm">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
@@ -195,84 +197,86 @@ export function KardexPage() {
       </div>
 
       <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-200/60 shadow-inner space-y-4">
-        <div className="flex flex-wrap gap-4 items-center">
+        <div className="flex flex-col lg:flex-row gap-4 lg:items-center">
           {/* Buscador Principal */}
-          <div className="flex-1 min-w-[320px] relative group">
+          <div className="flex-1 min-w-0 relative group">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors z-10 pointer-events-none" />
             <Input
               placeholder="Buscar por código, descripción o referencia..."
               value={filtroArticulo}
               onChange={(e) => setFiltroArticulo(e.target.value)}
-              className="!pl-11 h-11 bg-white border-slate-200 focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm rounded-lg relative"
+              className="!pl-11 h-11 bg-white border-slate-200 focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm rounded-lg relative w-full"
             />
           </div>
 
-          <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
-            {/* Selector de Fecha Inicio */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"ghost"}
-                  className={cn(
-                    "w-[140px] justify-start text-xs font-semibold hover:bg-slate-100",
-                    !fechaInicio && "text-slate-400"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-3.5 w-3.5 text-blue-500" />
-                  {fechaInicio ? format(fechaInicio, "dd MMM, yy") : <span>Desde</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={fechaInicio}
-                  onSelect={setFechaInicio}
-                  initialFocus
-                  locale={es}
-                />
-              </PopoverContent>
-            </Popover>
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm w-full sm:w-auto">
+              {/* Selector de Fecha Inicio */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"ghost"}
+                    className={cn(
+                      "flex-1 sm:w-[140px] justify-start text-xs font-semibold hover:bg-slate-100",
+                      !fechaInicio && "text-slate-400"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-3.5 w-3.5 text-blue-500" />
+                    {fechaInicio ? format(fechaInicio, "dd MMM, yy") : <span>Desde</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={fechaInicio}
+                    onSelect={setFechaInicio}
+                    initialFocus
+                    locale={es}
+                  />
+                </PopoverContent>
+              </Popover>
 
-            <div className="h-4 w-[1px] bg-slate-200" />
+              <div className="h-4 w-[1px] bg-slate-200 hidden sm:block" />
 
-            {/* Selector de Fecha Fin */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"ghost"}
-                  className={cn(
-                    "w-[140px] justify-start text-xs font-semibold hover:bg-slate-100",
-                    !fechaFin && "text-slate-400"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-3.5 w-3.5 text-rose-500" />
-                  {fechaFin ? format(fechaFin, "dd MMM, yy") : <span>Hasta</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={fechaFin}
-                  onSelect={setFechaFin}
-                  initialFocus
-                  locale={es}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
+              {/* Selector de Fecha Fin */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"ghost"}
+                    className={cn(
+                      "flex-1 sm:w-[140px] justify-start text-xs font-semibold hover:bg-slate-100",
+                      !fechaFin && "text-slate-400"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-3.5 w-3.5 text-rose-500" />
+                    {fechaFin ? format(fechaFin, "dd MMM, yy") : <span>Hasta</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={fechaFin}
+                    onSelect={setFechaFin}
+                    initialFocus
+                    locale={es}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
 
-          <div className="w-[200px]">
-            <Select value={filtroTipo} onValueChange={setFiltroTipo}>
-              <SelectTrigger className="h-11 bg-white border-slate-200 text-xs font-bold shadow-sm rounded-lg">
-                <SelectValue placeholder="Tipo de Movimiento" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="TODOS" className="text-xs">Todos los tipos</SelectItem>
-                <SelectItem value="ENTRADA" className="text-xs">⚡ Solo Entradas</SelectItem>
-                <SelectItem value="SALIDA" className="text-xs">📦 Solo Salidas</SelectItem>
-                <SelectItem value="AJUSTE" className="text-xs">🔧 Solo Ajustes</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="w-full sm:w-[200px]">
+              <Select value={filtroTipo} onValueChange={setFiltroTipo}>
+                <SelectTrigger className="h-11 bg-white border-slate-200 text-xs font-bold shadow-sm rounded-lg">
+                  <SelectValue placeholder="Tipo de Movimiento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS" className="text-xs">Todos los tipos</SelectItem>
+                  <SelectItem value="ENTRADA" className="text-xs">⚡ Solo Entradas</SelectItem>
+                  <SelectItem value="SALIDA" className="text-xs">📦 Solo Salidas</SelectItem>
+                  <SelectItem value="AJUSTE" className="text-xs">🔧 Solo Ajustes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </div>
@@ -329,13 +333,13 @@ export function KardexPage() {
             <Table>
               <TableHeader className="bg-gray-50/50 sticky top-0 z-10">
                 <TableRow>
-                  <TableHead className="w-[150px]">Fecha</TableHead>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Área / Cuenta</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Cantidad</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
-                  <TableHead>Usuario / Referencia</TableHead>
+                  <TableHead className="min-w-[120px]">Fecha</TableHead>
+                  <TableHead className="min-w-[200px]">Producto</TableHead>
+                  <TableHead className="min-w-[150px]">Área / Cuenta</TableHead>
+                  <TableHead className="min-w-[100px]">Tipo</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Cantidad</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Balance</TableHead>
+                  <TableHead className="min-w-[180px]">Usuario / Referencia</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

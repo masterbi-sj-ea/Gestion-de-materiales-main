@@ -57,16 +57,16 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1>Dashboard General</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl font-bold">Dashboard General</h1>
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">
             Bienvenido, {user?.name}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col sm:flex-row flex-wrap gap-2">
           <Select value={selectedArea} onValueChange={setSelectedArea}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder="Seleccionar área" />
             </SelectTrigger>
             <SelectContent>
@@ -78,7 +78,7 @@ export default function Dashboard() {
             </SelectContent>
           </Select>
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder="Seleccionar mes" />
             </SelectTrigger>
             <SelectContent>
@@ -90,7 +90,7 @@ export default function Dashboard() {
               <SelectItem value="junio">Junio 2025</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
+          <Button variant="outline" className="w-full sm:w-auto">
             <Download className="w-4 h-4 mr-2" />
             Exportar
           </Button>

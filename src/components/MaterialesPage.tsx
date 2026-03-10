@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { Search, Plus, Upload, Package, Edit, Trash2 } from 'lucide-react';
+import { API_BASE_URL } from '../services/apiConfig';
 import {
   Table,
   TableBody,
@@ -56,7 +57,7 @@ export default function MaterialesPage() {
     if (!token) return;
     try {
       setLoading(true);
-      const resp = await fetch('http://localhost:4000/api/materiales/con-stock', {
+      const resp = await fetch(`${API_BASE_URL}/materiales/con-stock`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -121,7 +122,7 @@ export default function MaterialesPage() {
 
     try {
       if (editingMaterial) {
-        await fetch(`http://localhost:4000/api/materiales/${editingMaterial.id}`, {
+        await fetch(`${API_BASE_URL}/materiales/${editingMaterial.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -130,7 +131,7 @@ export default function MaterialesPage() {
           body: JSON.stringify(body),
         });
       } else {
-        await fetch('http://localhost:4000/api/materiales', {
+        await fetch(`${API_BASE_URL}/materiales`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -157,7 +158,7 @@ export default function MaterialesPage() {
     if (!window.confirm('¿Estás seguro de eliminar este material?')) return;
 
     try {
-      await fetch(`http://localhost:4000/api/materiales/${id}`, {
+      await fetch(`${API_BASE_URL}/materiales/${id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -241,7 +242,7 @@ export default function MaterialesPage() {
 
     try {
       setImportLoading(true);
-      const resp = await fetch('http://localhost:4000/api/materiales/importar', {
+      const resp = await fetch(`${API_BASE_URL}/materiales/importar`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -271,25 +272,26 @@ export default function MaterialesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1>Catálogo de Materiales</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl font-bold">Catálogo de Materiales</h1>
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">
             Gestión de materiales desde la base de datos
           </p>
         </div>
-        <div className="flex gap-2">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col sm:flex-row items-center gap-2">
             <Input
               type="file"
               accept=".csv"
               onChange={handleFileChange}
-              className="max-w-xs"
+              className="w-full sm:max-w-xs"
             />
             <Button
               variant="outline"
               onClick={handleImport}
               disabled={importLoading || !importFile}
+              className="w-full sm:w-auto"
             >
               <Upload className="w-4 h-4 mr-2" />
               {importLoading ? 'Importando...' : 'Importar CSV'}
@@ -297,12 +299,12 @@ export default function MaterialesPage() {
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button disabled={!canCreate} onClick={() => handleOpenDialog()}>
+              <Button disabled={!canCreate} onClick={() => handleOpenDialog()} className="w-full sm:w-auto">
                 <Plus className="w-4 h-4 mr-2" />
                 Nuevo Material
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-2xl sm:max-w-[95vw] md:max-w-2xl">
               <DialogHeader>
                 <DialogTitle>{editingMaterial ? 'Editar Material' : 'Agregar Nuevo Material'}</DialogTitle>
                 <DialogDescription>
@@ -312,7 +314,7 @@ export default function MaterialesPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="codigo">Número de artículo</Label>
                     <Input
@@ -341,7 +343,7 @@ export default function MaterialesPage() {
                     onChange={(e) => setFormDescripcion(e.target.value)}
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="unidad">Unidad de medida</Label>
                     <Input
@@ -351,21 +353,20 @@ export default function MaterialesPage() {
                       onChange={(e) => setFormUnidadMedida(e.target.value)}
                     />
                   </div>
-                  <div className="space-y-2"></div>
-                  <div className="space-y-2"></div>
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="flex flex-col sm:flex-row gap-2">
                 <Button
                   variant="outline"
                   onClick={() => {
                     setDialogOpen(false);
                     setEditingMaterial(null);
                   }}
+                  className="w-full sm:w-auto"
                 >
                   Cancelar
                 </Button>
-                <Button onClick={handleGuardar} disabled={!canCreate}>
+                <Button onClick={handleGuardar} disabled={!canCreate} className="w-full sm:w-auto">
                   {editingMaterial ? 'Guardar cambios' : 'Guardar Material'}
                 </Button>
               </DialogFooter>

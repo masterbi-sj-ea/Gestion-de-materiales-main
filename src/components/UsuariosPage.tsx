@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Search, Plus, Edit, Trash2, Users, Shield, UserCheck, Lock, Package } from 'lucide-react';
+import { API_BASE_URL } from '../services/apiConfig';
 import {
   Table,
   TableBody,
@@ -59,7 +60,7 @@ export default function UsuariosPage() {
 
   const cargarUsuarios = async () => {
     try {
-      const resp = await fetch('http://localhost:4000/api/usuarios', {
+      const resp = await fetch(`${API_BASE_URL}/usuarios`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!resp.ok) return;
@@ -87,7 +88,7 @@ export default function UsuariosPage() {
 
   const cargarRoles = async () => {
     try {
-      const resp = await fetch('http://localhost:4000/api/roles', {
+      const resp = await fetch(`${API_BASE_URL}/roles`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!resp.ok) return;
@@ -101,7 +102,7 @@ export default function UsuariosPage() {
 
   const cargarAreas = async () => {
     try {
-      const resp = await fetch('http://localhost:4000/api/areas', {
+      const resp = await fetch(`${API_BASE_URL}/areas`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!resp.ok) return;
@@ -143,7 +144,7 @@ export default function UsuariosPage() {
       if (!formNombre || !formEmail) return;
 
       if (editingUsuario) {
-        await fetch(`http://localhost:4000/api/usuarios/${editingUsuario.id}`, {
+        await fetch(`${API_BASE_URL}/usuarios/${editingUsuario.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -158,7 +159,7 @@ export default function UsuariosPage() {
           }),
         });
       } else {
-        await fetch('http://localhost:4000/api/usuarios', {
+        await fetch(`${API_BASE_URL}/usuarios`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -185,7 +186,7 @@ export default function UsuariosPage() {
   const handleEliminar = async (id: string) => {
     if (!confirm('¿Estás seguro de eliminar este usuario?')) return;
     try {
-      await fetch(`http://localhost:4000/api/usuarios/${id}`, {
+      await fetch(`${API_BASE_URL}/usuarios/${id}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });

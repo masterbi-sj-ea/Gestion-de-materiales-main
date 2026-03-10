@@ -1,6 +1,8 @@
+import { API_BASE_URL } from './apiConfig';
+
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  // Aquí usamos la variable de entorno o localhost por defecto
-  const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+  // URL dinámica basada en el hostname actual (evita apuntar a localhost del teléfono)
+  const baseUrl = API_BASE_URL;
 
   // Recuperar el token del session storage, que es el que gestiona el AuthContext
   const token = sessionStorage.getItem('authToken');

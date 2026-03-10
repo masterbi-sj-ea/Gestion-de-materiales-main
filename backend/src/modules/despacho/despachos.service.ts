@@ -511,9 +511,19 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
       m.NumeroArticulo AS Codigo,
       m.DescripcionArticulo AS Descripcion,
       m.UnidadMedida,
-      dd.CantidadDespachada
+      dd.CantidadDespachada,
+      arc.CodigoCuenta AS CodigoCuentaLinea,
+      COALESCE(a_det.Nombre, s.Area) AS ActividadLinea
     FROM DetalleDespachos dd
     JOIN Materiales m ON dd.IdMaterial = m.IdMaterial
+    JOIN Despachos d_det ON dd.IdDespacho = d_det.IdDespacho
+    JOIN SolicitudesMaterial s ON d_det.IdSolicitud = s.IdSolicitud
+    LEFT JOIN DetalleSolicitudesMaterial dsm ON dsm.IdSolicitud = s.IdSolicitud AND dsm.IdMaterial = m.IdMaterial
+    LEFT JOIN Areas a_det ON a_det.IdArea = COALESCE(dsm.IdArea, s.IdArea)
+    LEFT JOIN MaterialRecurso mr ON mr.IdMaterial = m.IdMaterial AND mr.Activo = 1
+    LEFT JOIN AreaRecursoCuenta arc ON arc.IdArea = a_det.IdArea 
+      AND arc.IdRecurso = mr.IdRecurso 
+      AND ISNULL(arc.Activo, 1) = 1
     WHERE dd.IdDespacho = @idDespacho
   `;
 
@@ -527,7 +537,7 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
   const doc = new PDFDocument({
     size: "A4",
     layout: "portrait",
-    margins: { top: 20, bottom: 20, left: 30, right: 30 },
+    margins: { top: 10, bottom: 10, left: 20, right: 20 },
   });
 
   const stream = new PassThrough();
@@ -535,12 +545,12 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
 
   // --- 0) CONFIGURACIÓN GLOBAL ---
   doc.lineWidth(0.5);
-  const left = 30;
-  const right = doc.page.width - 30;
+  const left = 20;
+  const right = doc.page.width - 20;
   const contentW = right - left;
 
   const strokeBox = (x: number, y: number, w: number, h: number) => doc.rect(x, y, w, h).stroke();
-  const fillStrokeBox = (x: number, y: number, w: number, h: number, color = "#E8E8E8") => {
+  const fillStrokeBox = (x: number, y: number, w: number, h: number, color = "#F3F4F6") => {
     doc.save().fillColor(color).rect(x, y, w, h).fill().restore();
     doc.rect(x, y, w, h).stroke();
   };
@@ -548,20 +558,15 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
 
   // Función interna para dibujar una copia de la requisa
   const dibujarRequisa = (startY: number) => {
-    // --- 1) TÍTULO ---
-    doc.font("Times-Roman").fontSize(15).fillColor("black");
-    doc.text("REQUISA SALIDA DE BODEGA  EXTRACEITE", left, startY, { characterSpacing: 0.5 });
-
-    // --- 2) LOGO (DERECHA) ---
-    const logoX = right - 70;
-    const logoY = startY - 10;
+    // --- 1) ENCABEZADO Y LOGO ---
+    const logoX = left;
+    const logoY = startY;
     
     const posiblesRutas = [
       path.join(process.cwd(), "backend", "public", "logo.png"),
       path.join(process.cwd(), "public", "logo.png"),
-      path.join(__dirname, "..", "..", "..", "public", "logo.png"),
-      path.join(process.cwd(), "backend", "public", "ic_launcher.png"),
-      path.join(process.cwd(), "public", "ic_launcher.png")
+      path.join(process.cwd(), "backend", "public", "logo_extraceite.png"),
+      path.join(process.cwd(), "public", "logo_extraceite.png")
     ];
 
     let logoFinalPath = null;
@@ -572,46 +577,56 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
       }
     }
 
+    const logoW = 45;
+    const logoImgX = right - 52; // mover 10pt más a la izquierda (antes right - 42)
+
     if (logoFinalPath) {
       try {
-        doc.image(logoFinalPath, logoX , logoY, { width: 60 });
-      } catch (err) {
-        dibujarLogoPlaceholder(doc, logoX, logoY);
-      }
-    } else {
-      dibujarLogoPlaceholder(doc, logoX, logoY);
-    }
+        doc.image(logoFinalPath, logoImgX, logoY, { width: logoW });
+      } catch (err) { dibujarLogoPlaceholder(doc, logoImgX, logoY); }
+    } else { dibujarLogoPlaceholder(doc, logoImgX, logoY); }
 
-    // --- 3) CAJAS FECHA / SOLICITUD N° ---
-    const boxY = startY + 25;
-    const colLabelW = 75;
-    const colValueW = 110;
-    const rowHBox = 16;
+    doc.font("Helvetica-Bold").fontSize(14).fillColor("#000");
+    doc.text("REQUISA SALIDA DE BODEGA EXTRACEITE", left, startY + 15, { align: "left" });
+    
+    // Texto Extraceite debajo del logo (dar más espacio para evitar que haga wrap)
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#000");
+    const logoTextX = Math.max(logoImgX - 15, left);
+    const logoTextW = Math.min(logoW + 30, contentW - (logoTextX - left));
+    doc.text("Extraceite", logoTextX, startY + 50, { width: logoTextW, align: "center" });
+    
+    // --- 2) INFORMACIÓN GENERAL ---
 
-    fillStrokeBox(left, boxY, colLabelW, rowHBox);
-    strokeBox(left + colLabelW, boxY, colValueW, rowHBox);
-    fillStrokeBox(left, boxY + rowHBox, colLabelW, rowHBox);
-    strokeBox(left + colLabelW, boxY + rowHBox, colValueW, rowHBox);
+    const infoY = startY + 55;
+    const tableInfoW = 160;
+    const tableInfoH = 34;
 
-    doc.font("Helvetica").fontSize(8).fillColor("#000");
-    doc.text("FECHA", left + 5, boxY + 5);
-    doc.text("SOLICITUD N°", left + 5, boxY + rowHBox + 5);
+    strokeBox(left, infoY, tableInfoW, tableInfoH);
+    doc.moveTo(left, infoY + 17).lineTo(left + tableInfoW, infoY + 17).stroke();
+    doc.moveTo(left + 60, infoY).lineTo(left + 60, infoY + tableInfoH).stroke();
 
-    doc.font("Helvetica").fontSize(9);
-    doc.text(fmtDate(cab?.FechaDespacho), left + colLabelW + 5, boxY + 5);
-    doc.text(String(cab?.CodigoSolicitud || ""), left + colLabelW + 5, boxY + rowHBox + 5);
+    doc.font("Helvetica-Bold").fontSize(8);
+    doc.text("FECHA", left + 5, infoY + 5);
+    doc.text("SOLICITUD N°", left + 5, infoY + 22);
 
-    // --- 4) TABLA DE ITEMS ---
-    const tableY = boxY + (rowHBox * 2) + 12;
+    doc.font("Helvetica").fontSize(8);
+    doc.text(fmtDate(cab?.FechaDespacho), left + 65, infoY + 5);
+    doc.text(cab?.CodigoSolicitud || "", left + 65, infoY + 22);
+
+    // --- 3) TABLA DE ITEMS ---
+    const tableY = infoY + 45;
     const headerH = 20;
-    const rowHTable = 25;
+    // Altura de fila ~8mm (PDFKit usa puntos: 1pt ≈ 0.3528mm)
+    const rowH = 23;
+    const rowsCount = 9; // Reducido a 9 campos en total
 
-    const wCodigo = 55;
-    const wDesc = 205;
-    const wUM = 50;
-    const wCant = 50;
-    const wAct = 100;
-    const wCCO = contentW - (wCodigo + wDesc + wUM + wCant + wAct);
+    // Ajuste de anchos para que CCO no quede demasiado angosto (evita que el código se parta en vertical)
+    const wCodigo = 60;
+    const wUM = 60;
+    const wCant = 60;
+    const wAct = 120;
+    const wCCO = 70;
+    const wDesc = contentW - (wCodigo + wUM + wCant + wAct + wCCO);
 
     const xCodigo = left;
     const xDesc = xCodigo + wCodigo;
@@ -620,120 +635,95 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
     const xAct = xCant + wCant;
     const xCCO = xAct + wAct;
 
-    const drawCellText = (
-      text: any,
-      x: number,
-      y: number,
-      w: number,
-      h: number,
-      align: 'left' | 'center' | 'right' = 'left',
-      padY: number = 3,
-    ) => {
-      const value = text == null ? '' : String(text);
-      doc.text(value, x, y + padY, {
-        width: w,
-        height: Math.max(0, h - (padY * 2)),
-        align,
-        lineBreak: true,
-        ellipsis: true,
-      });
-    };
+    // Encabezados
+    fillStrokeBox(left, tableY, contentW, headerH, "#FFFFFF"); // Fondo blanco
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#000");
+    const hY = tableY + 6;
+    doc.text("CODIGO", xCodigo, hY, { width: wCodigo, align: "center" });
+    doc.text("DESCRIPCION DEL MATERIAL", xDesc, hY, { width: wDesc, align: "center" });
+    doc.text("U/MEDIDA", xUM, hY, { width: wUM, align: "center" });
+    doc.text("CANTIDAD", xCant, hY, { width: wCant, align: "center" });
+    doc.text("ACTIVIDAD", xAct, hY, { width: wAct, align: "center" });
+    doc.text("CCO", xCCO, hY, { width: wCCO, align: "center" });
 
-    fillStrokeBox(left, tableY, contentW, headerH);
-    doc.font("Helvetica").fontSize(9).fillColor("#000");
-    doc.text("CODIGO", xCodigo, tableY + 6, { width: wCodigo, align: "center" });
-    doc.text("DESCRIPCION DEL MATERIAL", xDesc, tableY + 6, { width: wDesc, align: "center" });
-    doc.text("U/MEDIDA", xUM, tableY + 6, { width: wUM, align: "center" });
-    doc.text("CANTIDAD", xCant, tableY + 6, { width: wCant, align: "center" });
-    doc.text("ACTIVIDAD", xAct, tableY + 6, { width: wAct, align: "center" });
-    doc.fontSize(7);
-    drawCellText("CODIGO DE CUENTA", xCCO, tableY, wCCO, headerH, "center", 2);
-    doc.fontSize(9);
-
-    const rowsLimit = 10;
-    const tableH = headerH + (rowsLimit * rowHTable);
-    strokeBox(left, tableY, contentW, tableH);
-
-    // Líneas Verticales
-    [xDesc, xUM, xCant, xAct, xCCO].forEach(x => {
-        doc.moveTo(x, tableY).lineTo(x, tableY + tableH).stroke();
-    });
-
-    // Líneas Horizontales y Datos
-    doc.font("Helvetica").fontSize(9).fillColor("black");
-    for (let i = 0; i < rowsLimit; i++) {
-      const y = tableY + headerH + (i * rowHTable);
-      doc.moveTo(left, y).lineTo(left + contentW, y).stroke();
-      
-      const it = detalle && detalle[i];
-      if (it) {
-        const rowTextY = y + 7;
-        const itemCco = mapCco?.get(it.IdMaterial) || cab?.CodigoCuenta || '-';
+    // Cuerpo de la tabla
+    doc.font("Helvetica").fontSize(8);
+    for (let i = 0; i < rowsCount; i++) {
+        const curY = tableY + headerH + (i * rowH);
         
-        doc.text(String(it.Codigo || ""), xCodigo + 2, rowTextY, { width: wCodigo - 4, align: "center" });
-        
-        // REPARACIÓN DESCRIPCIÓN: Control de altura y elipsis para evitar desborde
-        doc.text(String(it.Descripcion || ""), xDesc + 4, rowTextY - 2, { 
-          width: wDesc - 8, 
-          height: rowHTable - 4,
-          ellipsis: true,
-          align: "left",
-          lineGap: -2
+        // Dibujar cuadro de la fila (rectángulo completo con bordes)
+        doc.rect(left, curY, contentW, rowH).stroke();
+
+        // Líneas verticales divisorias
+        [xDesc, xUM, xCant, xAct, xCCO].forEach(x => {
+            doc.moveTo(x, curY).lineTo(x, curY + rowH).stroke();
         });
 
-        doc.text(String(it.UnidadMedida || ""), xUM + 2, rowTextY, { width: wUM - 4, align: "center" });
-        doc.text(String(it.CantidadDespachada ?? ""), xCant + 2, rowTextY, { width: wCant - 4, align: "center" });
+      const it = detalle[i];
+      if (it) {
+        const textY = curY + (rowH / 2) - 4; // Centrado vertical manual aproximado
+        doc.text(String(it.Codigo || ""), xCodigo, textY, { width: wCodigo, align: "center" });
+        doc.text(String(it.Descripcion || "").substring(0, 70), xDesc + 5, textY - 2, { width: wDesc - 10, align: "left" });
+        doc.text(String(it.UnidadMedida || ""), xUM, textY, { width: wUM, align: "center" });
+        doc.text(String(it.CantidadDespachada || ""), xCant, textY, { width: wCant, align: "center" });
         
-        const actividadText = String(cab?.AreaNombre || "").split(' - ').pop() || "";
-        doc.text(actividadText, xAct + 2, rowTextY - 1, { width: wAct - 4, align: "center", lineGap: -2 });
+        const act = (it.ActividadLinea || cab?.AreaNombre || "").substring(0, 45);
+        doc.text(act, xAct + 2, textY - 2, { width: wAct - 4, align: "center" });
         
-        doc.fontSize(7);
-        drawCellText(String(itemCco), xCCO + 2, y, wCCO - 4, rowHTable, "center", 3);
-        doc.fontSize(9);
+        const cco = it.CodigoCuentaLinea || cab?.CodigoCC || "";
+        doc.text(String(cco), xCCO, textY, { width: wCCO, align: "center" });
       }
     }
 
-    // --- 5) OBSERVACIONES Y PIE ---
-    const obsY = tableY + tableH + 10;
+    // --- 4) PIE DE PÁGINA (HORAS Y FIRMAS) ---
+    const footerY = tableY + headerH + (rowsCount * rowH) + 15;
+    
+    // Observaciones
     doc.font("Helvetica").fontSize(9).fillColor("#000");
-    doc.text("OBSERVACIONES: ", left, obsY);
-    const lineObsStartX = left + 90;
-    doc.moveTo(lineObsStartX, obsY + 10).lineTo(right, obsY + 10).stroke();
-    if (cab?.Observaciones) {
-      doc.text(String(cab.Observaciones), lineObsStartX + 5, obsY, { width: contentW - 95 });
+    doc.text("OBSERVACIONES:", left, footerY);
+    const obsX = left + 90;
+    doc.moveTo(obsX, footerY + 10).lineTo(right, footerY + 10).stroke();
+    const obsTxt = String(cab?.Observaciones || "").trim();
+    if (obsTxt) {
+      doc.font("Helvetica").fontSize(8).fillColor("#000");
+      doc.text(obsTxt.substring(0, 140), obsX + 3, footerY + 2, { width: right - (obsX + 3), align: "left" });
     }
 
-    const formCodeY = obsY + 15;
-    doc.font("Helvetica").fontSize(7).fillColor("#555");
-    doc.text("FR-F-BD-025", left, formCodeY);
+    const signY = footerY + 80; // Más espacio para firmas
+    const signW = 160;
+    const gap = (contentW - (signW * 3)) / 2;
 
-    // --- 6) FIRMAS ---
-    const signY = formCodeY + 45;
-    const signW = 125;
-    const sig1X = left + 10;
-    const sig2X = left + (contentW / 2) - (signW / 2);
-    const sig3X = right - signW - 75;
+    // Firmas con la estructura solicitada
+    doc.font("Helvetica").fontSize(8).fillColor("#000");
+    
+    // Entrega bodega
+    doc.moveTo(left, signY).lineTo(left + signW, signY).stroke();
+    doc.text("Entrega bodega\nNombre y firma", left, signY + 5, { width: signW, align: "center" });
 
-    [sig1X, sig2X, sig3X].forEach(x => {
-        doc.moveTo(x, signY).lineTo(x + signW, signY).stroke();
-    });
+    // Retirado por
+    doc.moveTo(left + signW + gap, signY).lineTo(left + signW * 2 + gap, signY).stroke();
+    doc.text("Retirado por\nNombre y firma", left + signW + gap, signY + 5, { width: signW, align: "center" });
 
-    doc.font("Helvetica").fontSize(8).fillColor("#333");
-    doc.text("Entrega bodega\nNombre y firma", sig1X, signY + 5, { width: signW, align: "center" });
-    doc.text("Retirado por\nNombre y firma", sig2X, signY + 5, { width: signW, align: "center" });
-    doc.text("Autorizado por\nNombre del Ingeniero", sig3X, signY + 5, { width: signW, align: "center" });
+    // Autorizado por / Nombre del Ingeniero
+    doc.moveTo(right - signW, signY).lineTo(right, signY).stroke();
+    doc.text("Autorizado por\nNombre del Ingeniero", right - signW, signY + 5, { width: signW, align: "center" });
 
-    // Correlativo Rojo 
-    const numX = right - 80;
-    const numY = signY + 15;
-    doc.font("Helvetica-Bold").fontSize(14).fillColor("black");
-    doc.text("N°", numX, numY);
-    doc.font("Helvetica").fontSize(15).fillColor("#D32F2F");
-    doc.text(String(cab?.IdDespacho ?? "").padStart(5, "0"), numX + 25, numY - 2);
+    // Folio Number Red (evitar sobreposición con firmas; ubicar al pie derecho)
+    const folioY = doc.page.height - 70;
+    doc.font("Helvetica-Bold").fontSize(18).fillColor("#000");
+    doc.text("N°", right - 115, folioY + 2, { width: 30, align: "left" });
+    doc.font("Helvetica").fontSize(22).fillColor("#D32F2F");
+    const numFolio = String(cab?.IdDespacho ?? idDespacho).padStart(5, "0");
+    doc.text(numFolio, right - 85, folioY, { width: 85, align: "right" });
+
+    // FR-F-BD-025
+    doc.font("Helvetica").fontSize(8).fillColor("#000");
+    doc.text("FR-F-BD-025", left, footerY + 15);
+
   };
 
-  // Dibujar única copia (Arriba)
-  dibujarRequisa(10);
+  // Dibujar copia única
+  dibujarRequisa(20);
 
   doc.end();
   return stream;

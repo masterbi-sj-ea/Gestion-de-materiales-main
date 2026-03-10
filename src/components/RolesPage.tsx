@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Plus, Edit, Trash2, Shield } from 'lucide-react';
+import { API_BASE_URL } from '../services/apiConfig';
 
 interface Rol {
   id: number;
@@ -28,7 +29,7 @@ export default function RolesPage() {
 
   const cargarRoles = async () => {
     try {
-      const resp = await fetch('http://localhost:4000/api/roles', {
+      const resp = await fetch(`${API_BASE_URL}/roles`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!resp.ok) return;
@@ -63,7 +64,7 @@ export default function RolesPage() {
 
     try {
       if (editingRol) {
-        await fetch(`http://localhost:4000/api/roles/${editingRol.id}`, {
+        await fetch(`${API_BASE_URL}/roles/${editingRol.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -72,7 +73,7 @@ export default function RolesPage() {
           body: JSON.stringify({ nombre, descripcion }),
         });
       } else {
-        await fetch('http://localhost:4000/api/roles', {
+        await fetch(`${API_BASE_URL}/roles`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -92,7 +93,7 @@ export default function RolesPage() {
   const handleEliminar = async (id: number) => {
     if (!confirm('¿Estás seguro de eliminar este rol?')) return;
     try {
-      await fetch(`http://localhost:4000/api/roles/${id}`, {
+      await fetch(`${API_BASE_URL}/roles/${id}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });

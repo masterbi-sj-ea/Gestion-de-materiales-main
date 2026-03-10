@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { UserRole } from '../types';
 import { useAuth } from '../hooks/useAuth';
+import { API_BASE_URL } from '../services/apiConfig';
 
 export interface Modulo {
   id: string;
@@ -52,7 +53,7 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
         const authHeaders = { Authorization: `Bearer ${token}` };
 
         // 0) Cargar módulos desde backend
-        const respModulos = await fetch('http://localhost:4000/api/modulos', {
+        const respModulos = await fetch(`${API_BASE_URL}/modulos`, {
           headers: authHeaders,
         });
         if (!respModulos.ok) return;
@@ -68,7 +69,7 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
         setModulos(modulosFrontend);
 
         // 1) Cargar roles reales desde el backend
-        const respRoles = await fetch('http://localhost:4000/api/roles', {
+        const respRoles = await fetch(`${API_BASE_URL}/roles`, {
           headers: authHeaders,
         });
         if (!respRoles.ok) return;
@@ -88,7 +89,7 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
         const anyRoleId = anyRoleEntry[1];
 
         // 2) Cargar mapeo Codigo -> IdModulo usando cualquier rol existente
-        const respPermisos = await fetch(`http://localhost:4000/api/permisos/rol/${anyRoleId}`, {
+        const respPermisos = await fetch(`${API_BASE_URL}/permisos/rol/${anyRoleId}`, {
           headers: authHeaders,
         });
         if (!respPermisos.ok) return;
@@ -107,7 +108,7 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
         for (const [rolNombre, idRol] of Object.entries(roleMap)) {
           if (!idRol) continue;
 
-          const respPermisosRol = await fetch(`http://localhost:4000/api/permisos/rol/${idRol}`, {
+          const respPermisosRol = await fetch(`${API_BASE_URL}/permisos/rol/${idRol}`, {
             headers: authHeaders,
           });
           if (!respPermisosRol.ok) continue;
@@ -170,7 +171,7 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        await fetch(`http://localhost:4000/api/permisos/rol/${idRol}`, {
+        await fetch(`${API_BASE_URL}/permisos/rol/${idRol}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

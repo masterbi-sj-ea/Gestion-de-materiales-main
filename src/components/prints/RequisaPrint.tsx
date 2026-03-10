@@ -1,5 +1,4 @@
 import React from 'react';
-import { useAuth } from '../../hooks/useAuth';
 
 interface DetalleDespachoPrint {
   Codigo: string;
@@ -28,8 +27,6 @@ interface RequisaPrintProps {
 }
 
 export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(({ data }, ref) => {
-  const { user } = useAuth();
-  
   if (!data) {
     return <div ref={ref} className="print-container" style={{ display: 'none' }} />;
   }
@@ -50,101 +47,110 @@ export const RequisaPrint = React.forwardRef<HTMLDivElement, RequisaPrintProps>(
   const numeroDespacho = (CodigoDespacho?.match(/\d+/g)?.pop()) ?? '098145';
   const fechaImpresion = FechaDespacho || '';
 
+  const actividadImpresion = Actividad || AreaNombre || '';
+  const ccoImpresion = CodigoCuenta || CodigoCentroCosto || '';
+  const totalFilas = 9;
+  const filasVacias = Math.max(0, totalFilas - Detalles.length);
+
   return (
-    <div ref={ref} className="print-container">
-      <header className="print-header">
-         <div className="header-left">
-            <div className="logo-placeholder">
-               <img src="/logo_extraceite.png" alt="Extraceite" style={{ width: '50px', height: 'auto' }} />
-               <span style={{ fontWeight: 'bold', fontSize: '10pt' }}>Extraceite</span>
-            </div>
-         </div>
-         <div className="header-center">
-            <h1 style={{ fontSize: '16pt', fontWeight: 'bold' }}>SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.</h1>
-         </div>
-         <div className="header-right" style={{ textAlign: 'right' }}>
-             <p style={{ margin: 0, fontSize: '8pt', color: '#666' }}>FR-F-BD-022</p>
-             <p style={{ margin: 0, fontSize: '14pt', fontWeight: 'bold' }}>
-               Nº <span className="red-number">{numeroDespacho}</span>
-             </p>
-         </div>
-      </header>
-
-      <div className="info-grid">
-        <div className="info-item">
-          <span className="info-label">FECHA:</span>
-          <span className="info-underline">{fechaImpresion}</span>
-        </div>
-        <div className="info-item">
-          <span className="info-label">REQUISA DE SALIDA No. :</span>
-          <span className="info-underline">{CodigoSolicitud}</span>
-        </div>
-      </div>
-
-      <main>
-        <div className="items-section">
-          <table className="items-table">
-            <thead>
-              <tr>
-                <th>CODIGO</th>
-                <th>DESCRIPCION MATERIAL</th>
-                <th>U/MEDIDA</th>
-                <th>CANTIDAD</th>
-                <th>ACTIVIDAD</th>
-                <th>CODIGO DE CUENTA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Detalles.map((item, index) => (
-                <tr key={index}>
-                  <td style={{ textAlign: 'center' }}>{item.Codigo}</td>
-                  <td>{item.Descripcion}</td>
-                  <td style={{ textAlign: 'center' }}>{item.UnidadMedida}</td>
-                  <td style={{ textAlign: 'center' }}>{item.CantidadDespachada}</td>
-                  <td style={{ fontSize: '0.8rem', textAlign: 'center' }}>{Actividad || AreaNombre || ''}</td>
-                  <td style={{ fontSize: '0.8rem', textAlign: 'center' }}>{CodigoCuenta || CodigoCentroCosto || ''}</td>
-                </tr>
-              ))}
-              {Array.from({ length: Math.max(0, 10 - Detalles.length) }).map((_, i) => (
-                <tr key={`empty-${i}`}>
-                   <td>&nbsp;</td>
-                   <td>&nbsp;</td>
-                   <td>&nbsp;</td>
-                   <td>&nbsp;</td>
-                   <td>&nbsp;</td>
-                   <td>&nbsp;</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </main>
-
-      <footer className="print-footer-new">
-        <div className="extra-info">
-          <div className="info-row">
-            <span className="info-label">Hora de inicio de despacho:</span>
-            <span className="info-underline" style={{ width: '150px' }}></span>
-            <span className="info-label" style={{ marginLeft: '20px' }}>Hora de finalización de despacho:</span>
-            <span className="info-underline" style={{ width: '150px' }}></span>
+    <div ref={ref} className="print-container requisa-print">
+      <header className="requisa-header">
+        <div className="requisa-header-row">
+          <h1 className="requisa-title">REQUISA SALIDA DE BODEGA&nbsp;&nbsp;EXTRACEITE</h1>
+          <div className="requisa-logo">
+            <img src="/logo_extraceite.png" alt="Extraceite" />
+            <span>Extraceite</span>
           </div>
         </div>
 
-        <div className="signatures-grid">
-            <div className="signature-item">
-              <div className="signature-line"></div>
-              <p>Autorizado por</p>
-              <p>Nombre y firma del jefe de área</p>
-            </div>
-            <div className="signature-item">
-              <div className="signature-line"></div>
-              <p>Autorizado por</p>
-              <p>de la persona que retira</p>
-            </div>
+        <table className="requisa-mini-table">
+          <tbody>
+            <tr>
+              <th>FECHA</th>
+              <td>{fechaImpresion}</td>
+            </tr>
+            <tr>
+              <th>SOLICITUD N°</th>
+              <td>{CodigoSolicitud}</td>
+            </tr>
+          </tbody>
+        </table>
+      </header>
+
+      <main>
+        <table className="items-table requisa-items-table">
+          <colgroup>
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '40%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '10%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>CODIGO</th>
+              <th>DESCRIPCION DEL MATERIAL</th>
+              <th>U/MEDIDA</th>
+              <th>CANTIDAD</th>
+              <th>ACTIVIDAD</th>
+              <th>CCO</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Detalles.map((item, index) => (
+              <tr key={index}>
+                <td className="tc">{item.Codigo}</td>
+                <td>{item.Descripcion}</td>
+                <td className="tc">{item.UnidadMedida}</td>
+                <td className="tc">{item.CantidadDespachada}</td>
+                <td className="tc small">{actividadImpresion}</td>
+                <td className="tc small">{ccoImpresion}</td>
+              </tr>
+            ))}
+            {Array.from({ length: filasVacias }).map((_, i) => (
+              <tr key={`empty-${i}`}>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="requisa-observaciones">
+          <span className="label">OBSERVACIONES:</span>
+          <span className="line">{Observaciones || ''}</span>
         </div>
-        
-        <div className="footer-bottom">
-          <p style={{ fontSize: '7pt', margin: 0 }}>180B 50J (2) 005501 - 104500 Sep/2024</p>
+      </main>
+
+      <footer className="requisa-footer">
+        <div className="requisa-footer-meta">
+          <span className="form-code">FR-F-BD-025</span>
+          <span className="requisa-no">
+            N° <span className="red-number">{numeroDespacho}</span>
+          </span>
+        </div>
+
+        <div className="requisa-signatures">
+          <div className="requisa-signature">
+            <div className="signature-line"></div>
+            <div className="sig-title">Entrega bodega</div>
+            <div className="sig-subtitle">Nombre y firma</div>
+          </div>
+          <div className="requisa-signature">
+            <div className="signature-line"></div>
+            <div className="sig-title">Retirado por</div>
+            <div className="sig-subtitle">Nombre y firma</div>
+          </div>
+          <div className="requisa-signature">
+            <div className="signature-line"></div>
+            <div className="sig-title">Autorizado por</div>
+            <div className="sig-subtitle">Nombre del Ingeniero</div>
+          </div>
         </div>
       </footer>
     </div>

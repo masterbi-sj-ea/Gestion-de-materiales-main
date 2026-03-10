@@ -312,8 +312,21 @@ export default function CrearSolicitudPage() {
       );
 
       if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text || 'Error HTTP al crear solicitud');
+        let message = 'Error HTTP al crear solicitud';
+        try {
+          const contentType = resp.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const errJson = await resp.json();
+            message = errJson?.message || JSON.stringify(errJson);
+          } else {
+            const text = await resp.text();
+            message = text || message;
+          }
+        } catch {
+          const text = await resp.text().catch(() => '');
+          message = text || message;
+        }
+        throw new Error(message);
       }
       const data = await resp.json();
 
@@ -356,7 +369,7 @@ export default function CrearSolicitudPage() {
       setErrorLocal(e?.message || 'Error al crear la solicitud');
       toast.error({
         title: 'No se pudo crear la solicitud',
-        description: 'Intenta nuevamente o contacta al administrador.',
+        description: e?.message || 'Intenta nuevamente o contacta al administrador.',
       });
     } finally {
       setLoading(false);
@@ -369,25 +382,25 @@ export default function CrearSolicitudPage() {
       <Card className="overflow-hidden border-0 shadow-lg">
         <div className="h-20 w-full bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-400" />
         <CardContent className="pt-0">
-          <div className="-mt-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="-mt-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             {/* Bloque estilo perfil de usuario */}
-            <div className="flex items-center gap-4">
-              <div className="h-16 w-16 rounded-full border-4 border-white bg-slate-900/80 text-white flex items-center justify-center text-xl font-semibold shadow-md">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left">
+              <div className="h-16 w-16 min-w-[64px] rounded-full border-4 border-white bg-slate-900/80 text-white flex items-center justify-center text-xl font-semibold shadow-md">
                 {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
               </div>
-              <div>
-                <div className="text-sm uppercase tracking-[0.18em] text-slate-400">Solicitante</div>
+              <div className="flex flex-col items-center sm:items-start">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Solicitante</div>
                 <div className="text-lg font-semibold leading-tight text-slate-900">{user?.name}</div>
                 <div className="text-xs text-slate-500">{user?.email}</div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="rounded-full px-3 py-0.5 text-xs">
+                <div className="mt-2 flex flex-wrap justify-center sm:justify-start items-center gap-2">
+                  <Badge variant="outline" className="rounded-full px-3 py-0.5 text-[10px]">
                     {user?.role || 'Sin rol asignado'}
                   </Badge>
                   {idAreaDestino && (() => {
                     const area = areas.find((a: any) => String(a.id) === idAreaDestino);
                     if (!area) return null;
                     return (
-                      <Badge variant="secondary" className="rounded-full px-3 py-0.5 text-xs">
+                      <Badge variant="secondary" className="rounded-full px-3 py-0.5 text-[10px]">
                         {area.codigo} · {area.nombre}
                       </Badge>
                     );
@@ -397,11 +410,11 @@ export default function CrearSolicitudPage() {
             </div>
 
             {/* Chips de contexto: estado, fecha, OT, centro de costo */}
-            <div className="flex-1 flex flex-col gap-2 md:items-end">
-              <div className="flex flex-wrap gap-2 md:justify-end">
+            <div className="flex-1 flex flex-col gap-3 lg:items-end">
+              <div className="flex flex-wrap gap-2 justify-center lg:justify-end">
                 <div className="flex items-center gap-2 rounded-full bg-yellow-50 px-3 py-1 border border-yellow-200">
                   <span className="inline-flex h-2 w-2 rounded-full bg-yellow-400" />
-                  <span className="text-xs font-medium text-yellow-800">Pendiente</span>
+                  <span className="text-[10px] sm:text-xs font-medium text-yellow-800 uppercase tracking-wider">Pendiente</span>
                 </div>
                 <div className="rounded-full bg-slate-50 px-3 py-1 border border-slate-200 flex items-center gap-2">
                   <CalendarDays className="w-3 h-3 text-slate-500" />
@@ -409,7 +422,7 @@ export default function CrearSolicitudPage() {
                     type="date"
                     value={fechaSolicitud}
                     onChange={(e) => setFechaSolicitud(e.target.value)}
-                    className="border-0 bg-transparent text-xs text-slate-700 focus:outline-none focus:ring-0"
+                    className="border-0 bg-transparent text-[10px] sm:text-xs text-slate-700 focus:outline-none focus:ring-0 w-24 sm:w-auto"
                   />
                 </div>
                 <div className="rounded-full bg-slate-50 px-3 py-1 border border-slate-200 flex items-center gap-2">
@@ -418,7 +431,7 @@ export default function CrearSolicitudPage() {
                     placeholder="OT (opcional)"
                     value={ot}
                     onChange={(e) => setOt(e.target.value)}
-                    className="border-0 bg-transparent text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-w-[90px]"
+                    className="border-0 bg-transparent text-[10px] sm:text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-0 w-20 sm:min-w-[90px]"
                   />
                 </div>
               </div>
@@ -489,15 +502,28 @@ export default function CrearSolicitudPage() {
       </Card>
 
       {/* Acciones */}
-      <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={() => navigate('/solicitudes')}>
+      <div className="flex flex-col sm:flex-row justify-end gap-3 pb-8">
+        <Button 
+          variant="outline" 
+          onClick={() => navigate('/solicitudes')}
+          className="w-full sm:w-auto order-3 sm:order-1"
+        >
           Cancelar
         </Button>
-        <Button variant="outline" onClick={handleGuardarBorrador} disabled={loading}>
+        <Button 
+          variant="outline" 
+          onClick={handleGuardarBorrador} 
+          disabled={loading}
+          className="w-full sm:w-auto order-2"
+        >
           <Save className="w-4 h-4 mr-2" />
           Guardar Borrador
         </Button>
-        <Button onClick={() => handleEnviarSolicitud(false)} disabled={loading}>
+        <Button 
+          onClick={() => handleEnviarSolicitud(false)} 
+          disabled={loading}
+          className="w-full sm:w-auto order-1 sm:order-3 bg-blue-600 hover:bg-blue-700"
+        >
           <Send className="w-4 h-4 mr-2" />
           Enviar Solicitud
         </Button>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { API_BASE_URL } from '../services/apiConfig';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -59,7 +60,7 @@ export default function AuditoriaPage() {
       if (!token) return;
       setLoading(true);
       try {
-        const resp = await fetch(`http://localhost:4000/api/auditoria?page=${page}&pageSize=${pageSize}`, {
+        const resp = await fetch(`${API_BASE_URL}/auditoria?page=${page}&pageSize=${pageSize}`, {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },

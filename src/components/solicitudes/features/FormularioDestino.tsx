@@ -30,7 +30,7 @@ export const FormularioDestino: React.FC<FormularioDestinoProps> = ({
         <CardTitle>Información de destino</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
             <Label>Área destino</Label>
             <Select value={idAreaDestino} onValueChange={setIdAreaDestino}>

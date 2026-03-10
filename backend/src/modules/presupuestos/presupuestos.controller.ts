@@ -1,7 +1,11 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
-import { listarPresupuestos, crearPresupuesto, actualizarPresupuesto } from './presupuestos.service';
-import { registrarAuditoria } from '../auditoria/auditoria.service';
+import { 
+  listarPresupuestos, 
+  guardarPresupuesto, 
+  guardarPresupuestoDetalle, 
+  obtenerDetallePresupuesto 
+} from './presupuestos.service';
 
 export async function listarPresupuestosController(_req: Request, res: Response) {
   try {
@@ -13,87 +17,69 @@ export async function listarPresupuestosController(_req: Request, res: Response)
   }
 }
 
-export async function crearPresupuestoController(req: AuthRequest, res: Response) {
-  const { anio, mes, idArea, idCentroCosto, montoTotal, moneda } = req.body || {};
+export async function guardarPresupuestoController(req: AuthRequest, res: Response) {
+  const { idPresupuesto, anio, mes, montoTotal, idArea, idCentroCosto } = req.body || {};
 
-  if (!anio || !montoTotal) {
-    return res.status(400).json({ message: 'anio y montoTotal son requeridos' });
+  if (!anio || !mes || !montoTotal || !idArea) {
+    return res.status(400).json({ message: 'Anio, mes, montoTotal e idArea son requeridos' });
   }
 
   try {
-    const idPresupuesto = await crearPresupuesto({
+    await guardarPresupuesto({
+      IdPresupuesto: idPresupuesto ? Number(idPresupuesto) : undefined,
       Anio: Number(anio),
-      Mes: mes !== undefined && mes !== null ? Number(mes) : null,
-      IdArea: idArea !== undefined && idArea !== null ? Number(idArea) : null,
-      IdCentroCosto: idCentroCosto !== undefined && idCentroCosto !== null ? Number(idCentroCosto) : null,
+      Mes: Number(mes),
       MontoTotal: Number(montoTotal),
-      Moneda: moneda,
+      IdArea: Number(idArea),
+      IdCentroCosto: idCentroCosto ? Number(idCentroCosto) : undefined,
+      IdUsuarioAudit: req.userId || 0
     });
 
-    try {
-      await registrarAuditoria(req.userId ?? null, 'CREAR_PRESUPUESTO', {
-        modulo: 'Presupuestos',
-        entidad: `Presupuesto #${idPresupuesto}`,
-        idPresupuesto,
-        anio,
-        mes,
-        idArea,
-        idCentroCosto,
-        montoTotal,
-        moneda,
-      });
-    } catch (auditError) {
-      console.error('Error al registrar auditoría CREAR_PRESUPUESTO', auditError);
-    }
-
-    return res.status(201).json({ idPresupuesto });
+    return res.status(200).json({ message: 'Presupuesto guardado correctamente' });
   } catch (error: any) {
-    console.error('Error en crearPresupuestoController', error);
-    return res.status(500).json({ message: 'Error al crear presupuesto' });
+    console.error('Error en guardarPresupuestoController', error);
+    return res.status(500).json({ message: 'Error al guardar presupuesto' });
   }
 }
 
-export async function actualizarPresupuestoController(req: AuthRequest, res: Response) {
-  const id = Number(req.params.id);
-  const { anio, mes, idArea, idCentroCosto, montoTotal, moneda } = req.body || {};
+export async function guardarPresupuestoDetalleController(req: AuthRequest, res: Response) {
+  const { idPresupuesto, idMaterial, grupoArticulos, montoPermitido, cantidadPresupuestada, costoUnitarioPresupuestado, montoAsignado } = req.body || {};
 
-  if (!Number.isInteger(id) || id <= 0) {
-    return res.status(400).json({ message: 'Id de presupuesto inválido' });
-  }
-
-  if (!anio || !montoTotal) {
-    return res.status(400).json({ message: 'anio y montoTotal son requeridos' });
+  if (!idPresupuesto || !idMaterial || !montoPermitido) {
+    return res.status(400).json({ message: 'Datos incompletos para el detalle del presupuesto' });
   }
 
   try {
-    await actualizarPresupuesto(id, {
-      Anio: Number(anio),
-      Mes: mes !== undefined && mes !== null ? Number(mes) : null,
-      IdArea: idArea !== undefined && idArea !== null ? Number(idArea) : null,
-      IdCentroCosto: idCentroCosto !== undefined && idCentroCosto !== null ? Number(idCentroCosto) : null,
-      MontoTotal: Number(montoTotal),
-      Moneda: moneda,
+    await guardarPresupuestoDetalle({
+      IdPresupuesto: Number(idPresupuesto),
+      IdMaterial: Number(idMaterial),
+      GrupoArticulos: grupoArticulos || '',
+      MontoPermitido: Number(montoPermitido),
+      CantidadPresupuestada: Number(cantidadPresupuestada) || 0,
+      CostoUnitarioPresupuestado: Number(costoUnitarioPresupuestado) || 0,
+      MontoAsignado: Number(montoAsignado) || 0
     });
 
-    try {
-      await registrarAuditoria(req.userId ?? null, 'ACTUALIZAR_PRESUPUESTO', {
-        modulo: 'Presupuestos',
-        entidad: `Presupuesto #${id}`,
-        idPresupuesto: id,
-        anio,
-        mes,
-        idArea,
-        idCentroCosto,
-        montoTotal,
-        moneda,
-      });
-    } catch (auditError) {
-      console.error('Error al registrar auditoría ACTUALIZAR_PRESUPUESTO', auditError);
-    }
-
-    return res.status(204).send();
+    return res.status(200).json({ message: 'Detalle de presupuesto guardado correctamente' });
   } catch (error: any) {
-    console.error('Error en actualizarPresupuestoController', error);
-    return res.status(500).json({ message: 'Error al actualizar presupuesto' });
+    console.error('Error en guardarPresupuestoDetalleController', error);
+    return res.status(500).json({ message: 'Error al guardar detalle de presupuesto' });
   }
 }
+
+export async function obtenerDetallePresupuestoController(req: Request, res: Response) {
+  const idPresupuesto = Number(req.params.id);
+  
+  if (isNaN(idPresupuesto)) {
+    return res.status(400).json({ message: 'ID de presupuesto inválido' });
+  }
+
+  try {
+    const detalle = await obtenerDetallePresupuesto(idPresupuesto);
+    return res.json(detalle);
+  } catch (error: any) {
+    console.error('Error en obtenerDetallePresupuestoController', error);
+    return res.status(500).json({ message: 'Error al obtener detalle de presupuesto' });
+  }
+}
+

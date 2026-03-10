@@ -76,7 +76,29 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
     return res.status(201).json(result);
   } catch (error: any) {
     console.error('Error en crearSolicitudController', error);
-    return res.status(500).json({ message: 'Error al crear solicitud' });
+
+    const sqlInfo = error?.originalError?.info;
+    const sqlNumber: number | undefined =
+      (typeof error?.number === 'number' ? error.number : undefined) ??
+      (typeof sqlInfo?.number === 'number' ? sqlInfo.number : undefined);
+    const sqlMessage: string | undefined =
+      (typeof error?.message === 'string' ? error.message : undefined) ??
+      (typeof sqlInfo?.message === 'string' ? sqlInfo.message : undefined);
+
+    // 2627: PK/Unique constraint violation, 2601: Cannot insert duplicate key row in object with unique index
+    if (sqlNumber === 2627 || sqlNumber === 2601) {
+      // Caso específico observado: IDENTITY desfasado en DetalleSolicitudesMaterial
+      if ((sqlMessage || '').includes('DetalleSolicitudesMaterial') && (sqlMessage || '').includes('duplicate key value is (1)')) {
+        return res.status(409).json({
+          message:
+            'Error al crear solicitud: el IDENTITY de DetalleSolicitudesMaterial está desfasado (PK duplicada). Ejecuta un RESEED del IDENTITY al MAX(IdDetalleSolicitud) y reintenta.',
+        });
+      }
+
+      return res.status(409).json({ message: sqlMessage || 'Registro duplicado (restricción UNIQUE/PK)' });
+    }
+
+    return res.status(500).json({ message: sqlMessage || 'Error al crear solicitud' });
   }
 }
 
@@ -221,7 +243,55 @@ export async function registrarAprobacionSolicitudController(req: AuthRequest, r
     return res.status(200).json({ message: 'Aprobación registrada correctamente' });
   } catch (error: any) {
     console.error('Error en registrarAprobacionSolicitudController', error);
-    return res.status(500).json({ message: 'Error al registrar aprobación de solicitud' });
+
+    const sqlInfo = error?.originalError?.info;
+    const sqlNumber: number | undefined =
+      (typeof error?.number === 'number' ? error.number : undefined) ??
+      (typeof sqlInfo?.number === 'number' ? sqlInfo.number : undefined);
+    const sqlMessage: string | undefined =
+      (typeof error?.message === 'string' ? error.message : undefined) ??
+      (typeof sqlInfo?.message === 'string' ? sqlInfo.message : undefined);
+
+    // Algunos SPs relanzan como 50000; en esos casos el texto sigue siendo clave.
+    const msg = (sqlMessage || '').toString();
+
+    // Caso observado: IDENTITY desfasado en dbo.Aprobaciones (PK duplicada con valor 1)
+    if (msg.includes('Aprobaciones') && msg.includes('duplicate key value is (1)')) {
+      return res.status(409).json({
+        message:
+          'Error al registrar aprobación: el IDENTITY de dbo.Aprobaciones está desfasado (PK duplicada). Ejecuta un RESEED al MAX(IdAprobacion) y reintenta.',
+      });
+    }
+
+    // Duplicados por texto (aunque el number venga como 50000)
+    if (msg.includes('Cannot insert duplicate key') || msg.includes('duplicate key')) {
+      return res.status(409).json({
+        message: sqlMessage || 'No se pudo registrar la aprobación: registro duplicado (PK/UNIQUE).',
+      });
+    }
+
+    // Duplicados (PK/UNIQUE)
+    if (sqlNumber === 2627 || sqlNumber === 2601) {
+      return res.status(409).json({
+        message: sqlMessage || 'No se pudo registrar la aprobación: registro duplicado (PK/UNIQUE).',
+      });
+    }
+
+    // Violación de FK / CHECK
+    if (sqlNumber === 547) {
+      return res.status(409).json({
+        message:
+          sqlMessage ||
+          'No se pudo registrar la aprobación: violación de integridad (FK/CHECK). Verifica solicitud y aprobador.',
+      });
+    }
+
+    // Errores de conversión / parámetros inválidos
+    if (sqlNumber === 245 || sqlNumber === 8114 || sqlNumber === 515 || sqlNumber === 50000) {
+      return res.status(400).json({ message: sqlMessage || 'Datos inválidos para registrar aprobación.' });
+    }
+
+    return res.status(500).json({ message: sqlMessage || 'Error al registrar aprobación de solicitud' });
   }
 }
 

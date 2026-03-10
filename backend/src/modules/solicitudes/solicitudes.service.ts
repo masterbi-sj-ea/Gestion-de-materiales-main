@@ -426,14 +426,15 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
 
   const drawRequisa = (startY: number) => {
     // Título igual al físico
+    const titleY = startY - 10;
     doc.font("Times-Bold").fontSize(16);
-    doc.text("SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.", left, startY, { align: 'center', width: contentW });
+    doc.text("SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.", left, titleY, { align: 'center', width: contentW });
     
     doc.font("Helvetica").fontSize(8).fillColor("#666");
-    doc.text("FR-F-BD-022", right - 60, startY);
+    doc.text("FR-F-BD-022", right - 60, titleY);
 
     const logoX = left;
-    const logoY = startY - 5;
+    const logoY = titleY - 5;
     const posiblesRutas = [
       path.join(process.cwd(), "backend", "public", "logo_extraceite.png"),
       path.join(process.cwd(), "public", "logo_extraceite.png"),
@@ -455,9 +456,9 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
 
     const numDespacho = String(cab.CodigoSolicitud).replace(/\D/g, '').slice(-6) || '000000';
     doc.font("Helvetica-Bold").fontSize(14).fillColor("#e11d48");
-    doc.text(`Nº ${numDespacho}`, right - 80, startY + 15, { align: 'right', width: 80 });
+    doc.text(`Nº ${numDespacho}`, right - 80, titleY + 15, { align: 'right', width: 80 });
 
-    const infoY = startY + 50;
+    const infoY = titleY + 35;
     doc.font("Helvetica-Bold").fontSize(9).fillColor("black");
     doc.text("FECHA: ", left, infoY);
     doc.font("Helvetica").text(fmtDate(cab.FechaSolicitud), left + 45, infoY);
@@ -467,12 +468,12 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     doc.font("Helvetica").text(cab.CodigoSolicitud, left + 365, infoY);
     doc.moveTo(left + 365, infoY + 10).lineTo(right, infoY + 10).stroke();
 
-    const tableY = infoY + 25;
+    const tableY = infoY + 20;
     const headerH = 20;
-    const rowHTable = 20;
-    const rowsLimit = 10;
+    const rowHTable = 18;
+    const rowsLimit = 12;
 
-    const cellPadY = 3;
+    const cellPadY = 2;
     const cellH = rowHTable - (cellPadY * 2);
     const baseFontSize = 8;
     const minFontSize = 6;
@@ -558,12 +559,12 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     });
     strokeBox(left, tableY, contentW, headerH + (rowsLimit * rowHTable));
 
-    const footerY = tableY + headerH + (rowsLimit * rowHTable) + 15;
+    const footerY = tableY + headerH + (rowsLimit * rowHTable) + 12;
     doc.font("Helvetica").fontSize(9);
     doc.text("Hora de inicio de despacho: ____________", left, footerY);
     doc.text("Hora de finalización de despacho: ____________", left + 250, footerY);
 
-    const sigY = footerY + 50;
+    const sigY = footerY + 40;
     doc.moveTo(left + 20, sigY).lineTo(left + 180, sigY).stroke();
     doc.text("Autorizado por", left + 20, sigY + 5, { width: 160, align: 'center' });
     doc.text("Nombre y firma del jefe de área", left + 20, sigY + 15, { width: 160, align: 'center' });
@@ -571,8 +572,6 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     doc.moveTo(right - 180, sigY).lineTo(right - 20, sigY).stroke();
     doc.text("Autorizado por", right - 180, sigY + 5, { width: 160, align: 'center' });
     doc.text("de la persona que retira", right - 180, sigY + 15, { width: 160, align: 'center' });
-
-    doc.fontSize(7).text("180B 50J (2) 095501 - 104500 Sep/2024", left, sigY + 40);
   };
 
   drawRequisa(40);

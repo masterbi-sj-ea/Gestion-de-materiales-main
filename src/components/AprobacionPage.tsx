@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from './ui/table';
+import { apiFetch } from '../services/apiClient';
 
 interface Solicitud {
   id: string;
@@ -65,11 +66,10 @@ export default function AprobacionPage() {
     if (!token) return;
     setCargando(true);
     try {
-      const headers = { Authorization: `Bearer ${token}` };
       const [pendResp, aprResp, rejResp] = await Promise.all([
-        fetch('http://localhost:4000/api/solicitudes?estado=PENDIENTE', { headers }),
-        fetch('http://localhost:4000/api/solicitudes?estado=APROBADA', { headers }),
-        fetch('http://localhost:4000/api/solicitudes?estado=RECHAZADA', { headers }),
+        apiFetch('/solicitudes?estado=PENDIENTE'),
+        apiFetch('/solicitudes?estado=APROBADA'),
+        apiFetch('/solicitudes?estado=RECHAZADA'),
       ]);
 
       const [pendJson, aprJson, rejJson] = await Promise.all([
@@ -98,9 +98,7 @@ export default function AprobacionPage() {
     const cargarDetalle = async () => {
       setCargandoDetalle(true);
       try {
-        const resp = await fetch(`http://localhost:4000/api/solicitudes/${selectedSolicitud.id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const resp = await apiFetch(`/solicitudes/${selectedSolicitud.id}`);
         if (resp.ok) {
           const data = await resp.json();
           setDetalleSolicitud(data.detalle || []);
@@ -131,12 +129,8 @@ export default function AprobacionPage() {
     if (!selectedSolicitud || !token) return;
 
     try {
-      const resp = await fetch(`http://localhost:4000/api/solicitudes/${selectedSolicitud.id}/aprobaciones`, {
+      const resp = await apiFetch(`/solicitudes/${selectedSolicitud.id}/aprobaciones`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           estado: modalAction === 'aprobar' ? 'APROBADA' : 'RECHAZADA',
           comentario: comentario || null,
@@ -144,7 +138,18 @@ export default function AprobacionPage() {
       });
 
       if (!resp.ok) {
-        console.error('Error al registrar aprobación', await resp.text());
+        const contentType = resp.headers.get('content-type') || '';
+        const payload = contentType.includes('application/json')
+          ? await resp.json().catch(() => null)
+          : await resp.text().catch(() => null);
+
+        const message =
+          (payload && typeof payload === 'object' && 'message' in payload ? (payload as any).message : null) ||
+          (typeof payload === 'string' ? payload : null) ||
+          'Error al registrar aprobación';
+
+        console.error('Error al registrar aprobación', message);
+        alert(message);
         return;
       }
 
@@ -157,6 +162,7 @@ export default function AprobacionPage() {
       }
     } catch (error) {
       console.error('Error al aprobar/rechazar solicitud', error);
+      alert('Error al registrar aprobación');
     }
 
     setSelectedSolicitud(null);

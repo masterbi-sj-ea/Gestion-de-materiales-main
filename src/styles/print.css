@@ -31,6 +31,72 @@
     box-sizing: border-box;
   }
 
+  /* =========================
+     Requisa (FR-F-BD-025)
+     ========================= */
+  .requisa-print {
+    color: #000;
+  }
+
+  .requisa-header {
+    margin-bottom: 10px;
+  }
+
+  .requisa-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .requisa-title {
+    font-size: 16pt;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    margin: 0;
+  }
+
+  .requisa-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .requisa-logo img {
+    width: 64px;
+    height: auto;
+  }
+
+  .requisa-logo span {
+    font-weight: bold;
+    font-size: 11pt;
+  }
+
+  .requisa-mini-table {
+    width: 45%;
+    border-collapse: collapse;
+    border: 1px solid #000;
+    font-size: 10pt;
+  }
+
+  .requisa-mini-table th,
+  .requisa-mini-table td {
+    border: 1px solid #000;
+    padding: 4px 6px;
+  }
+
+  .requisa-mini-table th {
+    width: 40%;
+    font-weight: bold;
+    text-align: left;
+    text-transform: uppercase;
+    background-color: #f0f0f0;
+  }
+
+  .requisa-mini-table td {
+    height: 18px;
+  }
+
   /* Header New Layout */
   .print-header {
     display: flex;
@@ -89,6 +155,85 @@
     text-transform: uppercase;
     font-weight: bold;
     text-align: center;
+  }
+
+  .requisa-items-table td {
+    height: 18px;
+  }
+
+  .requisa-items-table .tc {
+    text-align: center;
+  }
+
+  .requisa-items-table .small {
+    font-size: 8pt;
+    line-height: 1.1;
+  }
+
+  .requisa-observaciones {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 10pt;
+  }
+
+  .requisa-observaciones .label {
+    font-weight: bold;
+    white-space: nowrap;
+  }
+
+  .requisa-observaciones .line {
+    flex: 1;
+    border-bottom: 1px solid #000;
+    min-height: 16px;
+    padding: 0 6px;
+  }
+
+  .requisa-footer {
+    margin-top: 8px;
+  }
+
+  .requisa-footer-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 10px 0 14px;
+  }
+
+  .requisa-footer-meta .form-code {
+    font-size: 9pt;
+  }
+
+  .requisa-footer-meta .requisa-no {
+    font-size: 14pt;
+    font-weight: bold;
+  }
+
+  .requisa-signatures {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    margin-top: 28px;
+  }
+
+  .requisa-signature {
+    text-align: center;
+  }
+
+  .requisa-signature .signature-line {
+    border-top: 1px solid #000;
+    margin-bottom: 6px;
+  }
+
+  .requisa-signature .sig-title {
+    font-size: 10pt;
+    margin: 0;
+  }
+
+  .requisa-signature .sig-subtitle {
+    font-size: 9pt;
+    margin: 0;
   }
 
   /* Footer New Layout */

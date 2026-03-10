@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Plus, Edit, Trash2, MapPin } from 'lucide-react';
+import { API_BASE_URL } from '../services/apiConfig';
 
 interface Area {
   id: number;
@@ -52,7 +53,7 @@ export default function AreasPage() {
     }
 
     try {
-      const resp = await fetch('http://localhost:4000/api/areas', {
+      const resp = await fetch(`${API_BASE_URL}/areas`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -80,8 +81,8 @@ export default function AreasPage() {
   const cargarCentrosCosto = async () => {
     if (!token) return;
 
-    try {
-      const resp = await fetch('http://localhost:4000/api/centros-costo', {
+     try {
+       const resp = await fetch(`${API_BASE_URL}/centros-costo`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -122,7 +123,7 @@ export default function AreasPage() {
     if (!nuevoCcCodigo.trim() || !nuevoCcNombre.trim()) return;
 
     try {
-      const resp = await fetch('http://localhost:4000/api/centros-costo', {
+      const resp = await fetch(`${API_BASE_URL}/centros-costo`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -163,7 +164,7 @@ export default function AreasPage() {
 
     try {
       if (editingArea) {
-        await fetch(`http://localhost:4000/api/areas/${editingArea.id}`, {
+        await fetch(`${API_BASE_URL}/areas/${editingArea.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -178,7 +179,7 @@ export default function AreasPage() {
           }),
         });
       } else {
-        await fetch('http://localhost:4000/api/areas', {
+        await fetch(`${API_BASE_URL}/areas`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -204,7 +205,7 @@ export default function AreasPage() {
   const handleEliminar = async (id: number) => {
     if (!confirm('¿Estás seguro de eliminar esta área?')) return;
     try {
-      await fetch(`http://localhost:4000/api/areas/${id}`, {
+      await fetch(`${API_BASE_URL}/areas/${id}`, {
         method: 'DELETE',
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
