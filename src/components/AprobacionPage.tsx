@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { sileo } from 'sileo';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
@@ -122,7 +123,7 @@ export default function AprobacionPage() {
 
   const handleConfirmarAccion = async () => {
     if (modalAction === 'rechazar' && !comentario.trim()) {
-      alert('Debes ingresar un comentario al rechazar la solicitud');
+      sileo.error('Comentario requerido', { description: 'Debes ingresar un comentario al rechazar la solicitud.' });
       return;
     }
 
@@ -149,7 +150,7 @@ export default function AprobacionPage() {
           'Error al registrar aprobación';
 
         console.error('Error al registrar aprobación', message);
-        alert(message);
+        sileo.error('Error al registrar aprobación', { description: message });
         return;
       }
 
@@ -162,7 +163,7 @@ export default function AprobacionPage() {
       }
     } catch (error) {
       console.error('Error al aprobar/rechazar solicitud', error);
-      alert('Error al registrar aprobación');
+      sileo.error('Error al registrar aprobación', { description: 'Ocurrió un error al registrar la aprobación.' });
     }
 
     setSelectedSolicitud(null);
@@ -529,9 +530,11 @@ export default function AprobacionPage() {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 mt-4">
             <Button
               variant="outline"
+              size="lg"
+              className="w-full sm:w-auto order-2 sm:order-1 font-semibold"
               onClick={() => {
                 setModalAction(null);
                 setSelectedSolicitud(null);
@@ -543,18 +546,22 @@ export default function AprobacionPage() {
             </Button>
             {modalAction !== 'ver' && (
               <Button
+                size="lg"
                 onClick={handleConfirmarAccion}
                 variant={modalAction === 'rechazar' ? 'destructive' : 'default'}
+                className={`w-full sm:min-w-[150px] order-1 sm:order-2 font-bold shadow-md transition-all active:scale-95 ${
+                  modalAction === 'aprobar' ? 'bg-green-600 hover:bg-green-700 text-white shadow-green-100' : ''
+                }`}
               >
                 {modalAction === 'aprobar' ? (
                   <>
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Aprobar
+                    <CheckCircle className="w-5 h-5 mr-2" />
+                    Confirmar Aprobación
                   </>
                 ) : (
                   <>
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Rechazar
+                    <XCircle className="w-5 h-5 mr-2" />
+                    Confirmar Rechazo
                   </>
                 )}
               </Button>

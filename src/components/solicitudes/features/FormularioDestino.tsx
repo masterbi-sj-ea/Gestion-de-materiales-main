@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
@@ -15,7 +15,7 @@ interface FormularioDestinoProps {
   codigoCuenta: string;
 }
 
-export const FormularioDestino: React.FC<FormularioDestinoProps> = ({
+export const FormularioDestino = memo(function FormularioDestino({
   areas,
   recursos,
   idAreaDestino,
@@ -23,7 +23,7 @@ export const FormularioDestino: React.FC<FormularioDestinoProps> = ({
   idRecurso,
   setIdRecurso,
   codigoCuenta,
-}) => {
+}: FormularioDestinoProps) {
   return (
     <Card>
       <CardHeader>
@@ -81,4 +81,4 @@ export const FormularioDestino: React.FC<FormularioDestinoProps> = ({
       </CardContent>
     </Card>
   );
-};
+});

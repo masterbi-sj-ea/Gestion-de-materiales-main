@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { sileo } from 'sileo';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -7,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Plus, Mail, Clock, Edit, Trash2, FileBarChart, Download } from 'lucide-react';
+import { Plus, Mail, Clock, Edit, Trash2, FileBarChart, Download, AlertTriangle } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -88,6 +89,7 @@ export default function ReportesPage() {
   const [reportes, setReportes] = useState<ConfiguracionReporte[]>(mockReportes);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingReporte, setEditingReporte] = useState<ConfiguracionReporte | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; item: string | null }>({ open: false, item: null });
   const [formData, setFormData] = useState({
     nombre: '',
     tipo: 'consumo',
@@ -124,7 +126,7 @@ export default function ReportesPage() {
 
   const handleGuardar = () => {
     console.log('Guardando configuración de reporte:', formData);
-    alert('Configuración guardada exitosamente');
+    sileo.success('Configuración guardada exitosamente', { description: 'Los cambios se han guardado correctamente.' });
     setDialogOpen(false);
   };
 
@@ -135,18 +137,50 @@ export default function ReportesPage() {
   };
 
   const handleEliminar = (id: string) => {
-    if (confirm('¿Estás seguro de eliminar esta configuración de reporte?')) {
-      setReportes(reportes.filter(r => r.id !== id));
+    setConfirmDelete({ open: true, item: id });
+  };
+
+  const confirmEliminar = () => {
+    if (confirmDelete.item) {
+      setReportes(reportes.filter(r => r.id !== confirmDelete.item));
+      sileo.success('Reporte eliminado', { description: 'La configuración del reporte fue eliminada con éxito.' });
     }
+    setConfirmDelete({ open: false, item: null });
   };
 
   const handleGenerarManual = (reporte: ConfiguracionReporte) => {
     console.log('Generando reporte manual:', reporte);
-    alert(`Generando ${reporte.nombre}...`);
+    sileo.info(`Generando ${reporte.nombre}...`, { description: 'El reporte se está generando y será enviado a los destinatarios.' });
   };
 
   return (
     <div className="space-y-6">
+      {/* Diálogo de Confirmación de Eliminación Pro-Level Responsivo */}
+      <Dialog open={confirmDelete.open} onOpenChange={(open) => !open && setConfirmDelete({ open: false, item: null })}>
+        <DialogContent className="sm:max-w-md w-[90vw] md:w-full rounded-2xl p-0 overflow-hidden border-destructive/20 shadow-2xl">
+          <div className="bg-destructive/10 p-6 flex flex-col items-center justify-center text-center">
+            <div className="bg-destructive/20 rounded-full p-4 mb-4">
+              <AlertTriangle className="h-10 w-10 text-destructive shadow-sm" />
+            </div>
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-destructive mb-2">
+              ¿Eliminar reporte?
+            </DialogTitle>
+            <DialogDescription className="text-base text-destructive/80 font-medium">
+              Esta acción es irreversible. ¿Deseas eliminar definitivamente este reporte automático?
+            </DialogDescription>
+          </div>
+
+          <DialogFooter className="px-6 py-4 bg-background/50 border-t flex justify-center">
+            <Button
+              variant="destructive"
+              onClick={confirmEliminar}
+              className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
+            >
+              Sí, eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>

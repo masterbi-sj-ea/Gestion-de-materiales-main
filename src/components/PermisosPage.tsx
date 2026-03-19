@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
+import { sileo } from 'sileo';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Switch } from './ui/switch';
@@ -78,7 +79,7 @@ export default function PermisosPage() {
       actualizarPermisos(rol as UserRole, modulos);
     });
     setHasChanges(false);
-    alert('Permisos actualizados exitosamente');
+    sileo.success('Permisos actualizados exitosamente', { description: 'Los cambios de permisos se han guardado correctamente.' });
   };
 
   const handleRestaurar = () => {

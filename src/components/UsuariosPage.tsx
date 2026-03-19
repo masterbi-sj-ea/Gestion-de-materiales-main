@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { sileo } from 'sileo';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Search, Plus, Edit, Trash2, Users, Shield, UserCheck, Lock, Package } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Users, Shield, UserCheck, Lock, Package, AlertTriangle } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
 import {
   Table,
@@ -45,6 +46,7 @@ export default function UsuariosPage() {
   const [selectedEstado, setSelectedEstado] = useState('todos');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUsuario, setEditingUsuario] = useState<Usuario | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; item: string | null }>({ open: false, item: null });
   const [formNombre, setFormNombre] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formRolId, setFormRolId] = useState<string>('');
@@ -183,28 +185,62 @@ export default function UsuariosPage() {
     }
   };
 
-  const handleEliminar = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar este usuario?')) return;
+  const handleEliminar = (id: string) => {
+    setConfirmDelete({ open: true, item: id });
+  };
+
+  const confirmEliminar = async () => {
+    if (!confirmDelete.item) return;
     try {
-      await fetch(`${API_BASE_URL}/usuarios/${id}`, {
+      await fetch(`${API_BASE_URL}/usuarios/${confirmDelete.item}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       await cargarUsuarios();
+      sileo.success('Usuario eliminado', { description: 'El usuario fue eliminado correctamente.' });
     } catch (error) {
       console.error('Error al eliminar usuario', error);
+      sileo.error('Error', { description: 'Ocurrió un error al eliminar el usuario.' });
+    } finally {
+      setConfirmDelete({ open: false, item: null });
     }
   };
 
   const handleResetPassword = (email: string) => {
     console.log('Enviando link de restablecimiento a:', email);
-    alert(`Link de restablecimiento enviado a ${email}`);
+    sileo.info('Link de restablecimiento enviado', { description: `Se envió un enlace de restablecimiento a ${email}` });
   };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="space-y-6">
+      {/* Diálogo de Confirmación de Eliminación Pro-Level Responsivo */}
+      <Dialog open={confirmDelete.open} onOpenChange={(open) => !open && setConfirmDelete({ open: false, item: null })}>
+        <DialogContent className="sm:max-w-md w-[90vw] md:w-full rounded-2xl p-0 overflow-hidden border-destructive/20 shadow-2xl">
+          <div className="bg-destructive/10 p-6 flex flex-col items-center justify-center text-center">
+            <div className="bg-destructive/20 rounded-full p-4 mb-4">
+              <AlertTriangle className="h-10 w-10 text-destructive shadow-sm" />
+            </div>
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-destructive mb-2">
+              ¿Eliminar usuario?
+            </DialogTitle>
+            <DialogDescription className="text-base text-destructive/80 font-medium">
+              Esta acción es irreversible. ¿Deseas eliminar definitivamente este usuario del sistema?
+            </DialogDescription>
+          </div>
+
+          <DialogFooter className="px-6 py-4 bg-background/50 border-t flex justify-center">
+            <Button
+              variant="destructive"
+              onClick={confirmEliminar}
+              className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
+            >
+              Sí, eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>

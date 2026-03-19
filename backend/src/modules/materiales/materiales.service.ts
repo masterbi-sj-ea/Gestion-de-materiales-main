@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import { callSpMany, callSpOne } from '../../infra/spCaller';
 import { getPool } from '../../config/db';
+import { env } from '../../config/env';
 
 export interface Material {
   IdMaterial: number;
@@ -15,6 +16,10 @@ export interface MaterialConStock extends Material {
   UltimaFechaCompra: string | null;
   UltimoPrecioCompra: number | null;
   UltimaMonedaCompra: string | null;
+  id_imagen?: number | null;
+  RutaImagenFinal?: string | null;
+  TieneImagen?: number | boolean | null;
+  FuenteImagen?: string | null;
 }
 
 export interface MaterialImportRow {
@@ -28,12 +33,40 @@ export interface MaterialImportRow {
   UltimaMonedaCompra?: string | null;
 }
 
+export interface MaterialImagen {
+  IdMaterial: number;
+  NumeroArticulo: string;
+  DescripcionArticulo: string;
+  id_producto: number | null;
+  CodigoSAP: string | null;
+  CodigoSAP_Original: string | null;
+  NumeroParte: string | null;
+  DescripcionCatalogo: string | null;
+  id_imagen: number | null;
+  RutaImagenFinal: string | null;
+  DescripcionImagen: string | null;
+  es_principal: boolean | number | null;
+  TieneImagen: boolean | number | null;
+  FuenteImagen: string | null;
+}
+
 export async function listarMateriales(): Promise<Material[]> {
   return callSpMany<Material>('sp_ListarMateriales');
 }
 
 export async function listarMaterialesConStock(): Promise<MaterialConStock[]> {
   return callSpMany<MaterialConStock>('sp_ListarMaterialesConStock');
+}
+
+export async function obtenerImagenMaterialPorNumeroArticulo(
+  numeroArticulo: string
+): Promise<MaterialImagen | null> {
+  const rows = await callSpMany<MaterialImagen>(
+    'sp_ObtenerImagenMaterialPorNumeroArticulo',
+    { NumeroArticulo: numeroArticulo }
+  );
+
+  return rows[0] ?? null;
 }
 
 export async function crearMaterial(input: {
@@ -75,7 +108,7 @@ export async function eliminarMaterial(idMaterial: number): Promise<void> {
 
 export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsuario?: number): Promise<void> {
   const pool = await getPool();
-  const tvp = new sql.Table();
+  const tvp = new sql.Table('dbo.TMaterialCarga');
 
   tvp.columns.add('NumeroArticulo', sql.NVarChar(50));
   tvp.columns.add('DescripcionArticulo', sql.NVarChar(255));
@@ -131,6 +164,7 @@ export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsu
   }
 
   const request = pool.request();
+  (request as any).timeout = env.DB_REQUEST_TIMEOUT_MS;
   request.input('Datos', tvp as any);
   if (idUsuario) {
     request.input('IdUsuario', sql.Int, idUsuario);

@@ -22,11 +22,17 @@ export async function listarMovimientosInventario(filtros: {
   TipoMovimiento?: string;
   FechaInicio?: string;
   FechaFin?: string;
+  Search?: string;
+  Page?: number;
+  Limit?: number;
 }): Promise<MovimientoInventario[]> {
   return callSpMany<MovimientoInventario>('sp_ListarMovimientosInventario', {
     IdMaterial: filtros.IdMaterial ?? null,
     TipoMovimiento: filtros.TipoMovimiento ?? null,
     FechaInicio: filtros.FechaInicio ?? null,
     FechaFin: filtros.FechaFin ?? null,
+    Search: filtros.Search ?? null,
+    Page: filtros.Page ?? null,
+    Limit: filtros.Limit ?? null,
   });
 }

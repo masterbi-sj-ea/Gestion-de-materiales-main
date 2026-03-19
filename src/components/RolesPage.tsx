@@ -6,8 +6,9 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Plus, Edit, Trash2, Shield } from 'lucide-react';
+import { Plus, Edit, Trash2, Shield, AlertTriangle } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
+import { sileo } from 'sileo';
 
 interface Rol {
   id: number;
@@ -19,6 +20,7 @@ export default function RolesPage() {
   const [roles, setRoles] = useState<Rol[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRol, setEditingRol] = useState<Rol | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; item: number | null }>({ open: false, item: null });
   const [nombre, setNombre] = useState('');
   const [descripcion, setDescripcion] = useState('');
   const [page, setPage] = useState(1);
@@ -90,16 +92,24 @@ export default function RolesPage() {
     }
   };
 
-  const handleEliminar = async (id: number) => {
-    if (!confirm('¿Estás seguro de eliminar este rol?')) return;
+  const handleEliminar = (id: number) => {
+    setConfirmDelete({ open: true, item: id });
+  };
+
+  const confirmEliminar = async () => {
+    if (!confirmDelete.item) return;
     try {
-      await fetch(`${API_BASE_URL}/roles/${id}`, {
+      await fetch(`${API_BASE_URL}/roles/${confirmDelete.item}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       await cargarRoles();
+      sileo.success('Rol eliminado', { description: 'El rol fue eliminado correctamente.' });
     } catch (error) {
       console.error('Error al eliminar rol', error);
+      sileo.error('Error', { description: 'Ocurrió un error al eliminar el rol.' });
+    } finally {
+      setConfirmDelete({ open: false, item: null });
     }
   };
 
@@ -107,6 +117,32 @@ export default function RolesPage() {
 
   return (
     <div className="space-y-6">
+      {/* Diálogo de Confirmación de Eliminación Pro-Level Responsivo */}
+      <Dialog open={confirmDelete.open} onOpenChange={(open) => !open && setConfirmDelete({ open: false, item: null })}>
+        <DialogContent className="sm:max-w-md w-[90vw] md:w-full rounded-2xl p-0 overflow-hidden border-destructive/20 shadow-2xl">
+          <div className="bg-destructive/10 p-6 flex flex-col items-center justify-center text-center">
+            <div className="bg-destructive/20 rounded-full p-4 mb-4">
+              <AlertTriangle className="h-10 w-10 text-destructive shadow-sm" />
+            </div>
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-destructive mb-2">
+              ¿Eliminar rol?
+            </DialogTitle>
+            <DialogDescription className="text-base text-destructive/80 font-medium">
+              Esta acción es irreversible. ¿Deseas eliminar definitivamente este rol?
+            </DialogDescription>
+          </div>
+
+          <DialogFooter className="px-6 py-4 bg-background/50 border-t flex justify-center">
+            <Button
+              variant="destructive"
+              onClick={confirmEliminar}
+              className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
+            >
+              Sí, eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1>Gestión de Roles</h1>

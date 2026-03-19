@@ -16,8 +16,9 @@ import {
   DialogTrigger,
 } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Plus, Calendar, FileText, Edit, Trash2 } from 'lucide-react';
+import { Plus, Calendar, FileText, Edit, Trash2, AlertTriangle } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
+import { sileo } from 'sileo';
 
 interface CorteStock {
   id: number;
@@ -32,6 +33,7 @@ interface CorteStock {
 export default function CortesPage() {
   const [cortes, setCortes] = useState<CorteStock[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; corte: CorteStock | null }>({ open: false, corte: null });
   const [editingCorte, setEditingCorte] = useState<CorteStock | null>(null);
   const [descripcion, setDescripcion] = useState('');
   const [descripcionError, setDescripcionError] = useState<string | null>(null);
@@ -163,9 +165,6 @@ export default function CortesPage() {
 
   const handleEliminarCorte = async (corte: CorteStock) => {
     if (!token) return;
-    const confirmar = window.confirm(`¿Seguro que deseas eliminar/anular el corte #${corte.id}?`);
-    if (!confirmar) return;
-
     try {
       const resp = await fetch(`${API_BASE_URL}/cortes/${corte.id}`, {
         method: 'DELETE',
@@ -176,18 +175,21 @@ export default function CortesPage() {
 
       if (!resp.ok) {
         console.error('Error HTTP al eliminar corte', await resp.text());
+        sileo.error({ title: 'Error al eliminar corte', description: 'No se pudo eliminar el corte de stock.' });
         return;
       }
 
       await cargarCortes();
+      sileo.success({ title: 'Corte eliminado', description: `El corte #${corte.id} fue eliminado correctamente.` });
     } catch (error) {
       console.error('Error al eliminar corte de stock', error);
+      sileo.error({ title: 'Error al eliminar corte', description: 'Ocurrió un error inesperado al eliminar el corte.' });
     }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-6 px-2 sm:px-4 md:px-8 max-w-full">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between w-full">
         <div>
           <h1>Cortes de Stock</h1>
           <p className="text-muted-foreground mt-1">
@@ -201,7 +203,7 @@ export default function CortesPage() {
               Nuevo Corte de Stock
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-md">
+          <DialogContent className="w-full max-w-md sm:max-w-lg md:max-w-xl">
             <DialogHeader>
               <DialogTitle>{editingCorte ? 'Editar Corte de Stock' : 'Nuevo Corte de Stock'}</DialogTitle>
               <DialogDescription>
@@ -221,7 +223,7 @@ export default function CortesPage() {
                   <p className="text-xs text-red-600">{descripcionError}</p>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="fecha-inicio">Fecha inicio</Label>
                   <Input
@@ -241,7 +243,7 @@ export default function CortesPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
                 <div className="space-y-2">
                   <Label htmlFor="ambito-corte">Ámbito</Label>
                   <Select value={ambito} onValueChange={(value: any) => setAmbito(value)}>
@@ -279,7 +281,7 @@ export default function CortesPage() {
         </Dialog>
       </div>
 
-      <Card>
+      <Card className="overflow-x-auto">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Calendar className="w-5 h-5" />
@@ -287,7 +289,7 @@ export default function CortesPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between text-sm text-muted-foreground mb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground mb-3 gap-2">
             <div>
               Página {page} de {Math.max(1, Math.ceil(total / pageSize))}
             </div>
@@ -310,8 +312,8 @@ export default function CortesPage() {
               </Button>
             </div>
           </div>
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
+          <div className="border rounded-lg overflow-x-auto w-full">
+            <Table className="min-w-[700px] w-full">
               <TableHeader>
                 <TableRow>
                   <TableHead>ID Corte</TableHead>
@@ -369,7 +371,7 @@ export default function CortesPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleEliminarCorte(corte)}
+                            onClick={() => setConfirmDelete({ open: true, corte })}
                           >
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </Button>
@@ -383,6 +385,37 @@ export default function CortesPage() {
           </div>
         </CardContent>
       </Card>
+      {/* Modal de confirmación de eliminación */}
+      <Dialog open={confirmDelete.open} onOpenChange={open => setConfirmDelete(v => ({ ...v, open }))}>
+        <DialogContent className="sm:max-w-md w-[90vw] md:w-full rounded-2xl mx-auto border-destructive/20 shadow-lg shadow-destructive/10">
+          <DialogHeader className="mb-4">
+            <div className="mx-auto w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6 text-destructive" />
+            </div>
+            <DialogTitle className="text-center text-xl pb-2">
+              Confirmar eliminación
+            </DialogTitle>
+            <DialogDescription className="text-center text-base">
+              ¿Seguro que deseas eliminar el corte <span className="font-semibold text-foreground">#{confirmDelete.corte?.id}</span>?
+              <br /><span className="text-sm mt-2 block text-muted-foreground">Esta acción no se puede deshacer y afectará el histórico.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center mt-6">
+            <Button
+              variant="destructive"
+              className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
+              onClick={async () => {
+                if (confirmDelete.corte) {
+                  await handleEliminarCorte(confirmDelete.corte);
+                  setConfirmDelete({ open: false, corte: null });
+                }
+              }}
+            >
+              Sí, eliminar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

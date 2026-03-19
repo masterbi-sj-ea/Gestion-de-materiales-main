@@ -26,7 +26,7 @@ interface Solicitud {
   area: string;
   cuenta?: string;
   solicitante: string;
-  estado: 'borrador' | 'pendiente' | 'aprobada' | 'rechazada' | 'en_despacho' | 'despachada_parcial' | 'despachada_total';
+  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'en_despacho' | 'despachada_parcial' | 'despachada_total';
   items: number;
   total: number;
   observaciones?: string;
@@ -39,7 +39,6 @@ type EstadoDb =
   | 'EN_DESPACHO'
   | 'DESPACHADA_PARCIAL'
   | 'DESPACHADA_TOTAL'
-  | 'BORRADOR'
   | string;
 
 interface SolicitudResumenApi {
@@ -93,8 +92,6 @@ interface AprobacionSolicitudApi {
 function mapEstadoDesdeBackend(estadoDb: EstadoDb): Solicitud['estado'] {
   const v = (estadoDb || '').toUpperCase();
   switch (v) {
-    case 'BORRADOR':
-      return 'borrador';
     case 'PENDIENTE':
       return 'pendiente';
     case 'APROBADA':
@@ -113,7 +110,6 @@ function mapEstadoDesdeBackend(estadoDb: EstadoDb): Solicitud['estado'] {
 }
 
 const estadoConfig = {
-  borrador: { label: 'Borrador', color: 'bg-slate-100 text-slate-700', icon: FileText },
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-700', icon: Clock },
   aprobada: { label: 'Aprobada', color: 'bg-green-100 text-green-700', icon: CheckCircle },
   rechazada: { label: 'Rechazada', color: 'bg-red-100 text-red-700', icon: XCircle },
@@ -277,6 +273,10 @@ export default function VerSolicitudesPage() {
     navigate(`/solicitudes/crear?id=${id}`);
   };
 
+  const handleClonar = (id: string) => {
+    navigate(`/solicitudes/crear?clone=${id}`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -317,7 +317,6 @@ export default function VerSolicitudesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="todas">Todos los estados</SelectItem>
-                <SelectItem value="borrador">Borrador</SelectItem>
                 <SelectItem value="pendiente">Pendiente</SelectItem>
                 <SelectItem value="aprobada">Aprobada</SelectItem>
                 <SelectItem value="rechazada">Rechazada</SelectItem>
@@ -404,14 +403,26 @@ export default function VerSolicitudesPage() {
                             <Button
                               size="sm"
                               variant="ghost"
+                              title="Ver detalle"
                               onClick={() => handleVerDetalle(solicitud)}
                             >
                               <Eye className="w-4 h-4" />
                             </Button>
-                            {(solicitud.estado === 'borrador' || solicitud.estado === 'rechazada') && (
+                            
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Clonar solicitud"
+                              onClick={() => handleClonar(solicitud.id)}
+                            >
+                              <FileText className="w-4 h-4 text-blue-600" />
+                            </Button>
+
+                            {solicitud.estado === 'rechazada' && (
                               <Button
                                 size="sm"
                                 variant="ghost"
+                                title="Editar solicitud rechazada"
                                 onClick={() => handleEditar(solicitud.id)}
                               >
                                 <Edit className="w-4 h-4" />

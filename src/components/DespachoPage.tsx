@@ -1062,12 +1062,13 @@ export default function DespachoPage() {
             </div>
           )}
 
-          <DialogFooter className="mt-6 border-t-2 border-slate-100 pt-5 bg-white rounded-b-3xl px-6 pb-6">
+          <DialogFooter className="mt-0 border-t border-slate-100 p-6 bg-slate-50/50 backdrop-blur rounded-b-3xl">
             {['APROBADA', 'PARCIALMENTE_DESPACHADA'].includes(selectedSolicitud?.cabecera.Estado || '') && (
-              <div className="flex flex-col sm:flex-row gap-3 w-full">
+              <div className="flex flex-col sm:flex-row gap-3 w-full max-w-2xl ml-auto">
                 <Button
                   variant="outline"
-                  className="flex-1 h-14 border-2 border-slate-200 text-slate-600 hover:bg-slate-50 font-bold shadow-sm rounded-xl transition-all"
+                  size="lg"
+                  className="w-full sm:w-[140px] h-14 border-2 border-slate-200 text-slate-600 hover:bg-white font-bold shadow-sm rounded-2xl transition-all order-2 sm:order-1"
                   onClick={() => {
                     setSelectedSolicitud(null);
                     setEditedItems({});
@@ -1081,26 +1082,28 @@ export default function DespachoPage() {
                 {hayCantidadesPendientes() && (
                   <Button
                     variant="outline"
-                    className="flex-1 h-14 border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 font-black shadow-md flex items-center justify-center gap-2 rounded-xl transition-all active:scale-95"
+                    size="lg"
+                    className="w-full sm:flex-1 h-14 border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 font-black shadow-md flex items-center justify-center gap-2 rounded-2xl transition-all active:scale-95 order-3 sm:order-2"
                     onClick={() => handleDespachar('parcial')}
                     disabled={isDispatching || hayDespachoVacio() || hayExcedeStock()}
                   >
-                    <Package className="w-5 h-5" />
-                    Registrar Despacho Parcial
+                    <Package className="w-5 h-5 flex-shrink-0" />
+                    <span className="truncate">Despacho Parcial</span>
                   </Button>
                 )}
 
                 <Button
-                  className={`flex-[1.5] h-14 text-white font-black shadow-lg flex items-center justify-center gap-3 text-lg rounded-xl transition-all active:scale-95 ${
+                  size="lg"
+                  className={`w-full sm:flex-[1.5] h-14 text-white font-black shadow-lg flex items-center justify-center gap-3 text-lg rounded-2xl transition-all active:scale-95 order-1 sm:order-3 ${
                     esDespachoCompleto() 
-                    ? 'bg-primary hover:bg-primary/90' 
+                    ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' 
                     : 'bg-slate-400 cursor-not-allowed opacity-70'
                   }`}
                   onClick={() => handleDespachar('total')}
                   disabled={!esDespachoCompleto() || isDispatching || hayExcedeStock()}
                 >
-                  <CheckCircle className="w-6 h-6" />
-                  Finalizar Despacho Total
+                  <CheckCircle className="w-6 h-6 flex-shrink-0" />
+                  <span className="truncate">Despacho Total</span>
                 </Button>
               </div>
             )}

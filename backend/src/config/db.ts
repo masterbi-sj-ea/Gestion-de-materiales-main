@@ -8,9 +8,17 @@ const sqlConfig: SqlConfig = {
   user: env.DB_USER,
   password: env.DB_PASSWORD,
   database: env.DB_DATABASE,
+  connectionTimeout: env.DB_CONNECTION_TIMEOUT_MS,
+  requestTimeout: env.DB_REQUEST_TIMEOUT_MS,
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000,
+  },
   options: {
     encrypt: env.DB_ENCRYPT,
-    trustServerCertificate: !env.DB_ENCRYPT
+    trustServerCertificate: !env.DB_ENCRYPT,
+    enableArithAbort: true
   }
 };
 

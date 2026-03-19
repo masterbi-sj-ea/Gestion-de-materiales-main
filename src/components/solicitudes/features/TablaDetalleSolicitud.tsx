@@ -5,6 +5,7 @@ import { Package, Trash2, Check, X, Pencil, DollarSign } from 'lucide-react';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
+import { VisorImagenMaterial } from './VisorImagenMaterial';
 
 interface ItemSolicitud {
   idMaterial: number;
@@ -20,6 +21,8 @@ interface ItemSolicitud {
   stockDisponible: number | null;
   costoUnitario: number;
   subtotal: number;
+  tieneImagen?: boolean | number | null;
+  rutaImagenFinal?: string | null;
 }
 
 interface TablaDetalleSolicitudProps {
@@ -63,6 +66,7 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[80px]"></TableHead>
                     <TableHead className="min-w-[100px]">Grupo</TableHead>
                     <TableHead className="min-w-[100px]">N° Artículo</TableHead>
                     <TableHead className="min-w-[200px]">Descripción</TableHead>
@@ -76,19 +80,32 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
                 <TableBody>
                   {items.map((item, index) => (
                     <TableRow key={index}>
+                      <TableCell>
+                        <VisorImagenMaterial 
+                          tieneImagen={item.tieneImagen ?? null} 
+                          rutaImagenFinal={item.rutaImagenFinal ?? null} 
+                          descripcionArticulo={item.descripcionArticulo}
+                          numeroArticulo={item.numeroArticulo}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">{item.grupoArticulos || '-'}</TableCell>
                       <TableCell>{item.numeroArticulo}</TableCell>
                       <TableCell>{item.descripcionArticulo}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px] uppercase font-bold">
-                          {item.areaNombre || '-'}
+                        <Badge 
+                          variant={item.areaNombre ? "outline" : "destructive"} 
+                          className={`text-[10px] uppercase font-bold ${!item.areaNombre ? 'animate-pulse' : ''}`}
+                        >
+                          {item.areaNombre || 'FALTA ÁREA'}
                         </Badge>
                         <div className="text-[9px] text-muted-foreground mt-1">
-                          {item.codigoCuenta || ''}
+                          {item.codigoCuenta || (item.areaNombre ? 'Sin cuenta asignada' : '')}
                         </div>
                       </TableCell>
                       <TableCell>{item.unidadMedida}</TableCell>
-                      <TableCell className="text-right">{item.stockDisponible ?? 0}</TableCell>
+                      <TableCell className={`text-right ${(!item.stockDisponible || item.stockDisponible < item.cantidad) ? 'text-red-500 font-bold' : ''}`}>
+                        {item.stockDisponible ?? 0}
+                      </TableCell>
                       <TableCell className="text-right">
                         {editingIndex === index ? (
                           <Input

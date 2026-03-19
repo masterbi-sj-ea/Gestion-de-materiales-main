@@ -10,6 +10,8 @@ export interface MaterialDisponible {
   enStock: number | null;
   ultimoPrecioCompra: number | null;
   ultimaMonedaCompra: string | null;
+  rutaImagenFinal?: string | null;
+  tieneImagen?: number | boolean | null;
 }
 
 export interface AreaListado {
@@ -33,7 +35,8 @@ export function useCatalogosSolicitud(
   // 1. Cargar materiales y áreas inicialmente (se hace en paralelo y se cachea)
   const { 
     data: datosBase, 
-    error: errorBase 
+    error: errorBase,
+    isLoading: isLoadingBase
   } = useQuery({
     queryKey: ['catalogosBase'],
     queryFn: async () => {
@@ -57,6 +60,8 @@ export function useCatalogosSolicitud(
         enStock: m.EnStock ?? null,
         ultimoPrecioCompra: m.UltimoPrecioCompra ?? null,
         ultimaMonedaCompra: m.UltimaMonedaCompra ?? null,
+        rutaImagenFinal: m.RutaImagenFinal ?? null,
+        tieneImagen: m.TieneImagen ?? null,
       }));
 
       const mappedAreas: AreaListado[] = (areasJson || [])
@@ -80,7 +85,7 @@ export function useCatalogosSolicitud(
   });
 
   // 2. Cargar recursos cuando cambia el Área (cachea por idArea)
-  const { data: recursos = [], error: errorRecursos } = useQuery({
+  const { data: recursos = [], error: errorRecursos, isLoading: isLoadingRecursos } = useQuery({
     queryKey: ['recursosParaArea', idAreaDestino],
     queryFn: async () => {
       const resp = await apiFetch(`/area-recursos/recursos?idArea=${idAreaDestino}`);
@@ -96,7 +101,7 @@ export function useCatalogosSolicitud(
   });
 
   // 3. Cargar Código de Cuenta cuando tengamos Área Y Recurso
-  const { data: dataCuenta, error: errorCuenta } = useQuery({
+  const { data: dataCuenta, error: errorCuenta, isLoading: isLoadingCuenta } = useQuery({
     queryKey: ['codigoCuenta', idAreaDestino, idRecurso],
     queryFn: async () => {
       const resp = await apiFetch(`/area-recursos/codigo-cuenta?idArea=${idAreaDestino}&idRecurso=${idRecurso}`);
@@ -125,5 +130,8 @@ export function useCatalogosSolicitud(
     codigoCuenta: (idAreaDestino && idRecurso) ? (dataCuenta?.codigoCuenta || '') : '',
     idCentroCostoCalculado: (idAreaDestino && idRecurso) ? (dataCuenta?.idCentroCosto || null) : null,
     errorCatalogos,
+    isLoadingBase,
+    isLoadingRecursos,
+    isLoadingCuenta
   };
 }

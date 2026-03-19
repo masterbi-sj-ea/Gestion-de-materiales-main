@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -7,15 +7,16 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
-import { Search, Plus, Upload, Package, Edit, Trash2 } from 'lucide-react';
+import { Search, Plus, Upload, Package, Edit, Trash2, Eye, CheckCircle2 } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
+import { sileo } from 'sileo';
 import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
-  TableRow,
+  TableRow,                        
 } from './ui/table';
 
 interface Material {
@@ -28,16 +29,38 @@ interface Material {
   ultimaFechaCompra: string | null;
   ultimoPrecioCompra: number | null;
   ultimaMonedaCompra: string | null;
+
+  // Imagen (viene de vw_MaterialesConImagen)
+  idImagen?: number | null;
+  rutaImagenFinal?: string | null;
+  tieneImagen?: boolean | null;
+  fuenteImagen?: string | null;
+}
+
+type CategoriaOption = {
+  value: string;
+  label: string;
+};
+
+const ALL_CATEGORIES_VALUE = 'todas';
+
+function safeTrim(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeCategoria(value: unknown): string {
+  return safeTrim(value).toLowerCase();
 }
 
 export default function MaterialesPage() {
   const { user, token } = useAuth();
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategoria, setSelectedCategoria] = useState('todas');
+  const [selectedCategoria, setSelectedCategoria] = useState<string>(ALL_CATEGORIES_VALUE);
   const [loading, setLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [formNumeroArticulo, setFormNumeroArticulo] = useState('');
@@ -45,13 +68,60 @@ export default function MaterialesPage() {
   const [formUnidadMedida, setFormUnidadMedida] = useState('');
   const [formGrupoArticulos, setFormGrupoArticulos] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(10);
+  const pageSize = 10;
+
+  const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const [imagePreview, setImagePreview] = useState<{
+    numeroArticulo: string;
+    descripcion: string;
+    src: string;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; material: Material | null }>({ open: false, material: null });
 
   // Permisos según rol (ajustar según tus roles reales si hace falta)
   const canEdit = !!user; // por ahora, cualquier usuario autenticado
   const canCreate = !!user;
 
-  const categorias = ['Todas'];
+  const categorias: CategoriaOption[] = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of materiales) {
+      const label = safeTrim(m.grupoArticulos);
+      if (!label) continue;
+      const key = label.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, label);
+      }
+    }
+
+    const options = Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: 'base' }))
+      .map(([value, label]) => ({ value, label }));
+
+    return [{ value: ALL_CATEGORIES_VALUE, label: 'Todas' }, ...options];
+  }, [materiales]);
+
+  const normalizedSearchTerm = useMemo(() => searchTerm.trim().toLowerCase(), [searchTerm]);
+
+  const filteredMateriales = useMemo(() => {
+    const categoria = selectedCategoria;
+    const hasSearch = normalizedSearchTerm.length > 0;
+
+    return materiales.filter((material) => {
+      const matchesSearch = !hasSearch
+        ? true
+        : material.numeroArticulo.toLowerCase().includes(normalizedSearchTerm) ||
+          material.descripcion.toLowerCase().includes(normalizedSearchTerm);
+
+      const matchesCategoria =
+        categoria === ALL_CATEGORIES_VALUE ||
+        normalizeCategoria(material.grupoArticulos) === categoria;
+
+      return matchesSearch && matchesCategoria;
+    });
+  }, [materiales, normalizedSearchTerm, selectedCategoria]);
 
   const cargarMateriales = async () => {
     if (!token) return;
@@ -67,16 +137,22 @@ export default function MaterialesPage() {
         return;
       }
       const data = await resp.json();
-      const mapped: Material[] = (data as any[]).map((m) => ({
-        id: m.IdMaterial as number,
-        numeroArticulo: m.NumeroArticulo as string,
-        descripcion: m.DescripcionArticulo as string,
-        unidadMedida: m.UnidadMedida as string,
-        grupoArticulos: (m.GrupoArticulos as string) ?? null,
-        enStock: m.EnStock ?? null,
-        ultimaFechaCompra: (m.UltimaFechaCompra as string) ?? null,
-        ultimoPrecioCompra: m.UltimoPrecioCompra ?? null,
-        ultimaMonedaCompra: (m.UltimaMonedaCompra as string) ?? null,
+      const rows: any[] = Array.isArray(data) ? data : [];
+      const mapped: Material[] = rows.map((m) => ({
+        id: Number(m?.IdMaterial ?? 0),
+        numeroArticulo: String(m?.NumeroArticulo ?? ''),
+        descripcion: String(m?.DescripcionArticulo ?? ''),
+        unidadMedida: String(m?.UnidadMedida ?? ''),
+        grupoArticulos: safeTrim(m?.GrupoArticulos) || null,
+        enStock: m?.EnStock ?? null,
+        ultimaFechaCompra: (m?.UltimaFechaCompra as string) ?? null,
+        ultimoPrecioCompra: m?.UltimoPrecioCompra ?? null,
+        ultimaMonedaCompra: safeTrim(m?.UltimaMonedaCompra) || null,
+
+        idImagen: m?.id_imagen != null ? Number(m.id_imagen) : null,
+        rutaImagenFinal: safeTrim(m?.RutaImagenFinal) || null,
+        tieneImagen: m?.TieneImagen != null ? Boolean(m.TieneImagen) : null,
+        fuenteImagen: safeTrim(m?.FuenteImagen) || null,
       }));
       setMateriales(mapped);
       setPage(1);
@@ -84,6 +160,56 @@ export default function MaterialesPage() {
       console.error('Error al cargar materiales', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getPublicBaseUrl = () => API_BASE_URL.replace(/\/api\/?$/i, '');
+
+  const resolveImageSrc = (ruta: string): string => {
+    const trimmed = ruta.trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    const base = getPublicBaseUrl();
+    const normalized = trimmed.replace(/\\/g, '/');
+    const raw = normalized.startsWith('/') ? `${base}${normalized}` : `${base}/${normalized}`;
+    return encodeURI(raw);
+  };
+
+  const handleVerImagen = async (material: Material) => {
+    setImagePreview({
+      numeroArticulo: material.numeroArticulo,
+      descripcion: material.descripcion,
+      src: '',
+      loading: true,
+      error: null
+    });
+    setImageDialogOpen(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/materiales/imagen-archivo/${encodeURIComponent(material.numeroArticulo)}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (response.status === 404) {
+        throw new Error('Sin imagen disponible');
+      }
+
+      if (!response.ok) {
+        throw new Error('No se pudo cargar la imagen');
+      }
+
+      const blob = await response.blob();
+      if (!blob || blob.size === 0) {
+        throw new Error('Imagen vacía');
+      }
+      
+      const objectUrl = URL.createObjectURL(blob);
+      setImagePreview(prev => prev ? { ...prev, src: objectUrl, loading: false } : null);
+    } catch (error: any) {
+      setImagePreview(prev => prev ? { ...prev, error: error.message || 'Error al cargar imagen', loading: false } : null);
     }
   };
 
@@ -104,12 +230,12 @@ export default function MaterialesPage() {
 
   const handleGuardar = async () => {
     if (!token) {
-      window.alert('Debes iniciar sesión para guardar materiales');
+      sileo.error({ title: 'Error', description: 'Debes iniciar sesión para guardar materiales' });
       return;
     }
 
     if (!formNumeroArticulo || !formDescripcion || !formUnidadMedida) {
-      window.alert('Número de artículo, descripción y unidad de medida son obligatorios');
+      sileo.error({ title: 'Campos requeridos', description: 'Número de artículo, descripción y unidad de medida son obligatorios' });
       return;
     }
 
@@ -121,8 +247,10 @@ export default function MaterialesPage() {
     };
 
     try {
+      let resp: Response;
+      const isEdit = !!editingMaterial;
       if (editingMaterial) {
-        await fetch(`${API_BASE_URL}/materiales/${editingMaterial.id}`, {
+        resp = await fetch(`${API_BASE_URL}/materiales/${editingMaterial.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -131,7 +259,7 @@ export default function MaterialesPage() {
           body: JSON.stringify(body),
         });
       } else {
-        await fetch(`${API_BASE_URL}/materiales`, {
+        resp = await fetch(`${API_BASE_URL}/materiales`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -141,86 +269,101 @@ export default function MaterialesPage() {
         });
       }
 
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        sileo.error({ title: 'Error al guardar', description: text || 'Error al guardar material' });
+        return;
+      }
+
       setDialogOpen(false);
       setEditingMaterial(null);
       await cargarMateriales();
+
+      const accion = isEdit ? 'actualizado' : 'creado';
+      sileo.success({ title: 'Éxito', description: `Material ${accion} correctamente: ${formNumeroArticulo}` });
     } catch (error) {
       console.error('Error al guardar material', error);
-      window.alert('Error al guardar material');
+      sileo.error({ title: 'Error', description: 'Error al guardar material' });
     }
   };
 
   const handleEliminar = async (id: number) => {
     if (!token) {
-      window.alert('Debes iniciar sesión para eliminar materiales');
+      sileo.error({ title: 'Atención', description: 'Debes iniciar sesión para eliminar materiales' });
       return;
     }
-    if (!window.confirm('¿Estás seguro de eliminar este material?')) return;
 
     try {
-      await fetch(`${API_BASE_URL}/materiales/${id}`, {
+      const resp = await fetch(`${API_BASE_URL}/materiales/${id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
+
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        sileo.error({ title: 'Error', description: text || 'Error al eliminar material' });
+        return;
+      }
+
       await cargarMateriales();
+
+      sileo.success({ title: 'Eliminado', description: `Material eliminado correctamente (ID ${id})` });
     } catch (error) {
       console.error('Error al eliminar material', error);
-      window.alert('Error al eliminar material');
+      sileo.error({ title: 'Error', description: 'Error al eliminar material' });
     }
   };
 
-  const filteredMateriales = materiales.filter((material) => {
-    const matchesSearch =
-      material.numeroArticulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      material.descripcion.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategoria = selectedCategoria === 'todas';
-    return matchesSearch && matchesCategoria;
-  });
+  const totalMaterialesCatalogo = materiales.length;
+  const totalMaterialesFiltrados = filteredMateriales.length;
+  const totalPages = Math.max(1, Math.ceil(totalMaterialesFiltrados / pageSize));
 
-  const totalMateriales = filteredMateriales.length;
-  const totalPages = Math.max(1, Math.ceil(totalMateriales / pageSize));
-
-  const pagedMateriales = filteredMateriales.slice((page - 1) * pageSize, page * pageSize);
+  const pagedMateriales = useMemo(
+    () => filteredMateriales.slice((page - 1) * pageSize, page * pageSize),
+    [filteredMateriales, page, pageSize],
+  );
 
   // Cálculo de valores de inventario (sobre todos los materiales cargados)
   const TIPO_CAMBIO_USD_A_CORD = 36.5; // 1 USD = 36.5 C$
 
-  let totalValorUSD = 0;
-  let totalValorCord = 0;
-  let materialesConStockSinPrecio = 0;
+  const inventoryTotals = useMemo(() => {
+    let totalValorUSD = 0;
+    let totalValorCord = 0;
+    let materialesConStockSinPrecio = 0;
 
-  for (const m of materiales) {
-    const qty = m.enStock ?? 0;
-    const price = m.ultimoPrecioCompra;
+    for (const m of materiales) {
+      const qty = m.enStock ?? 0;
+      const price = m.ultimoPrecioCompra;
 
-    if (!qty || price === null || price === undefined) {
-      if (qty > 0) {
-        materialesConStockSinPrecio++;
+      if (!qty || price === null || price === undefined) {
+        if (qty > 0) {
+          materialesConStockSinPrecio++;
+        }
+        continue;
       }
-      continue;
+
+      const moneda = (m.ultimaMonedaCompra || 'COR').toUpperCase();
+
+      if (moneda.includes('USD')) {
+        const valorUsd = qty * price;
+        totalValorUSD += valorUsd;
+        totalValorCord += valorUsd * TIPO_CAMBIO_USD_A_CORD;
+      } else {
+        const valorCord = qty * price;
+        totalValorCord += valorCord;
+        totalValorUSD += valorCord / TIPO_CAMBIO_USD_A_CORD;
+      }
     }
 
-    const moneda = (m.ultimaMonedaCompra || 'COR').toUpperCase();
+    return { totalValorUSD, totalValorCord, materialesConStockSinPrecio };
+  }, [materiales]);
 
-    if (moneda.includes('USD')) {
-      // Precio ya en USD
-      const valorUsd = qty * price;
-      totalValorUSD += valorUsd;
-      totalValorCord += valorUsd * TIPO_CAMBIO_USD_A_CORD;
-    } else {
-      // Asumimos moneda local (Córdobas)
-      const valorCord = qty * price;
-      totalValorCord += valorCord;
-      totalValorUSD += valorCord / TIPO_CAMBIO_USD_A_CORD;
-    }
-  }
-
-  // Resetear a página 1 cuando cambia el filtro de búsqueda
+  // Resetear a página 1 cuando cambia el filtro de búsqueda/categoría
   useEffect(() => {
     setPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, selectedCategoria]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -229,11 +372,11 @@ export default function MaterialesPage() {
 
   const handleImport = async () => {
     if (!token) {
-      window.alert('Debes iniciar sesión para importar materiales');
+      sileo.error({ title: 'Atención', description: 'Debes iniciar sesión para importar materiales' });
       return;
     }
     if (!importFile) {
-      window.alert('Selecciona un archivo CSV primero');
+      sileo.warning({ title: 'Archivo requerido', description: 'Selecciona un archivo CSV primero' });
       return;
     }
 
@@ -253,17 +396,30 @@ export default function MaterialesPage() {
       if (!resp.ok) {
         const text = await resp.text();
         console.error('Error al importar materiales', text);
-        window.alert('Error al importar materiales. Revisa la consola para más detalles.');
+        sileo.error({ title: 'Error de importación', description: 'Error al importar materiales. Revisa la consola para más detalles.' });
         return;
       }
 
       const result = await resp.json();
-      window.alert(result.message || 'Importación realizada correctamente');
+      const stats = result?.stats;
+      const idCorte = result?.idCorte;
+      
+      let descriptionStr = `Se han procesado ${stats?.totalProcesados || 0} artículos correctamente.`;
+      if (stats?.snapshotDate) descriptionStr += ` Fecha de inventario: ${stats.snapshotDate}.`;
+      if (idCorte) descriptionStr += ` Corte STOCK: #${idCorte}.`;
+
+      sileo.success({
+        title: "Importación Exitosa",
+        description: descriptionStr,
+        duration: 6000
+      });
+
       setImportFile(null);
+      setFileInputKey((k) => k + 1);
       await cargarMateriales();
     } catch (error) {
       console.error('Error al importar materiales', error);
-      window.alert('Error al importar materiales');
+      sileo.error({ title: 'Error inesperado', description: 'Ocurrió un error al intentar importar los materiales.' });
     } finally {
       setImportLoading(false);
     }
@@ -272,36 +428,55 @@ export default function MaterialesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Catálogo de Materiales</h1>
-          <p className="text-muted-foreground mt-1 text-sm md:text-base">
-            Gestión de materiales desde la base de datos
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-8">
+        <div className="space-y-1">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900">Catálogo de Materiales</h1>
+          <p className="text-slate-500 text-sm md:text-base">
+            Gestión y control de inventario maestro
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="flex flex-col sm:flex-row items-center gap-2">
-            <Input
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+          {/* Import Section - Responsive Container */}
+          <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 shadow-sm flex-1 sm:flex-none">
+            <input
+              key={fileInputKey}
               type="file"
-              accept=".csv"
+              id="file-upload"
+              accept=".csv,.xlsx"
               onChange={handleFileChange}
-              className="w-full sm:max-w-xs"
+              className="hidden"
             />
+            <label 
+              htmlFor="file-upload" 
+              className="flex-1 sm:w-40 md:w-56 text-[11px] md:text-xs font-medium px-3 py-2 cursor-pointer hover:bg-slate-50 rounded-lg transition-all truncate text-slate-600 border border-transparent hover:border-slate-100"
+            >
+              {importFile ? importFile.name : "Subir CSV o Excel"}
+            </label>
             <Button
-              variant="outline"
+              variant="ghost"
+              size="sm"
               onClick={handleImport}
               disabled={importLoading || !importFile}
-              className="w-full sm:w-auto"
+              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-8 px-3 shrink-0"
             >
-              <Upload className="w-4 h-4 mr-2" />
-              {importLoading ? 'Importando...' : 'Importar CSV'}
+              <Upload className="w-3.5 h-3.5 mr-1.5" />
+              <span className="hidden xs:inline">{importLoading ? '...' : 'Importar'}</span>
             </Button>
           </div>
+
+          <div className="hidden sm:block h-8 w-px bg-slate-200 mx-1" />
+
+          {/* Create Button - Matching Import size */}
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button disabled={!canCreate} onClick={() => handleOpenDialog()} className="w-full sm:w-auto">
-                <Plus className="w-4 h-4 mr-2" />
-                Nuevo Material
+              <Button 
+                disabled={!canCreate} 
+                onClick={() => handleOpenDialog()} 
+                className="w-full sm:w-auto bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 text-white shadow-sm h-11 px-6 text-xs font-semibold transition-all active:scale-[0.98] shrink-0 rounded-xl"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                <span>Nuevo Material</span>
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl sm:max-w-[95vw] md:max-w-2xl">
@@ -384,7 +559,7 @@ export default function MaterialesPage() {
             <Package className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{totalMateriales}</div>
+            <div className="text-2xl">{totalMaterialesCatalogo}</div>
             <p className="text-xs text-muted-foreground mt-1">Ítems en catálogo</p>
           </CardContent>
         </Card>
@@ -396,7 +571,7 @@ export default function MaterialesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl">
-              {totalValorUSD.toLocaleString(undefined, {
+              {inventoryTotals.totalValorUSD.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}{' '}
@@ -415,7 +590,7 @@ export default function MaterialesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl">
-              {totalValorCord.toLocaleString(undefined, {
+              {inventoryTotals.totalValorCord.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}{' '}
@@ -423,8 +598,8 @@ export default function MaterialesPage() {
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Tasa {TIPO_CAMBIO_USD_A_CORD} C$ por 1 USD
-              {materialesConStockSinPrecio > 0
-                ? ` · ${materialesConStockSinPrecio} materiales con stock sin precio`
+              {inventoryTotals.materialesConStockSinPrecio > 0
+                ? ` · ${inventoryTotals.materialesConStockSinPrecio} materiales con stock sin precio`
                 : ''}
             </p>
           </CardContent>
@@ -452,9 +627,9 @@ export default function MaterialesPage() {
                 <SelectValue placeholder="Categoría" />
               </SelectTrigger>
               <SelectContent>
-                {categorias.map(cat => (
-                  <SelectItem key={cat} value={cat.toLowerCase()}>
-                    {cat}
+                {categorias.map((cat) => (
+                  <SelectItem key={cat.value} value={cat.value}>
+                    {cat.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -472,69 +647,91 @@ export default function MaterialesPage() {
                   <TableHead className="text-right">Stock</TableHead>
                   <TableHead className="text-right">Última compra</TableHead>
                   <TableHead className="text-right">Último precio</TableHead>
-                  {canEdit && <TableHead className="text-right">Acciones</TableHead>}
+                  {canEdit && <TableHead className="text-center">Acciones</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagedMateriales.map((material) => (
-                  <TableRow key={material.id}>
-                    <TableCell className="font-medium">{material.numeroArticulo}</TableCell>
-                    <TableCell>{material.descripcion}</TableCell>
-                    <TableCell>
-                      {material.grupoArticulos ? (
-                        <Badge variant="outline">{material.grupoArticulos}</Badge>
-                      ) : (
-                        <span className="text-muted-foreground">(Sin grupo)</span>
-                      )}
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={canEdit ? 8 : 7} className="text-center text-muted-foreground py-6">
+                      Cargando materiales...
                     </TableCell>
-                    <TableCell>{material.unidadMedida}</TableCell>
-                    <TableCell className="text-right">
-                      {material.enStock !== null ? material.enStock : '-'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {material.ultimaFechaCompra
-                        ? new Date(material.ultimaFechaCompra).toLocaleDateString()
-                        : '-'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {material.ultimoPrecioCompra !== null
-                        ? `${material.ultimoPrecioCompra.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })} ${material.ultimaMonedaCompra || ''}`
-                        : '-'}
-                    </TableCell>
-                    {canEdit && (
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleOpenDialog(material)}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleEliminar(material.id)}
-                          >
-                            <Trash2 className="w-4 h-4 text-red-600" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    )}
                   </TableRow>
-                ))}
+                ) : pagedMateriales.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={canEdit ? 8 : 7} className="text-center text-muted-foreground py-6">
+                      Sin resultados
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pagedMateriales.map((material) => (
+                    <TableRow key={material.id}>
+                      <TableCell className="font-medium">{material.numeroArticulo}</TableCell>
+                      <TableCell>{material.descripcion}</TableCell>
+                      <TableCell>
+                        {material.grupoArticulos ? (
+                          <Badge variant="outline">{material.grupoArticulos}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">(Sin grupo)</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{material.unidadMedida}</TableCell>
+                      <TableCell className="text-right">
+                        {material.enStock !== null ? material.enStock : '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {material.ultimaFechaCompra
+                          ? new Date(material.ultimaFechaCompra).toLocaleDateString()
+                          : '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {material.ultimoPrecioCompra !== null
+                          ? `${material.ultimoPrecioCompra.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} ${material.ultimaMonedaCompra || ''}`
+                          : '-'}
+                      </TableCell>
+                      {canEdit && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleVerImagen(material)}
+                                title="Ver imagen"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleOpenDialog(material)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setConfirmDelete({ open: true, material })}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
           <div className="flex items-center justify-between mt-4 text-sm text-muted-foreground">
             <div>
               Mostrando{' '}
-              {totalMateriales === 0
+              {totalMaterialesFiltrados === 0
                 ? '0 de 0 materiales'
-                : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalMateriales)} de ${totalMateriales} materiales`}
+                : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalMaterialesFiltrados)} de ${totalMaterialesFiltrados} materiales`}
             </div>
             <div className="flex gap-2">
               <Button
@@ -557,6 +754,83 @@ export default function MaterialesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={imageDialogOpen}
+        onOpenChange={(open) => {
+          setImageDialogOpen(open);
+            if (!open) {
+              if (imagePreview?.src) {
+                URL.revokeObjectURL(imagePreview.src);
+              }
+              setImagePreview(null);
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] max-w-[960px] h-[85vh] max-h-[85vh] p-0 sm:h-auto sm:max-h-[90vh] sm:p-6">
+            <DialogHeader>
+              <DialogTitle>Imagen del artículo</DialogTitle>
+              <DialogDescription>
+                {imagePreview
+                  ? `${imagePreview.numeroArticulo} · ${imagePreview.descripcion}`
+                  : 'No hay imagen para mostrar'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex h-full flex-col sm:block">
+              <div className="flex-1 overflow-auto p-4 sm:p-0">
+                <div className="flex w-full items-center justify-center min-h-[240px] h-full border rounded-md bg-slate-50">
+                  {imagePreview?.loading ? (
+                    <span className="px-3 text-center text-slate-500">Cargando imagen...</span>
+                  ) : imagePreview?.error ? (
+                    <span className="px-3 text-center text-red-500">{imagePreview.error}</span>
+                  ) : imagePreview?.src ? (
+                    <img
+                      src={imagePreview.src}
+                      alt={`Imagen ${imagePreview.numeroArticulo}`}
+                      className="w-full h-full max-h-[72vh] object-contain"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="px-3 text-center text-slate-500">Sin imagen</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de confirmación de eliminación (PRO) */}
+        <Dialog open={confirmDelete.open} onOpenChange={open => setConfirmDelete(v => ({ ...v, open }))}>
+        <DialogContent className="sm:max-w-md w-[90vw] md:w-full rounded-2xl mx-auto border-destructive/20 shadow-lg shadow-destructive/10">
+          <DialogHeader className="mb-4">
+            <div className="mx-auto w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+              <Trash2 className="w-6 h-6 text-destructive" />
+            </div>
+            <DialogTitle className="text-center text-xl pb-2">
+              Confirmar eliminación
+            </DialogTitle>
+            <DialogDescription className="text-center text-base">
+              ¿Seguro que deseas eliminar el material <span className="font-semibold text-foreground">{confirmDelete.material?.numeroArticulo}</span>?
+              <br /><span className="text-sm mt-2 block text-muted-foreground">Esta acción no se puede deshacer y puede afectar históricos vinculados.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center mt-6">
+            <Button
+              variant="destructive"
+              className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
+              onClick={async () => {
+                if (confirmDelete.material) {
+                  await handleEliminar(confirmDelete.material.id);
+                  setConfirmDelete({ open: false, material: null });
+                }
+              }}
+            >
+              Sí, eliminar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

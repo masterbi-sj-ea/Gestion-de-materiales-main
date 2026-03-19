@@ -7,8 +7,9 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Plus, Edit, Trash2, MapPin } from 'lucide-react';
+import { Plus, Edit, Trash2, MapPin, AlertTriangle } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
+import { sileo } from 'sileo';
 
 interface Area {
   id: number;
@@ -40,6 +41,7 @@ export default function AreasPage() {
   const [nuevoCcCodigo, setNuevoCcCodigo] = useState('');
   const [nuevoCcNombre, setNuevoCcNombre] = useState('');
   const [creandoCentro, setCreandoCentro] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; area: Area | null }>({ open: false, area: null });
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [total, setTotal] = useState(0);
@@ -203,17 +205,22 @@ export default function AreasPage() {
   };
 
   const handleEliminar = async (id: number) => {
-    if (!confirm('¿Estás seguro de eliminar esta área?')) return;
     try {
-      await fetch(`${API_BASE_URL}/areas/${id}`, {
+      const resp = await fetch(`${API_BASE_URL}/areas/${id}`, {
         method: 'DELETE',
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
+      if (!resp.ok) {
+        sileo.error({ title: 'Error al eliminar', description: 'No se pudo eliminar el área.' });
+        return;
+      }
       await cargarAreas();
+      sileo.success({ title: 'Área eliminada', description: 'El área fue eliminada correctamente.' });
     } catch (error) {
       console.error('Error al eliminar área', error);
+      sileo.error({ title: 'Error inesperado', description: 'Ocurrió un error al intentar eliminar el área.' });
     }
   };
 
@@ -409,7 +416,7 @@ export default function AreasPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleEliminar(area.id)}
+                          onClick={() => setConfirmDelete({ open: true, area })}
                         >
                           <Trash2 className="w-4 h-4 text-red-600" />
                         </Button>
@@ -422,6 +429,38 @@ export default function AreasPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Modal de confirmación de eliminación (PRO) */}
+      <Dialog open={confirmDelete.open} onOpenChange={open => setConfirmDelete(v => ({ ...v, open }))}>
+        <DialogContent className="sm:max-w-md w-[90vw] md:w-full rounded-2xl mx-auto border-destructive/20 shadow-lg shadow-destructive/10">
+          <DialogHeader className="mb-4">
+            <div className="mx-auto w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6 text-destructive" />
+            </div>
+            <DialogTitle className="text-center text-xl pb-2">
+              Confirmar eliminación
+            </DialogTitle>
+            <DialogDescription className="text-center text-base">
+              ¿Seguro que deseas eliminar el área <span className="font-semibold text-foreground">{confirmDelete.area?.nombre}</span>?
+              <br /><span className="text-sm mt-2 block text-muted-foreground">Esta acción no se puede deshacer.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center mt-6">
+            <Button
+              variant="destructive"
+              className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
+              onClick={async () => {
+                if (confirmDelete.area) {
+                  await handleEliminar(confirmDelete.area.id);
+                  setConfirmDelete({ open: false, area: null });
+                }
+              }}
+            >
+              Sí, eliminar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

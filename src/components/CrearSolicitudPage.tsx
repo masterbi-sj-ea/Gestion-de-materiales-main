@@ -1,36 +1,60 @@
-import { useEffect, useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { useCatalogosSolicitud } from '../hooks/useCatalogosSolicitud';
 import { apiFetch } from '../services/apiClient';
+
+// Componentes UI
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
+import { Alert, AlertDescription } from './ui/alert';
+
+// Subcomponentes del formulario
 import { FormularioDestino } from './solicitudes/features/FormularioDestino';
 import { TablaDetalleSolicitud } from './solicitudes/features/TablaDetalleSolicitud';
 import { FormularioAgregarMaterial } from './solicitudes/features/FormularioAgregarMaterial';
-import { AlertCircle, Plus, Save, Send, User, CalendarDays, Tag } from 'lucide-react';
-import { Alert, AlertDescription } from './ui/alert';
+
+// Iconos y Utilidades
+import { AlertCircle, Send, CalendarDays, Tag, Clock } from 'lucide-react';
 import { sileo as toast } from 'sileo';
 
-interface ItemSolicitud {
+/**
+ * Obtiene la URL de la imagen del material desde el backend de forma segura.
+ */
+async function obtenerBlobUrlImagenMaterial(numeroArticulo: string): Promise<string | null> {
+  if (!numeroArticulo) return null;
+  
+  try {
+    const response = await apiFetch(`/materiales/imagen-archivo/${encodeURIComponent(numeroArticulo)}`);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    const blob = await response.blob();
+    return blob && blob.size > 0 ? URL.createObjectURL(blob) : null;
+  } catch (error) {
+    console.error('Error al cargar imagen:', error);
+    return null; // Resolvemos silenciosamente para no interrumpir el flujo principal
+  }
+}
+
+export interface ItemSolicitud {
   idMaterial: number;
   grupoArticulos: string | null;
   numeroArticulo: string;
   descripcionArticulo: string;
   unidadMedida: string;
   idArea?: number | null;
-  idRecurso?: number | null; // <-- Agregar
-  codigoCuenta?: string | null; // <-- Agregar
-  areaNombre?: string | null; // <-- Opcional para mostrar en tabla
+  idRecurso?: number | null;
+  codigoCuenta?: string | null;
+  areaNombre?: string | null;
   cantidad: number;
   stockDisponible: number | null;
   costoUnitario: number;
   subtotal: number;
+  tieneImagen?: boolean | number | null;
+  rutaImagenFinal?: string | null;
 }
 
 export default function CrearSolicitudPage() {
@@ -38,23 +62,35 @@ export default function CrearSolicitudPage() {
   const navigate = useNavigate();
   const location = useLocation();
   
+  // -- Estados Globales de la Solicitud --
   const [items, setItems] = useState<ItemSolicitud[]>([]);
+  const [observaciones, setObservaciones] = useState('');
+  const [ot, setOt] = useState('');
+  const [fechaSolicitud, setFechaSolicitud] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  
+  // -- Estados de Cabecera (Destino) --
+  const [idAreaDestino, setIdAreaDestino] = useState<string>('');
+  const [idRecurso, setIdRecurso] = useState<string>('');
+
+  // -- Estados de Interfaz de Búsqueda --
   const [selectedGrupo, setSelectedGrupo] = useState<string>('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('');
   const [cantidad, setCantidad] = useState('');
-  const [observaciones, setObservaciones] = useState('');
-  const [ot, setOt] = useState('');
-  const [fechaSolicitud, setFechaSolicitud] = useState<string>(() => {
-    const today = new Date();
-    const y = today.getFullYear();
-    const m = String(today.getMonth() + 1).padStart(2, '0');
-    const d = String(today.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  });
-  const [idAreaDestino, setIdAreaDestino] = useState<string>('');
-  const [idRecurso, setIdRecurso] = useState<string>('');
   
-  // Custom Hook: Abstrae la lógica de carga de catálogos y cálculos en cascada
+  // -- Estados Visuales de Material --
+  const [imagenMaterialUrl, setImagenMaterialUrl] = useState<string | null>(null);
+  const [imagenMaterialLoading, setImagenMaterialLoading] = useState(false);
+  const [imagenMaterialError, setImagenMaterialError] = useState<string | null>(null);
+  
+  // -- Estados de Edición de Tabla --
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingCantidad, setEditingCantidad] = useState<string>('');
+
+  // -- Estados de Modos (Edición / Clonación) --
+  const [editId, setEditId] = useState<string | null>(null);
+  const [cloneId, setCloneId] = useState<string | null>(null);
+
+  // -- Hook Personalizado: Catálogos --
   const { 
     materiales, 
     areas, 
@@ -64,53 +100,100 @@ export default function CrearSolicitudPage() {
     errorCatalogos
   } = useCatalogosSolicitud(token, idAreaDestino, idRecurso);
 
+  // -- Estados del Servidor --
   const [loading, setLoading] = useState(false);
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
-  const error = errorLocal || errorCatalogos; // Mostraremos cualquier error
+  const error = errorLocal || errorCatalogos;
 
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editingCantidad, setEditingCantidad] = useState<string>('');
+  // -- Datos Derivados Memorizados --
+  const gruposUnicos = useMemo(() => Array.from(
+    new Set(materiales.map((m: any) => m.grupoArticulos).filter(Boolean))
+  ), [materiales]);
 
-  const gruposUnicos = Array.from(
-    new Set(materiales.map((m: any) => m.grupoArticulos).filter((g: any): g is string => !!g)),
-  );
+  const materialesFiltrados = useMemo(() => materiales.filter((m: any) => {
+    return !selectedGrupo || m.grupoArticulos === selectedGrupo;
+  }), [materiales, selectedGrupo]);
 
-  const materialesFiltrados = materiales.filter((m: any) => {
-    return (!selectedGrupo || m.grupoArticulos === selectedGrupo);
-  });
-
-  const materialSeleccionado = selectedMaterialId
-    ? materiales.find((m: any) => String(m.idMaterial) === selectedMaterialId) || null
-    : null;
+  const materialSeleccionado = useMemo(() => 
+    selectedMaterialId ? materiales.find((m: any) => String(m.idMaterial) === selectedMaterialId) || null : null
+  , [selectedMaterialId, materiales]);
 
   const stockActualSeleccionado = materialSeleccionado?.enStock ?? null;
-  const stockRestante =
-    stockActualSeleccionado != null && cantidad
-      ? stockActualSeleccionado - Number(cantidad || '0')
-      : null;
+  const stockRestante = (stockActualSeleccionado != null && cantidad)
+    ? stockActualSeleccionado - Number(cantidad || '0')
+    : null;
 
-  const total = items.reduce((sum, item) => sum + item.subtotal, 0);
+  const total = useMemo(() => items.reduce((sum, item) => sum + item.subtotal, 0), [items]);
 
-  // Limpiar recurso si cambia el área (opcional pero lo hacía el código original)
-  useEffect(() => {
-    setIdRecurso('');
-  }, [idAreaDestino]);
-
+  // -- Efecto: Inicializar lectura de parámetros URL --
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const id = params.get('id');
-    setEditId(id);
+    setEditId(params.get('id'));
+    setCloneId(params.get('clone'));
   }, [location.search]);
 
   useEffect(() => {
-    if (!token || !editId) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    async function cargarImagen() {
+      if (!materialSeleccionado?.numeroArticulo) {
+        setImagenMaterialLoading(false);
+        setImagenMaterialError(null);
+        setImagenMaterialUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+        return;
+      }
+
+      setImagenMaterialLoading(true);
+      setImagenMaterialError(null);
+
+      try {
+        const url = await obtenerBlobUrlImagenMaterial(materialSeleccionado.numeroArticulo);
+        objectUrl = url;
+
+        if (cancelled) {
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        setImagenMaterialUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return objectUrl;
+        });
+      } catch (error: any) {
+        if (cancelled) return;
+
+        setImagenMaterialUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+
+        setImagenMaterialError(error?.message || 'No se pudo cargar la imagen del material');
+      } finally {
+        if (!cancelled) setImagenMaterialLoading(false);
+      }
+    }
+
+    cargarImagen();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [materialSeleccionado?.numeroArticulo]);
+
+  useEffect(() => {
+    const targetId = editId || cloneId;
+    if (!token || !targetId) return;
 
     const cargarSolicitud = async () => {
       try {
         setErrorLocal(null);
 
-        const resp = await apiFetch(`/solicitudes/${editId}`);
+        const resp = await apiFetch(`/solicitudes/${targetId}`);
 
         if (!resp.ok) {
           throw new Error('No se pudo cargar la solicitud');
@@ -125,7 +208,9 @@ export default function CrearSolicitudPage() {
         }
 
         const estado = String(cabecera.Estado ?? '').toUpperCase();
-        if (estado !== 'RECHAZADA' && estado !== 'BORRADOR') {
+        
+        // Si es edición, validar que sea rechazada
+        if (editId && (estado !== 'RECHAZADA' && estado !== 'BORRADOR')) {
           toast.error({
             title: 'No se puede editar esta solicitud',
             description: 'Solo se permiten editar solicitudes rechazadas o en borrador.',
@@ -138,7 +223,11 @@ export default function CrearSolicitudPage() {
           ? new Date(String(cabecera.FechaSolicitud)).toISOString().slice(0, 10)
           : fechaSolicitud;
 
-        setFechaSolicitud(fecha);
+        // Si es clonación, usamos la fecha de hoy, no la original
+        if (editId) {
+          setFechaSolicitud(fecha);
+        }
+        
         setObservaciones(cabecera.Comentario ?? '');
         setIdAreaDestino(cabecera.IdArea ? String(cabecera.IdArea) : '');
         setIdRecurso('');
@@ -161,14 +250,21 @@ export default function CrearSolicitudPage() {
         });
 
         setItems(mappedItems);
+        
+        if (cloneId) {
+          toast.info({
+            title: 'Solicitud clonada',
+            description: 'Se han cargado los materiales de la solicitud anterior. Revisa y envía.',
+          });
+        }
       } catch (e: any) {
-        console.error('Error al cargar solicitud para edición', e);
+        console.error('Error al cargar solicitud', e);
         setErrorLocal(e?.message || 'Error al cargar la solicitud');
       }
     };
 
     cargarSolicitud();
-  }, [editId, token, navigate, fechaSolicitud]);
+  }, [editId, cloneId, token, navigate]);
 
   const handleAgregarItem = () => {
     if (!selectedMaterialId || !cantidad || Number(cantidad) <= 0) return;
@@ -202,13 +298,15 @@ export default function CrearSolicitudPage() {
       stockDisponible: material.enStock,
       costoUnitario,
       subtotal: cantidadNumber * costoUnitario,
+      tieneImagen: material.tieneImagen ?? null,
+      rutaImagenFinal: material.rutaImagenFinal ?? null,
     };
 
     setItems((prev) => [...prev, nuevoItem]);
 
     // Limpiar campos pero mantener info de material seleccionado visible
-  setCantidad('');
-  setSelectedMaterialId('');
+    setCantidad('');
+    setSelectedMaterialId('');
   };
 
   const handleEliminarItem = (index: number) => {
@@ -253,11 +351,7 @@ export default function CrearSolicitudPage() {
     setEditingCantidad('');
   };
 
-  const handleGuardarBorrador = async () => {
-    await handleEnviarSolicitud(true);
-  };
-
-  const handleEnviarSolicitud = async (comoBorrador = false) => {
+  const handleEnviarSolicitud = async () => {
     if (!token) {
       toast.error({
         title: 'No hay sesión activa',
@@ -274,6 +368,16 @@ export default function CrearSolicitudPage() {
       return;
     }
 
+    // Validación profesional: No permitir envío si faltan áreas en el detalle
+    const lineasSinArea = items.filter(it => !it.idArea && !idAreaDestino);
+    if (lineasSinArea.length > 0) {
+      toast.error({
+        title: 'Información incompleta',
+        description: 'Todas las líneas deben tener un área de destino asignada.',
+      });
+      return;
+    }
+
     const areaSeleccionada = idAreaDestino ? areas.find((a: any) => String(a.id) === idAreaDestino) : null;
 
     setLoading(true);
@@ -282,7 +386,7 @@ export default function CrearSolicitudPage() {
     try {
       const payload = {
         fechaSolicitud,
-        estado: comoBorrador ? 'PENDIENTE' : 'PENDIENTE',
+        estado: 'PENDIENTE',
         nuevoEstado: 'PENDIENTE',
         area: null,
         comentario: observaciones || null,
@@ -299,7 +403,7 @@ export default function CrearSolicitudPage() {
           idArea: it.idArea ?? (areaSeleccionada ? areaSeleccionada.id : null),
           idRecurso: it.idRecurso ?? (idRecurso ? Number(idRecurso) : null),
           areaNombre: it.areaNombre || (areaSeleccionada ? areaSeleccionada.nombre : null),
-          codigoCuenta: it.codigoCuenta || null, // <-- Ahora sí it.codigoCuenta existe y tiene valor por línea
+          codigoCuenta: it.codigoCuenta || null,
         })),
       };
 
@@ -332,7 +436,7 @@ export default function CrearSolicitudPage() {
 
       // Descargar PDF automáticamente (igual que en Despacho) tras la creación
       const idSolicitudFinal = data.IdSolicitud ?? data.idSolicitud ?? null;
-      if (idSolicitudFinal && !editId && !comoBorrador) {
+      if (idSolicitudFinal && !editId) {
         try {
           const pdfResp = await apiFetch(`/solicitudes/${idSolicitudFinal}/pdf`);
           if (pdfResp.ok) {
@@ -354,14 +458,10 @@ export default function CrearSolicitudPage() {
       toast.success({
         title: editId
           ? 'Solicitud actualizada correctamente'
-          : comoBorrador
-            ? 'Solicitud guardada correctamente'
-            : 'Solicitud creada correctamente',
+          : 'Solicitud creada correctamente',
         description: editId
           ? 'La solicitud quedó actualizada y enviada a revisión.'
-          : comoBorrador
-            ? 'El borrador quedó disponible en el listado de solicitudes.'
-            : 'Se registró y quedó en estado pendiente.',
+          : 'Se registró y quedó en estado pendiente.',
       });
       navigate('/solicitudes');
     } catch (e: any) {
@@ -469,6 +569,9 @@ export default function CrearSolicitudPage() {
         setCantidad={setCantidad}
         onAgregarItem={handleAgregarItem}
         materialSeleccionado={materialSeleccionado}
+        imagenMaterialUrl={imagenMaterialUrl}
+        imagenMaterialLoading={imagenMaterialLoading}
+        imagenMaterialError={imagenMaterialError}
         stockActualSeleccionado={stockActualSeleccionado}
         stockRestante={stockRestante}
       />
@@ -502,31 +605,37 @@ export default function CrearSolicitudPage() {
       </Card>
 
       {/* Acciones */}
-      <div className="flex flex-col sm:flex-row justify-end gap-3 pb-8">
-        <Button 
-          variant="outline" 
-          onClick={() => navigate('/solicitudes')}
-          className="w-full sm:w-auto order-3 sm:order-1"
-        >
-          Cancelar
-        </Button>
-        <Button 
-          variant="outline" 
-          onClick={handleGuardarBorrador} 
-          disabled={loading}
-          className="w-full sm:w-auto order-2"
-        >
-          <Save className="w-4 h-4 mr-2" />
-          Guardar Borrador
-        </Button>
-        <Button 
-          onClick={() => handleEnviarSolicitud(false)} 
-          disabled={loading}
-          className="w-full sm:w-auto order-1 sm:order-3 bg-blue-600 hover:bg-blue-700"
-        >
-          <Send className="w-4 h-4 mr-2" />
-          Enviar Solicitud
-        </Button>
+      <div className="flex flex-col sm:flex-row sm:justify-end gap-3 pb-12 mb-8">
+        <div className="w-full sm:w-auto">
+          <Button 
+            size="lg"
+            onClick={handleEnviarSolicitud} 
+            disabled={loading || items.length === 0}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg shadow-blue-200 transition-all active:scale-95 disabled:opacity-50 px-8"
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <Clock className="w-5 h-5 animate-spin" />
+                Procesando...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Send className="w-5 h-5" />
+                Enviar Solicitud
+              </span>
+            )}
+          </Button>
+        </div>
+        <div className="w-full sm:w-auto">
+          <Button 
+            variant="outline" 
+            size="lg"
+            onClick={() => navigate('/solicitudes')}
+            className="w-full font-semibold border-slate-300 hover:bg-slate-50 transition-all px-8"
+          >
+            Cancelar
+          </Button>
+        </div>
       </div>
     </div>
   );

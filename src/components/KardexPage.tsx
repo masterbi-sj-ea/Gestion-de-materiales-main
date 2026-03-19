@@ -45,10 +45,14 @@ export function KardexPage() {
   const [fechaInicio, setFechaInicio] = useState<Date | undefined>(undefined);
   const [fechaFin, setFechaFin] = useState<Date | undefined>(undefined);
   const componentRef = useRef<HTMLDivElement>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   const highlightText = (text: string, highlight: string) => {
     if (!highlight.trim()) return text;
-    const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
+    const safe = escapeRegExp(highlight);
+    const parts = text.split(new RegExp(`(${safe})`, 'gi'));
     return (
       <span>
         {parts.map((part, i) => 
@@ -76,6 +80,12 @@ export function KardexPage() {
       if (filtroTipo !== 'TODOS') params.append('tipoMovimiento', filtroTipo);
       if (fechaInicio) params.append('fechaInicio', format(fechaInicio, 'yyyy-MM-dd'));
       if (fechaFin) params.append('fechaFin', format(fechaFin, 'yyyy-MM-dd'));
+      if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
+
+      // Pedimos más de 50 por defecto para que el usuario no “pierda” registros
+      // si no está usando filtros, pero sin cargar todo el histórico.
+      params.append('page', '1');
+      params.append('limit', debouncedSearch.trim() ? '200' : '500');
 
       const res = await fetch(`${API_BASE}/api/kardex?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -93,12 +103,27 @@ export function KardexPage() {
 
   useEffect(() => {
     fetchMovimientos();
-  }, [filtroTipo, fechaInicio, fechaFin]);
+  }, [filtroTipo, fechaInicio, fechaFin, debouncedSearch]);
 
-  const movimientosFiltrados = movimientos.filter(m =>
-    m.NumeroArticulo.toLowerCase().includes(filtroArticulo.toLowerCase()) ||
-    m.DescripcionArticulo.toLowerCase().includes(filtroArticulo.toLowerCase())
-  );
+  // Debounce del buscador para no golpear el backend en cada tecla.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(filtroArticulo);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [filtroArticulo]);
+
+  // Con Search en backend, normalmente ya llega filtrado; este filtro queda como “refuerzo”.
+  const movimientosFiltrados = movimientos.filter(m => {
+    const q = filtroArticulo.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      m.NumeroArticulo.toLowerCase().includes(q) ||
+      m.DescripcionArticulo.toLowerCase().includes(q) ||
+      (m.Referencia || '').toLowerCase().includes(q) ||
+      (m.AreaDestino || '').toLowerCase().includes(q)
+    );
+  });
 
   const stats = {
     entradas: movimientosFiltrados.filter(m => m.TipoMovimiento === 'ENTRADA').reduce((acc, m) => acc + m.Cantidad, 0),
@@ -107,6 +132,13 @@ export function KardexPage() {
   };
 
   const exportToCSV = () => {
+    const csvEscape = (value: unknown) => {
+      const str = String(value ?? '');
+      const needsQuotes = /[\n\r",]/.test(str);
+      const escaped = str.replace(/"/g, '""');
+      return needsQuotes ? `"${escaped}"` : escaped;
+    };
+
     const headers = ["Fecha", "Artículo", "Descripción", "Área Destino", "Cuenta", "Tipo", "Cantidad", "Stock Anterior", "Stock Nuevo", "Usuario", "Referencia"];
     const rows = movimientosFiltrados.map(m => [
       format(new Date(m.FechaMovimiento), "yyyy-MM-dd HH:mm"),
@@ -122,7 +154,9 @@ export function KardexPage() {
       m.Referencia || ''
     ]);
 
-    const content = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const content = [headers, ...rows]
+      .map((row) => row.map(csvEscape).join(','))
+      .join("\n");
     const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -132,6 +166,12 @@ export function KardexPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const applyQuickFilter = (value: string) => {
+    const next = String(value || '').trim();
+    if (!next) return;
+    setFiltroArticulo(next);
   };
 
   return (
@@ -407,15 +447,27 @@ export function KardexPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="font-bold text-gray-800 text-sm">{highlightText(mov.NumeroArticulo, filtroArticulo)}</span>
+                          <button
+                            type="button"
+                            onClick={() => applyQuickFilter(mov.NumeroArticulo)}
+                            className="font-bold text-gray-800 text-sm text-left hover:underline"
+                            title="Filtrar por este código"
+                          >
+                            {highlightText(mov.NumeroArticulo, filtroArticulo)}
+                          </button>
                           <span className="text-[11px] text-gray-500 truncate max-w-[200px]">{highlightText(mov.DescripcionArticulo, filtroArticulo)}</span>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-0.5">
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded w-fit ${mov.AreaDestino ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
+                          <button
+                            type="button"
+                            onClick={() => applyQuickFilter(mov.AreaDestino || '')}
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded w-fit text-left hover:underline ${mov.AreaDestino ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-400'}`}
+                            title="Filtrar por área"
+                          >
                             {mov.AreaDestino || 'SIN ÁREA'}
-                          </span>
+                          </button>
                           <span className="text-[10px] text-gray-400 font-mono">
                             {mov.CodigoCuenta || '00000000'}
                           </span>
@@ -454,9 +506,14 @@ export function KardexPage() {
                           <span className="text-[11px] font-semibold text-gray-700 uppercase tracking-tight">{mov.NombreUsuario || 'SISTEMA'}</span>
                           <div className="flex items-center gap-1">
                             <FileText className="h-3 w-3 text-blue-500" />
-                            <span className="text-xs text-blue-600 font-bold hover:underline cursor-pointer decoration-2 underline-offset-2">
+                            <button
+                              type="button"
+                              onClick={() => applyQuickFilter(mov.Referencia || '')}
+                              className="text-xs text-blue-600 font-bold hover:underline decoration-2 underline-offset-2 text-left"
+                              title="Filtrar por referencia"
+                            >
                               {highlightText(mov.Referencia || '', filtroArticulo)}
-                            </span>
+                            </button>
                           </div>
                         </div>
                       </TableCell>

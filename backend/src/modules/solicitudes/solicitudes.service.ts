@@ -110,7 +110,7 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   const pool = await getPool();
 
   // Construir TVP para dbo.TDetalleSolicitudMaterial
-  const tvp = new sql.Table();
+  const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
   tvp.columns.add('IdMaterial', sql.Int);
   tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
   tvp.columns.add('UnidadMedida', sql.NVarChar(50));
@@ -169,7 +169,7 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
 
   const pool = await getPool();
 
-  const tvp = new sql.Table();
+  const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
   tvp.columns.add('IdMaterial', sql.Int);
   tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
   tvp.columns.add('UnidadMedida', sql.NVarChar(50));
