@@ -106,7 +106,11 @@ export async function eliminarMaterial(idMaterial: number): Promise<void> {
   await callSpOne('sp_EliminarMaterial', { IdMaterial: idMaterial });
 }
 
-export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsuario?: number): Promise<void> {
+export async function importarMaterialesYStock(
+  datos: MaterialImportRow[],
+  idUsuario?: number,
+  modo: 'ACTUALIZAR' | 'REEMPLAZAR' = 'ACTUALIZAR'
+): Promise<void> {
   const pool = await getPool();
   const tvp = new sql.Table('dbo.TMaterialCarga');
 
@@ -124,19 +128,15 @@ export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsu
     const str = value.trim();
     if (!str) return null;
 
-    // Soportar formatos dd/MM/yyyy y yyyy-MM-dd
     let d: number, m: number, y: number;
-
     const slashParts = str.split('/');
     if (slashParts.length === 3) {
-      // Asumimos dd/MM/yyyy
       d = Number(slashParts[0]);
       m = Number(slashParts[1]);
       y = Number(slashParts[2]);
     } else {
       const dashParts = str.split('-');
       if (dashParts.length === 3) {
-        // Asumimos yyyy-MM-dd
         y = Number(dashParts[0]);
         m = Number(dashParts[1]);
         d = Number(dashParts[2]);
@@ -147,7 +147,11 @@ export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsu
 
     if (!y || !m || !d) return null;
     const date = new Date(y, m - 1, d);
-    return Number.isNaN(date.getTime()) ? null : date;
+    if (Number.isNaN(date.getTime())) return null;
+    if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
+      return null;
+    }
+    return date;
   };
 
   for (const row of datos) {
@@ -169,5 +173,7 @@ export async function importarMaterialesYStock(datos: MaterialImportRow[], idUsu
   if (idUsuario) {
     request.input('IdUsuario', sql.Int, idUsuario);
   }
+  request.input('Modo', sql.NVarChar(20), modo);
+
   await request.execute('sp_ImportarMaterialesYStock');
 }

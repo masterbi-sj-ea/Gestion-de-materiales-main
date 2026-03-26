@@ -7,11 +7,10 @@ import {
   actualizarMaterialController,
   eliminarMaterialController,
   importarMaterialesController,
-  verImagenMaterialController,
   obtenerImagenMaterialPorNumeroArticuloController,
-  obtenerArchivoImagenMaterialController,
   obtenerArchivoImagenMaterialPorNumeroArticuloController,
 } from './materiales.controller';
+import { requireModulePermission } from '../../middleware/accessControl';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -23,16 +22,14 @@ const upload = multer({
 
 const router = Router();
 
-router.get('/', listarMaterialesController);
-router.get('/con-stock', listarMaterialesConStockController);
-router.get('/imagen', verImagenMaterialController);
-router.get('/imagen/:numeroArticulo', obtenerImagenMaterialPorNumeroArticuloController);
-router.get('/archivo/:filename', obtenerArchivoImagenMaterialController);
-router.get('/archivo/por-numero/:numeroArticulo', obtenerArchivoImagenMaterialPorNumeroArticuloController);
-router.get('/imagen-archivo/:numeroArticulo', obtenerArchivoImagenMaterialPorNumeroArticuloController);
-router.post('/', crearMaterialController);
-router.put('/:id', actualizarMaterialController);
-router.delete('/:id', eliminarMaterialController);
-router.post('/importar', upload.single('file'), importarMaterialesController);
+router.get('/', requireModulePermission('materiales', 'ver'), listarMaterialesController);
+router.get('/con-stock', requireModulePermission('materiales', 'ver'), listarMaterialesConStockController);
+router.get('/imagen/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerImagenMaterialPorNumeroArticuloController);
+router.get('/archivo/por-numero/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerArchivoImagenMaterialPorNumeroArticuloController);
+router.get('/imagen-archivo/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerArchivoImagenMaterialPorNumeroArticuloController);
+router.post('/', requireModulePermission('materiales', 'crear'), crearMaterialController);
+router.put('/:id', requireModulePermission('materiales', 'editar'), actualizarMaterialController);
+router.delete('/:id', requireModulePermission('materiales', 'eliminar'), eliminarMaterialController);
+router.post('/importar', requireModulePermission('materiales', 'crear'), upload.single('file'), importarMaterialesController);
 
 export default router;

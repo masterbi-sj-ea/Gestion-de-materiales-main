@@ -4,6 +4,9 @@ import { env } from '../config/env';
 
 export interface AuthRequest extends Request {
   userId?: number;
+  userRoles?: string[];
+  userEmail?: string;
+  userName?: string;
 }
 
 export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
@@ -29,10 +32,20 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
     }
     */
 
-    const payload = jwt.verify(token, env.JWT_SECRET) as { id?: number };
+    const payload = jwt.verify(token, env.JWT_SECRET) as {
+      id?: number;
+      email?: string;
+      nombre?: string;
+      roles?: unknown;
+    };
     if (payload.id) {
       req.userId = payload.id;
     }
+    req.userEmail = typeof payload.email === 'string' ? payload.email : undefined;
+    req.userName = typeof payload.nombre === 'string' ? payload.nombre : undefined;
+    req.userRoles = Array.isArray(payload.roles)
+      ? payload.roles.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : [];
     return next();
   } catch (err) {
     console.error('Error verificando JWT en authMiddleware', err && (err as Error).message ? (err as Error).message : err);

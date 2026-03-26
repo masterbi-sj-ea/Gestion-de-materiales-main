@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type MouseEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { usePermisos } from '../contexts/PermisosContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Badge } from './ui/badge';
-import { Search, Plus, Upload, Package, Edit, Trash2, Eye, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, Upload, Package, Edit, Trash2, Eye, RefreshCw, Clock3 } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
 import { sileo } from 'sileo';
 import {
@@ -18,6 +19,7 @@ import {
   TableHeader,
   TableRow,                        
 } from './ui/table';
+import './MaterialesPage.css';
 
 interface Material {
   id: number;
@@ -52,14 +54,95 @@ function normalizeCategoria(value: unknown): string {
   return safeTrim(value).toLowerCase();
 }
 
+function formatMaterialDate(value: string | null): string {
+  const raw = safeTrim(value);
+  if (!raw) return '-';
+
+  const dateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dateMatch) {
+    const [, year, month, day] = dateMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+
+  return new Intl.DateTimeFormat('es-NI', { timeZone: 'UTC' }).format(parsed);
+}
+
+function formatLastUpdatedLabel(value: Date | null): string {
+  if (!value) return 'Sin sincronizar';
+
+  const now = new Date();
+  const sameDay = value.toDateString() === now.toDateString();
+
+  if (sameDay) {
+    return `Actualizado ${new Intl.DateTimeFormat('es-NI', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(value)}`;
+  }
+
+  return `Actualizado ${new Intl.DateTimeFormat('es-NI', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(value)}`;
+}
+
+async function getImageAspectRatio(src: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      if (!image.naturalWidth || !image.naturalHeight) {
+        resolve(null);
+        return;
+      }
+
+      resolve(image.naturalWidth / image.naturalHeight);
+    };
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+function getImageViewportStyle(aspectRatio: number | null): CSSProperties {
+  const safeRatio = aspectRatio && Number.isFinite(aspectRatio)
+    ? Math.min(1.65, Math.max(0.72, aspectRatio))
+    : 1;
+
+  const profile =
+    safeRatio < 0.9 ? 'portrait' :
+    safeRatio > 1.15 ? 'landscape' :
+    'square';
+
+  const widthMap = {
+    portrait: 380,
+    square: 470,
+    landscape: 620,
+  } as const;
+
+  return {
+    width: `min(100%, ${widthMap[profile]}px)`,
+    aspectRatio: safeRatio,
+    maxHeight: '460px',
+  };
+}
+
 export default function MaterialesPage() {
   const { user, token } = useAuth();
+  const { modulos, cargandoPermisos, puedeAcceder, getPermisosModulo } = usePermisos();
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoria, setSelectedCategoria] = useState<string>(ALL_CATEGORIES_VALUE);
   const [loading, setLoading] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [modoImportacion, setModoImportacion] = useState<'ACTUALIZAR' | 'REEMPLAZAR'>('ACTUALIZAR');
   const [fileInputKey, setFileInputKey] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
@@ -75,15 +158,24 @@ export default function MaterialesPage() {
     numeroArticulo: string;
     descripcion: string;
     src: string;
+    aspectRatio: number | null;
     loading: boolean;
     error: string | null;
   } | null>(null);
 
   const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; material: Material | null }>({ open: false, material: null });
 
-  // Permisos según rol (ajustar según tus roles reales si hace falta)
-  const canEdit = !!user; // por ahora, cualquier usuario autenticado
-  const canCreate = !!user;
+  const materialesModuleCode = useMemo(
+    () => modulos.find((modulo) => modulo.path === '/materiales')?.id ?? 'materiales',
+    [modulos],
+  );
+  const canView = !!user && puedeAcceder(user.role, materialesModuleCode);
+  const modulePermissions = user ? getPermisosModulo(user.role, materialesModuleCode) : null;
+  const canCreate = !!modulePermissions?.puedeCrear;
+  const canEdit = !!modulePermissions?.puedeEditar;
+  const canDelete = !!modulePermissions?.puedeEliminar;
+  const canImport = canCreate;
+  const showActions = canView || canEdit || canDelete;
 
   const categorias: CategoriaOption[] = useMemo(() => {
     const map = new Map<string, string>();
@@ -124,7 +216,7 @@ export default function MaterialesPage() {
   }, [materiales, normalizedSearchTerm, selectedCategoria]);
 
   const cargarMateriales = async () => {
-    if (!token) return;
+    if (!token || !canView) return;
     try {
       setLoading(true);
       const resp = await fetch(`${API_BASE_URL}/materiales/con-stock`, {
@@ -155,6 +247,7 @@ export default function MaterialesPage() {
         fuenteImagen: safeTrim(m?.FuenteImagen) || null,
       }));
       setMateriales(mapped);
+      setLastUpdatedAt(new Date());
       setPage(1);
     } catch (error) {
       console.error('Error al cargar materiales', error);
@@ -163,23 +256,21 @@ export default function MaterialesPage() {
     }
   };
 
-  const getPublicBaseUrl = () => API_BASE_URL.replace(/\/api\/?$/i, '');
-
-  const resolveImageSrc = (ruta: string): string => {
-    const trimmed = ruta.trim();
-    if (!trimmed) return '';
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    const base = getPublicBaseUrl();
-    const normalized = trimmed.replace(/\\/g, '/');
-    const raw = normalized.startsWith('/') ? `${base}${normalized}` : `${base}/${normalized}`;
-    return encodeURI(raw);
-  };
-
   const handleVerImagen = async (material: Material) => {
+    if (!token || !canView) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para ver imágenes de materiales' });
+      return;
+    }
+
+    if (imagePreview?.src) {
+      URL.revokeObjectURL(imagePreview.src);
+    }
+
     setImagePreview({
       numeroArticulo: material.numeroArticulo,
       descripcion: material.descripcion,
       src: '',
+      aspectRatio: null,
       loading: true,
       error: null
     });
@@ -193,7 +284,7 @@ export default function MaterialesPage() {
         }
       });
 
-      if (response.status === 404) {
+      if (response.status === 204 || response.status === 404) {
         throw new Error('Sin imagen disponible');
       }
 
@@ -207,18 +298,29 @@ export default function MaterialesPage() {
       }
       
       const objectUrl = URL.createObjectURL(blob);
-      setImagePreview(prev => prev ? { ...prev, src: objectUrl, loading: false } : null);
+      const aspectRatio = await getImageAspectRatio(objectUrl);
+      setImagePreview(prev => prev ? { ...prev, src: objectUrl, aspectRatio, loading: false } : null);
     } catch (error: any) {
       setImagePreview(prev => prev ? { ...prev, error: error.message || 'Error al cargar imagen', loading: false } : null);
     }
   };
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || cargandoPermisos || !canView) return;
     cargarMateriales();
-  }, [token]);
+  }, [token, cargandoPermisos, canView]);
 
   const handleOpenDialog = (material?: Material) => {
+    const isEdit = !!material;
+    if (isEdit && !canEdit) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para editar materiales' });
+      return;
+    }
+    if (!isEdit && !canCreate) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para crear materiales' });
+      return;
+    }
+
     const mat = material ?? null;
     setEditingMaterial(mat);
     setFormNumeroArticulo(mat?.numeroArticulo ?? '');
@@ -231,6 +333,16 @@ export default function MaterialesPage() {
   const handleGuardar = async () => {
     if (!token) {
       sileo.error({ title: 'Error', description: 'Debes iniciar sesión para guardar materiales' });
+      return;
+    }
+
+    const isEdit = !!editingMaterial;
+    if (isEdit && !canEdit) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para editar materiales' });
+      return;
+    }
+    if (!isEdit && !canCreate) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para crear materiales' });
       return;
     }
 
@@ -248,7 +360,6 @@ export default function MaterialesPage() {
 
     try {
       let resp: Response;
-      const isEdit = !!editingMaterial;
       if (editingMaterial) {
         resp = await fetch(`${API_BASE_URL}/materiales/${editingMaterial.id}`, {
           method: 'PUT',
@@ -289,7 +400,12 @@ export default function MaterialesPage() {
 
   const handleEliminar = async (id: number) => {
     if (!token) {
-      sileo.error({ title: 'Atención', description: 'Debes iniciar sesión para eliminar materiales' });
+      sileo.error({ title: 'Atención', description: 'Debes iniciar sesión para desactivar materiales' });
+      return;
+    }
+
+    if (!canDelete) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para desactivar materiales' });
       return;
     }
 
@@ -303,22 +419,30 @@ export default function MaterialesPage() {
 
       if (!resp.ok) {
         const text = await resp.text().catch(() => '');
-        sileo.error({ title: 'Error', description: text || 'Error al eliminar material' });
+        sileo.error({ title: 'Error', description: text || 'Error al desactivar material' });
         return;
       }
 
       await cargarMateriales();
 
-      sileo.success({ title: 'Eliminado', description: `Material eliminado correctamente (ID ${id})` });
+      sileo.success({
+        title: 'Material desactivado',
+        description: `El material quedó oculto del catálogo operativo sin borrar su historial (ID ${id})`,
+      });
     } catch (error) {
-      console.error('Error al eliminar material', error);
-      sileo.error({ title: 'Error', description: 'Error al eliminar material' });
+      console.error('Error al desactivar material', error);
+      sileo.error({ title: 'Error', description: 'Error al desactivar material' });
     }
   };
 
   const totalMaterialesCatalogo = materiales.length;
   const totalMaterialesFiltrados = filteredMateriales.length;
   const totalPages = Math.max(1, Math.ceil(totalMaterialesFiltrados / pageSize));
+  const totalCategoriasCatalogo = Math.max(0, categorias.length - 1);
+  const materialesConStock = useMemo(
+    () => materiales.reduce((acc, material) => acc + ((material.enStock ?? 0) > 0 ? 1 : 0), 0),
+    [materiales],
+  );
 
   const pagedMateriales = useMemo(
     () => filteredMateriales.slice((page - 1) * pageSize, page * pageSize),
@@ -375,13 +499,24 @@ export default function MaterialesPage() {
       sileo.error({ title: 'Atención', description: 'Debes iniciar sesión para importar materiales' });
       return;
     }
+    if (!canImport) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para importar materiales' });
+      return;
+    }
     if (!importFile) {
-      sileo.warning({ title: 'Archivo requerido', description: 'Selecciona un archivo CSV primero' });
+      sileo.warning({ title: 'Archivo requerido', description: 'Selecciona un archivo CSV o Excel primero' });
       return;
     }
 
     const formData = new FormData();
     formData.append('file', importFile);
+    formData.append('modo', modoImportacion);
+
+    sileo.info({
+      title: "Carga Iniciada",
+      description: `Procesando archivo: ${importFile.name} en modo ${modoImportacion.toLowerCase()}. Por favor, espere...`,
+      duration: 3000
+    });
 
     try {
       setImportLoading(true);
@@ -403,15 +538,27 @@ export default function MaterialesPage() {
       const result = await resp.json();
       const stats = result?.stats;
       const idCorte = result?.idCorte;
+      const modoResult = result?.modo;
       
       let descriptionStr = `Se han procesado ${stats?.totalProcesados || 0} artículos correctamente.`;
+      
+      if (modoResult === 'REEMPLAZAR') {
+        descriptionStr =
+          `Reemplazo total aplicado. Se actualizaron, insertaron o reactivaron los materiales del archivo; ` +
+          `los ausentes quedaron inactivos y su stock fue llevado a 0. ${descriptionStr}`;
+      } else {
+        descriptionStr =
+          `Actualización parcial aplicada. Se procesaron únicamente los materiales del archivo; ` +
+          `los ausentes no fueron modificados. ${descriptionStr}`;
+      }
+
       if (stats?.snapshotDate) descriptionStr += ` Fecha de inventario: ${stats.snapshotDate}.`;
-      if (idCorte) descriptionStr += ` Corte STOCK: #${idCorte}.`;
+      if (idCorte) descriptionStr += ` Transacción de stock asociada: #${idCorte}.`;
 
       sileo.success({
-        title: "Importación Exitosa",
+        title: "Carga Completada",
         description: descriptionStr,
-        duration: 6000
+        duration: 8000
       });
 
       setImportFile(null);
@@ -425,185 +572,329 @@ export default function MaterialesPage() {
     }
   };
 
+  const handleRefresh = async () => {
+    if (!token || !canView || loading) return;
+    await cargarMateriales();
+  };
+
+  if (cargandoPermisos) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-slate-500">
+          Validando permisos del módulo de materiales...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <Card className="border-amber-200 bg-amber-50/70">
+        <CardContent className="py-10 text-center">
+          <h2 className="text-lg font-semibold text-slate-900">Acceso restringido</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            No tienes permisos para ver el catálogo de materiales.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const imageViewportStyle = getImageViewportStyle(imagePreview?.aspectRatio ?? null);
+  const lastUpdatedLabel = formatLastUpdatedLabel(lastUpdatedAt);
+  const headerStatusLabel = loading ? 'Sincronizando catálogo' : 'Catálogo operativo';
+  const importDisabledReason =
+    !canImport
+      ? 'Tu rol no tiene permiso para importar materiales. Necesitas permisos de creación en este módulo.'
+      : importLoading
+        ? 'La importación está en proceso. Espera a que finalice para volver a cargar otro archivo.'
+        : !importFile
+          ? 'Selecciona primero un archivo CSV o Excel para habilitar la importación.'
+          : null;
+  const importModeFileHint =
+    modoImportacion === 'REEMPLAZAR'
+      ? importFile
+        ? `${importFile.name} se procesará como catálogo oficial completo`
+        : 'Usa este modo cuando el archivo represente el catálogo oficial nuevo'
+      : importFile
+        ? `${importFile.name} se procesará sin alterar materiales ausentes`
+        : 'Usa este modo para cargas parciales o ajustes puntuales';
+  const importButtonLabel =
+    !canImport
+      ? 'Sin permiso'
+      : importLoading
+        ? 'Importando...'
+        : !importFile
+          ? 'Selecciona archivo'
+          : 'Importar ahora';
+
+  const handleImportFileTriggerClick = (event: MouseEvent<HTMLLabelElement>) => {
+    if (!canImport) {
+      event.preventDefault();
+      sileo.error({
+        title: 'Sin acceso',
+        description: 'Tu rol no tiene permiso para importar materiales en este módulo.',
+      });
+      return;
+    }
+
+    if (importLoading) {
+      event.preventDefault();
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-8">
-        <div className="space-y-1">
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900">Catálogo de Materiales</h1>
-          <p className="text-slate-500 text-sm md:text-base">
-            Gestión y control de inventario maestro
-          </p>
-        </div>
+      <section className="materials-hero">
+        <div className="materials-hero__glow materials-hero__glow--blue" />
+        <div className="materials-hero__glow materials-hero__glow--mint" />
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-          {/* Import Section - Responsive Container */}
-          <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 shadow-sm flex-1 sm:flex-none">
-            <input
-              key={fileInputKey}
-              type="file"
-              id="file-upload"
-              accept=".csv,.xlsx"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <label 
-              htmlFor="file-upload" 
-              className="flex-1 sm:w-40 md:w-56 text-[11px] md:text-xs font-medium px-3 py-2 cursor-pointer hover:bg-slate-50 rounded-lg transition-all truncate text-slate-600 border border-transparent hover:border-slate-100"
-            >
-              {importFile ? importFile.name : "Subir CSV o Excel"}
-            </label>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleImport}
-              disabled={importLoading || !importFile}
-              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-8 px-3 shrink-0"
-            >
-              <Upload className="w-3.5 h-3.5 mr-1.5" />
-              <span className="hidden xs:inline">{importLoading ? '...' : 'Importar'}</span>
-            </Button>
+        <div className="materials-hero__grid">
+          <div className="materials-hero__content">
+            <div className="materials-hero__eyebrow">
+              <div className="materials-hero__eyebrow-icon">
+                <Package className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="materials-hero__eyebrow-label">Inventario maestro</div>
+                <div className="materials-hero__eyebrow-title">Centro de control del catálogo</div>
+              </div>
+            </div>
+
+            <div className="materials-hero__copy">
+              <h1 className="materials-hero__title">Catálogo de Materiales</h1>
+              <p className="materials-hero__description">
+                Supervisa, actualiza e importa el inventario maestro desde una consola de trabajo
+                unificada, pensada para operación diaria, trazabilidad y velocidad de ejecución.
+              </p>
+            </div>
+
+            <div className="materials-hero__stats">
+              <article className="materials-stat-card">
+                <span className="materials-stat-card__label">Artículos</span>
+                <strong className="materials-stat-card__value">
+                  {totalMaterialesCatalogo.toLocaleString()}
+                </strong>
+              </article>
+              <article className="materials-stat-card materials-stat-card--large">
+                <span className="materials-stat-card__label">Valor Inventario (USD)</span>
+                <strong className="materials-stat-card__value">
+                  {inventoryTotals.totalValorUSD.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </strong>
+                
+              </article>
+              <article className="materials-stat-card materials-stat-card--large">
+                <span className="materials-stat-card__label">Valor Inventario (C$)</span>
+                <strong className="materials-stat-card__value">
+                  {inventoryTotals.totalValorCord.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </strong>
+                <span className="materials-stat-card__meta">C${TIPO_CAMBIO_USD_A_CORD}por 1 $ </span>
+              </article>
+              
+              
+            </div>
           </div>
 
-          <div className="hidden sm:block h-8 w-px bg-slate-200 mx-1" />
-
-          {/* Create Button - Matching Import size */}
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button 
-                disabled={!canCreate} 
-                onClick={() => handleOpenDialog()} 
-                className="w-full sm:w-auto bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 text-white shadow-sm h-11 px-6 text-xs font-semibold transition-all active:scale-[0.98] shrink-0 rounded-xl"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1.5" />
-                <span>Nuevo Material</span>
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl sm:max-w-[95vw] md:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>{editingMaterial ? 'Editar Material' : 'Agregar Nuevo Material'}</DialogTitle>
-                <DialogDescription>
-                  {editingMaterial
-                    ? 'Modifica la información del material seleccionado'
-                    : 'Completa la información del nuevo material'}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="codigo">Número de artículo</Label>
-                    <Input
-                      id="codigo"
-                      placeholder="Código de material"
-                      value={formNumeroArticulo}
-                      onChange={(e) => setFormNumeroArticulo(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="grupo">Grupo de artículos</Label>
-                    <Input
-                      id="grupo"
-                      placeholder="Grupo / familia"
-                      value={formGrupoArticulos}
-                      onChange={(e) => setFormGrupoArticulos(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="descripcion">Descripción</Label>
-                  <Input
-                    id="descripcion"
-                    placeholder="Descripción del material"
-                    value={formDescripcion}
-                    onChange={(e) => setFormDescripcion(e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="unidad">Unidad de medida</Label>
-                    <Input
-                      id="unidad"
-                      placeholder="Unidad"
-                      value={formUnidadMedida}
-                      onChange={(e) => setFormUnidadMedida(e.target.value)}
-                    />
-                  </div>
-                </div>
+          <aside className="materials-command">
+            <div className="materials-command__header">
+              <div>
+                <div className="materials-command__eyebrow">Acciones rápidas</div>
+                <div className="materials-command__title">Operación del catálogo</div>
               </div>
-              <DialogFooter className="flex flex-col sm:flex-row gap-2">
+              <div className={`materials-command__status ${loading ? 'is-loading' : ''}`}>
+                <span className="materials-command__status-dot" />
+                <span>{headerStatusLabel}</span>
+              </div>
+            </div>
+
+            <div className="materials-sync-card">
+              <div className="materials-sync-card__icon">
+                <Clock3 className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="materials-sync-card__label">Última sincronización</div>
+                <div className="materials-sync-card__value">{lastUpdatedLabel}</div>
+              </div>
+            </div>
+
+            <div className={`materials-command__actions ${canCreate ? 'has-secondary' : ''}`}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRefresh}
+                disabled={loading}
+                className="materials-command__button materials-command__button--ghost"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <span>{loading ? 'Actualizando...' : 'Actualizar catálogo'}</span>
+              </Button>
+
+              {canCreate && (
+                <Button
+                  type="button"
+                  onClick={() => handleOpenDialog()}
+                  className="materials-command__button materials-command__button--primary"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Nuevo material</span>
+                </Button>
+              )}
+            </div>
+
+            <div className="materials-import">
+              <input
+                key={fileInputKey}
+                type="file"
+                id="file-upload"
+                accept=".csv,.xlsx"
+                onChange={handleFileChange}
+                disabled={!canImport || importLoading}
+                className="hidden"
+              />
+
+              <div className={`materials-import__config mb-3 ${!canImport ? 'opacity-60' : ''}`}>
+                <Select 
+                  value={modoImportacion} 
+                  onValueChange={(v: any) => {
+                    if (!canImport || importLoading) return;
+                    setModoImportacion(v);
+                  }}
+                >
+                  <SelectTrigger className="w-full bg-white/50 border-slate-200" disabled={!canImport || importLoading}>
+                    <SelectValue placeholder="Modo de importación" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTUALIZAR">Modo ACTUALIZAR: carga parcial sin tocar ausentes</SelectItem>
+                    <SelectItem value="REEMPLAZAR">Modo REEMPLAZAR: catálogo oficial, desactiva ausentes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="materials-import__row">
+                <label
+                  htmlFor="file-upload"
+                  className={`materials-import__trigger ${!canImport || importLoading ? 'is-disabled' : ''}`}
+                  title={importFile ? importFile.name : 'Seleccionar archivo CSV o Excel'}
+                  onClick={handleImportFileTriggerClick}
+                >
+                  <div className="materials-import__icon">
+                    <Upload className="h-4 w-4" />
+                  </div>
+                  <div className="materials-import__copy">
+                    <div className="materials-import__title">
+                      {importFile ? 'Archivo listo para importar' : 'Subir CSV o Excel'}
+                    </div>
+                    <div className="materials-import__subtitle">
+                      {importModeFileHint}
+                    </div>
+                  </div>
+                </label>
+
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    setDialogOpen(false);
-                    setEditingMaterial(null);
-                  }}
-                  className="w-full sm:w-auto"
+                  onClick={handleImport}
+                  disabled={!canImport || importLoading || !importFile}
+                  className="materials-import__button"
                 >
-                  Cancelar
+                  <Upload className="h-4 w-4" />
+                  <span>{importButtonLabel}</span>
                 </Button>
-                <Button onClick={handleGuardar} disabled={!canCreate} className="w-full sm:w-auto">
-                  {editingMaterial ? 'Guardar cambios' : 'Guardar Material'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </div>
+
+              <div className={`materials-import__hint ${importDisabledReason ? 'is-muted' : 'is-ready'}`}>
+                {importDisabledReason ?? `Listo para importar ${importFile?.name} en modo ${modoImportacion.toLowerCase()}.`}
+              </div>
+            </div>
+          </aside>
         </div>
-      </div>
+      </section>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl sm:max-w-[95vw] md:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingMaterial ? 'Editar Material' : 'Agregar Nuevo Material'}</DialogTitle>
+            <DialogDescription>
+              {editingMaterial
+                ? 'Modifica la información del material seleccionado'
+                : 'Completa la información del nuevo material'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="codigo">Número de artículo</Label>
+                <Input
+                  id="codigo"
+                  placeholder="Código de material"
+                  value={formNumeroArticulo}
+                  onChange={(e) => setFormNumeroArticulo(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="grupo">Grupo de artículos</Label>
+                <Input
+                  id="grupo"
+                  placeholder="Grupo / familia"
+                  value={formGrupoArticulos}
+                  onChange={(e) => setFormGrupoArticulos(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="descripcion">Descripción</Label>
+              <Input
+                id="descripcion"
+                placeholder="Descripción del material"
+                value={formDescripcion}
+                onChange={(e) => setFormDescripcion(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="unidad">Unidad de medida</Label>
+                <Input
+                  id="unidad"
+                  placeholder="Unidad"
+                  value={formUnidadMedida}
+                  onChange={(e) => setFormUnidadMedida(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialogOpen(false);
+                setEditingMaterial(null);
+              }}
+              className="w-full sm:w-auto"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleGuardar}
+              disabled={editingMaterial ? !canEdit : !canCreate}
+              className="w-full sm:w-auto"
+            >
+              {editingMaterial ? 'Guardar cambios' : 'Guardar Material'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* KPIs */}
       <div className="grid gap-4 md:grid-cols-3">
-        {/* Total materiales */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Total Materiales</CardTitle>
-            <Package className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">{totalMaterialesCatalogo}</div>
-            <p className="text-xs text-muted-foreground mt-1">Ítems en catálogo</p>
-          </CardContent>
-        </Card>
 
-        {/* Valor inventario en USD */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Valor Inventario (USD)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">
-              {inventoryTotals.totalValorUSD.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}{' '}
-              USD
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Incluye materiales en USD y C$ convertidos a USD
-            </p>
-          </CardContent>
-        </Card>
 
-        {/* Valor inventario en C$ */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Valor Inventario (C$)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">
-              {inventoryTotals.totalValorCord.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}{' '}
-              C$
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Tasa {TIPO_CAMBIO_USD_A_CORD} C$ por 1 USD
-              {inventoryTotals.materialesConStockSinPrecio > 0
-                ? ` · ${inventoryTotals.materialesConStockSinPrecio} materiales con stock sin precio`
-                : ''}
-            </p>
-          </CardContent>
-        </Card>
+      {/* Tarjetas KPI removidas — mantenemos el espacio para futuras métricas */}
       </div>
 
       {/* Filtros y Búsqueda */}
@@ -647,19 +938,19 @@ export default function MaterialesPage() {
                   <TableHead className="text-right">Stock</TableHead>
                   <TableHead className="text-right">Última compra</TableHead>
                   <TableHead className="text-right">Último precio</TableHead>
-                  {canEdit && <TableHead className="text-center">Acciones</TableHead>}
+                  {showActions && <TableHead className="text-center">Acciones</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={canEdit ? 8 : 7} className="text-center text-muted-foreground py-6">
+                    <TableCell colSpan={showActions ? 8 : 7} className="text-center text-muted-foreground py-6">
                       Cargando materiales...
                     </TableCell>
                   </TableRow>
                 ) : pagedMateriales.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={canEdit ? 8 : 7} className="text-center text-muted-foreground py-6">
+                    <TableCell colSpan={showActions ? 8 : 7} className="text-center text-muted-foreground py-6">
                       Sin resultados
                     </TableCell>
                   </TableRow>
@@ -680,9 +971,7 @@ export default function MaterialesPage() {
                         {material.enStock !== null ? material.enStock : '-'}
                       </TableCell>
                       <TableCell className="text-right">
-                        {material.ultimaFechaCompra
-                          ? new Date(material.ultimaFechaCompra).toLocaleDateString()
-                          : '-'}
+                        {formatMaterialDate(material.ultimaFechaCompra)}
                       </TableCell>
                       <TableCell className="text-right">
                         {material.ultimoPrecioCompra !== null
@@ -692,31 +981,39 @@ export default function MaterialesPage() {
                             })} ${material.ultimaMonedaCompra || ''}`
                           : '-'}
                       </TableCell>
-                      {canEdit && (
+                      {showActions && (
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleVerImagen(material)}
+                            {canView && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleVerImagen(material)}
                                 title="Ver imagen"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleOpenDialog(material)}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => setConfirmDelete({ open: true, material })}
-                            >
-                              <Trash2 className="w-4 h-4 text-red-600" />
-                            </Button>
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {canEdit && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleOpenDialog(material)}
+                                title="Editar material"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setConfirmDelete({ open: true, material })}
+                                title="Desactivar material"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       )}
@@ -767,19 +1064,24 @@ export default function MaterialesPage() {
             }
           }}
         >
-          <DialogContent className="w-[95vw] max-w-[960px] h-[85vh] max-h-[85vh] p-0 sm:h-auto sm:max-h-[90vh] sm:p-6">
-            <DialogHeader>
-              <DialogTitle>Imagen del artículo</DialogTitle>
-              <DialogDescription>
-                {imagePreview
-                  ? `${imagePreview.numeroArticulo} · ${imagePreview.descripcion}`
-                  : 'No hay imagen para mostrar'}
-              </DialogDescription>
-            </DialogHeader>
+          <DialogContent className="w-[92vw] max-w-[880px] overflow-hidden border-slate-200 p-0">
+            <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+              <DialogHeader className="space-y-1 text-left">
+                <DialogTitle>Imagen del artículo</DialogTitle>
+                <DialogDescription className="max-w-2xl text-sm leading-relaxed">
+                  {imagePreview
+                    ? `${imagePreview.numeroArticulo} · ${imagePreview.descripcion}`
+                    : 'No hay imagen para mostrar'}
+                </DialogDescription>
+              </DialogHeader>
+            </div>
 
-            <div className="flex h-full flex-col sm:block">
-              <div className="flex-1 overflow-auto p-4 sm:p-0">
-                <div className="flex w-full items-center justify-center min-h-[240px] h-full border rounded-md bg-slate-50">
+            <div className="bg-slate-100/80 px-4 py-4 sm:px-6 sm:py-5">
+              <div className="flex max-h-[72vh] min-h-[240px] items-center justify-center overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-inner sm:min-h-[300px] sm:p-5">
+                <div
+                  className="mx-auto flex w-full items-center justify-center overflow-hidden rounded-xl bg-slate-50"
+                  style={imageViewportStyle}
+                >
                   {imagePreview?.loading ? (
                     <span className="px-3 text-center text-slate-500">Cargando imagen...</span>
                   ) : imagePreview?.error ? (
@@ -788,7 +1090,7 @@ export default function MaterialesPage() {
                     <img
                       src={imagePreview.src}
                       alt={`Imagen ${imagePreview.numeroArticulo}`}
-                      className="w-full h-full max-h-[72vh] object-contain"
+                      className="h-full w-full rounded-lg object-contain"
                       loading="lazy"
                     />
                   ) : (
@@ -808,11 +1110,11 @@ export default function MaterialesPage() {
               <Trash2 className="w-6 h-6 text-destructive" />
             </div>
             <DialogTitle className="text-center text-xl pb-2">
-              Confirmar eliminación
+              Desactivar material
             </DialogTitle>
             <DialogDescription className="text-center text-base">
-              ¿Seguro que deseas eliminar el material <span className="font-semibold text-foreground">{confirmDelete.material?.numeroArticulo}</span>?
-              <br /><span className="text-sm mt-2 block text-muted-foreground">Esta acción no se puede deshacer y puede afectar históricos vinculados.</span>
+              ¿Seguro que deseas desactivar el material <span className="font-semibold text-foreground">{confirmDelete.material?.numeroArticulo}</span>?
+              <br /><span className="text-sm mt-2 block text-muted-foreground">El material dejará de mostrarse en el catálogo operativo, pero conservará historial, relaciones y trazabilidad.</span>
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-center mt-6">
@@ -826,7 +1128,7 @@ export default function MaterialesPage() {
                 }
               }}
             >
-              Sí, eliminar
+              Sí, desactivar
             </Button>
           </div>
         </DialogContent>

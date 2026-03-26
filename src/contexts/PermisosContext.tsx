@@ -14,6 +14,15 @@ export interface Modulo {
 export interface PermisoRol {
   rol: UserRole;
   modulosPermitidos: string[];
+  accionesPorModulo?: Record<string, PermisoAcciones>;
+}
+
+export interface PermisoAcciones {
+  puedeVer: boolean;
+  puedeCrear: boolean;
+  puedeEditar: boolean;
+  puedeAprobar: boolean;
+  puedeEliminar: boolean;
 }
 
 // La lista de módulos ahora se carga desde la base de datos vía /api/modulos
@@ -21,12 +30,19 @@ export interface PermisoRol {
 interface PermisosContextType {
   modulos: Modulo[];
   permisos: PermisoRol[];
+  cargandoPermisos: boolean;
   actualizarPermisos: (rol: UserRole, modulosSeleccionados: string[]) => void;
   getModulosPermitidos: (rol: UserRole) => string[];
   puedeAcceder: (rol: UserRole, moduloId: string) => boolean;
+  getPermisosModulo: (rol: UserRole, moduloId: string) => PermisoAcciones;
 }
 
 const PermisosContext = createContext<PermisosContextType | null>(null);
+
+function isSuperUserRole(rol: string | null | undefined): boolean {
+  const normalized = String(rol || '').trim().toLowerCase();
+  return normalized === 'administrador' || normalized === 'admin' || normalized === 'administrator';
+}
 
 export const usePermisos = () => {
   const context = useContext(PermisosContext);
@@ -37,19 +53,34 @@ export const usePermisos = () => {
 export function PermisosProvider({ children }: { children: ReactNode }) {
   const [modulos, setModulos] = useState<Modulo[]>([]);
   const [permisos, setPermisos] = useState<PermisoRol[]>([]);
+  const [cargandoPermisos, setCargandoPermisos] = useState(false);
   const [roleNameToId, setRoleNameToId] = useState<Record<string, number>>({});
   const [codigoToIdModulo, setCodigoToIdModulo] = useState<Record<string, number>>({});
   const { token } = useAuth();
+
+  const emptyPermisosModulo: PermisoAcciones = {
+    puedeVer: false,
+    puedeCrear: false,
+    puedeEditar: false,
+    puedeAprobar: false,
+    puedeEliminar: false,
+  };
 
   // Cargar mapeos dinámicos: UserRole -> IdRol y CodigoModulo -> IdModulo desde el backend
   useEffect(() => {
     const cargarConfigPermisos = async () => {
       if (!token) {
         // Si aún no tenemos token (usuario no logueado), no llamamos a las APIs protegidas
+        setModulos([]);
+        setPermisos([]);
+        setRoleNameToId({});
+        setCodigoToIdModulo({});
+        setCargandoPermisos(false);
         return;
       }
 
       try {
+        setCargandoPermisos(true);
         const authHeaders = { Authorization: `Bearer ${token}` };
 
         // 0) Cargar módulos desde backend
@@ -115,25 +146,41 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
           const permisosRolData = await respPermisosRol.json();
 
           const modulosPermitidos: string[] = [];
+          const accionesPorModulo: Record<string, PermisoAcciones> = {};
           (permisosRolData as any[]).forEach((row) => {
+            const codigo = String(row.Codigo || '').trim();
+            if (!codigo) return;
+            const normalizedCodigo = codigo.toLowerCase();
+
+            accionesPorModulo[normalizedCodigo] = {
+              puedeVer: !!row.PuedeVer,
+              puedeCrear: !!row.PuedeCrear,
+              puedeEditar: !!row.PuedeEditar,
+              puedeAprobar: !!row.PuedeAprobar,
+              puedeEliminar: !!row.PuedeEliminar,
+            };
+
             // Consideramos que puedeVer define si el módulo está activo para la vista
-            if (row.Codigo && row.PuedeVer) {
-              const codigo: string = row.Codigo;
+            if (row.PuedeVer) {
               // Solo tomamos módulos que existen en la lista cargada desde BD
               if (modulosFrontend.some((m) => m.id === codigo)) {
-                modulosPermitidos.push(codigo);
+                modulosPermitidos.push(normalizedCodigo);
               }
             }
           });
 
-          permisosDb.push({ rol: rolNombre as UserRole, modulosPermitidos });
+          permisosDb.push({
+            rol: rolNombre as UserRole,
+            modulosPermitidos,
+            accionesPorModulo,
+          });
         }
 
-        if (permisosDb.length > 0) {
-          setPermisos(permisosDb);
-        }
+        setPermisos(permisosDb);
       } catch (error) {
         console.error('Error al cargar configuración de permisos desde backend', error);
+      } finally {
+        setCargandoPermisos(false);
       }
     };
 
@@ -143,7 +190,24 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
   const actualizarPermisos = (rol: UserRole, modulosSeleccionados: string[]) => {
     setPermisos(prevPermisos =>
       prevPermisos.map(p =>
-        p.rol === rol ? { ...p, modulosPermitidos: modulosSeleccionados } : p
+        p.rol === rol
+          ? {
+              ...p,
+              modulosPermitidos: modulosSeleccionados.map((codigo) => codigo.toLowerCase()),
+              accionesPorModulo: modulos.reduce<Record<string, PermisoAcciones>>((acc, modulo) => {
+                const normalizedId = modulo.id.toLowerCase();
+                const tieneAcceso = modulosSeleccionados.includes(modulo.id);
+                acc[normalizedId] = {
+                  puedeVer: tieneAcceso,
+                  puedeCrear: false,
+                  puedeEditar: false,
+                  puedeAprobar: false,
+                  puedeEliminar: false,
+                };
+                return acc;
+              }, {}),
+            }
+          : p
       )
     );
 
@@ -186,17 +250,50 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
   };
 
   const getModulosPermitidos = (rol: UserRole): string[] => {
+    if (isSuperUserRole(rol)) {
+      return modulos.map((modulo) => modulo.id.toLowerCase());
+    }
+
     const permisoRol = permisos.find(p => p.rol === rol);
     return permisoRol?.modulosPermitidos || [];
   };
 
   const puedeAcceder = (rol: UserRole, moduloId: string): boolean => {
+    if (isSuperUserRole(rol)) {
+      return true;
+    }
+
     const modulosPermitidos = getModulosPermitidos(rol);
-    return modulosPermitidos.includes(moduloId);
+    return modulosPermitidos.includes(moduloId.toLowerCase());
+  };
+
+  const getPermisosModulo = (rol: UserRole, moduloId: string): PermisoAcciones => {
+    if (isSuperUserRole(rol)) {
+      return {
+        puedeVer: true,
+        puedeCrear: true,
+        puedeEditar: true,
+        puedeAprobar: true,
+        puedeEliminar: true,
+      };
+    }
+
+    const permisoRol = permisos.find((p) => p.rol === rol);
+    return permisoRol?.accionesPorModulo?.[moduloId.toLowerCase()] || emptyPermisosModulo;
   };
 
   return (
-    <PermisosContext.Provider value={{ modulos, permisos, actualizarPermisos, getModulosPermitidos, puedeAcceder }}>
+    <PermisosContext.Provider
+      value={{
+        modulos,
+        permisos,
+        cargandoPermisos,
+        actualizarPermisos,
+        getModulosPermitidos,
+        puedeAcceder,
+        getPermisosModulo,
+      }}
+    >
       {children}
     </PermisosContext.Provider>
   );

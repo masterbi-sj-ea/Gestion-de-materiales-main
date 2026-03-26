@@ -107,6 +107,10 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
     throw new Error('La solicitud debe tener al menos una línea de detalle');
   }
 
+  if (input.detalle.length > 9) {
+    throw new Error('Solo se permiten un máximo de 9 materiales por solicitud para ajustarse al formato de impresión.');
+  }
+
   const pool = await getPool();
 
   // Construir TVP para dbo.TDetalleSolicitudMaterial
@@ -165,6 +169,10 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
 export async function actualizarSolicitud(input: ActualizarSolicitudInput): Promise<void> {
   if (!input.detalle || input.detalle.length === 0) {
     throw new Error('La solicitud debe tener al menos una línea de detalle');
+  }
+
+  if (input.detalle.length > 9) {
+    throw new Error('Solo se permiten un máximo de 9 materiales por solicitud para ajustarse al formato de impresión.');
   }
 
   const pool = await getPool();
@@ -314,7 +322,7 @@ function dibujarLogoPlaceholder(doc: any, x: number, y: number) {
      .fillAndStroke("#333", "#333")
      .restore();
   doc.font("Helvetica-Bold").fontSize(10).fillColor("black");
-  doc.text("Extraceite", x, y + 40, { width: 60, align: "center" });
+  doc.text("Extraceite", x, y + 40, { width: 40, align: "center" });
 }
 
 export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThrough> {
@@ -406,15 +414,15 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
   const doc = new PDFDocument({
     size: "A4",
     layout: "portrait",
-    margins: { top: 20, bottom: 20, left: 30, right: 30 },
+    margins: { top: 20, bottom: 20, left: 15, right: 15 },
   });
 
   const stream = new PassThrough();
   doc.pipe(stream);
 
   doc.lineWidth(0.5);
-  const left = 30;
-  const right = doc.page.width - 30;
+  const left = 15;
+  const right = doc.page.width - 15;
   const contentW = right - left;
 
   const strokeBox = (x: number, y: number, w: number, h: number) => doc.rect(x, y, w, h).stroke();
@@ -425,16 +433,17 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
   const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("es-NI") : "";
 
   const drawRequisa = (startY: number) => {
-    // Título igual al físico
-    const titleY = startY - 10;
-    doc.font("Times-Bold").fontSize(16);
-    doc.text("SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.", left, titleY, { align: 'center', width: contentW });
-    
-    doc.font("Helvetica").fontSize(8).fillColor("#666");
-    doc.text("FR-F-BD-022", right - 60, titleY);
+    // Elevamos todo substancialmente reduciendo el startY aquí
+    const adjustedStartY = startY - 30; // Lo subimos 20 puntos adicionales (de -15 a -35)
 
-    const logoX = left;
-    const logoY = titleY - 5;
+    // Título igual al físico
+    const titleY = adjustedStartY + 10; // Bajamos el titulo para que asimile mejor el espacio del logo
+
+    // Logo o placeholder
+    const logoX = left - 5;
+    const logoY = adjustedStartY + 2; // Bajamos solo un poco más el logo
+
+    // Aquí evitamos que el logo y el texto queden superpuestos ajustando X en el titulo
     const posiblesRutas = [
       path.join(process.cwd(), "backend", "public", "logo_extraceite.png"),
       path.join(process.cwd(), "public", "logo_extraceite.png"),
@@ -448,35 +457,48 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     }
 
     if (logoFinalPath) {
-      try { doc.image(logoFinalPath, logoX, logoY, { width: 45 }); }
+      // Reducimos un poco mas el logo sin alterar el resto del layout
+      try { doc.image(logoFinalPath, logoX, logoY, { width: 52 }); }
       catch (err) { dibujarLogoPlaceholder(doc, logoX, logoY); }
     } else {
       dibujarLogoPlaceholder(doc, logoX, logoY);
     }
 
+    doc.font("Helvetica").fontSize(12).fillColor("black");
+    doc.text("SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.", left + 60, titleY, { align: 'center', width: contentW - 140 });
+    
+    // N° Number in Red / Dark Pink
     const numDespacho = String(cab.CodigoSolicitud).replace(/\D/g, '').slice(-6) || '000000';
-    doc.font("Helvetica-Bold").fontSize(14).fillColor("#e11d48");
-    doc.text(`Nº ${numDespacho}`, right - 80, titleY + 15, { align: 'right', width: 80 });
+    doc.font("Helvetica").fontSize(14).fillColor("#a13854"); // Color rojo/granate similar a la imagen
+    doc.text(`Nº  ${numDespacho}`, right - 110, titleY, { align: 'right', width: 110 });
 
-    const infoY = titleY + 35;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("black");
-    doc.text("FECHA: ", left, infoY);
-    doc.font("Helvetica").text(fmtDate(cab.FechaSolicitud), left + 45, infoY);
-    doc.moveTo(left + 45, infoY + 10).lineTo(left + 200, infoY + 10).stroke();
+    doc.fillColor("black");
 
-    doc.font("Helvetica-Bold").text("REQUISA DE SALIDA No. : ", left + 250, infoY);
-    doc.font("Helvetica").text(cab.CodigoSolicitud, left + 365, infoY);
-    doc.moveTo(left + 365, infoY + 10).lineTo(right, infoY + 10).stroke();
+    // Push header down slightly to clear the taller logo
+    const headerTextY = titleY + 45; 
+    
+    // FECHA
+    doc.font("Helvetica").fontSize(9);
+    doc.text("FECHA:", left, headerTextY);
+    // Movemos la fecha un poquito abajo para equilibrar
+    doc.text(fmtDate(cab.FechaSolicitud), left + 45, headerTextY - 2);
+    doc.moveTo(left + 35, headerTextY + 10).lineTo(left + 220, headerTextY + 10).stroke();
 
-    const tableY = infoY + 20;
-    const headerH = 20;
-    const rowHTable = 18;
-    const rowsLimit = 12;
+    // REQUISA DE SALIDA Nº
+    doc.text("REQUISA DE SALIDA Nº:", right - 280, headerTextY);
+    // Bajamos el texto del codigo de solicitud
+    doc.text(cab.CodigoSolicitud, right - 150, headerTextY - 2);
+    doc.moveTo(right - 155, headerTextY + 10).lineTo(right, headerTextY + 10).stroke();
 
-    const cellPadY = 2;
+    const tableY = headerTextY + 15; // Reducido algo de espacio aquí también
+    const headerH = 22;
+    const rowHTable = 22; // Reducido un poquito (de 24 a 22) para que las 9 filas suban juntas
+    const rowsLimit = 9;
+
+    const cellPadY = 4;
     const cellH = rowHTable - (cellPadY * 2);
-    const baseFontSize = 8;
-    const minFontSize = 6;
+    const baseFontSize = 9; // Subimos el tamaño por defecto de la tabla a 9
+    const minFontSize = 5; // Permitimos que, si el texto es excesivamente largo, se reduzca hasta tamaño 5 para que siempre quepa completo
     const drawCellTextFit = (
       text: any,
       x: number,
@@ -495,7 +517,7 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
 
       let fontSize = localBase;
       if (fit && value) {
-        for (let fs = localBase; fs >= localMin; fs -= 1) {
+        for (let fs = localBase; fs >= localMin; fs -= 0.5) { // Vamos decreciendo de a 0.5 puntos para el un ajuste más suave
           doc.fontSize(fs);
           const h = doc.heightOfString(value, measureOpts as any);
           if (h <= cellH) {
@@ -509,69 +531,104 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
       doc.fontSize(fontSize);
       const fits = !value ? true : doc.heightOfString(value, measureOpts as any) <= cellH;
 
-      doc.text(value, x, y + cellPadY, {
+      // Un cálculo simple para centrar verticalmente según el tamaño de fuente final
+      const textH = doc.heightOfString(value, measureOpts as any);
+      const offsetY = Math.max(0, (cellH - textH) / 2);
+
+      doc.text(value, x, y + cellPadY + offsetY, { // Sumamos ese offsetY para que si el texto es chiquito, quede en el medio vertical de la celda
         width: w,
         height: cellH,
         align,
         lineBreak: true,
-        ellipsis: !fits,
+        ellipsis: !fits, // Si a pesar de bajar a 5pt sigue sin caber, pone puntos suspensivos (aunque es casi imposible en ese tamaño)
       });
 
       doc.fontSize(baseFontSize);
     };
 
-    const wCodigo = 60;
-    const wDesc = 200;
-    const wUM = 50;
+    const wCodigo = 55;
+    const wDesc = 255; // Le damos a DESCRIPCIÓN los puntos adicionales
+    const wUM = 60;
     const wCant = 50;
-    const wAct = 100;
-    const wCCO = contentW - (wCodigo + wDesc + wUM + wCant + wAct);
+    const wAct = 75;
+    const wCCO = contentW - (wCodigo + wDesc + wUM + wCant + wAct); // Ahora CCO será más delgado
 
     fillStrokeBox(left, tableY, contentW, headerH);
-    doc.font("Helvetica-Bold").fontSize(8).text("CODIGO", left, tableY + 6, { width: wCodigo, align: 'center' });
-    doc.text("DESCRIPCION MATERIAL", left + wCodigo, tableY + 6, { width: wDesc, align: 'center' });
+    doc.font("Helvetica").fontSize(9);
+    doc.text("CÓDIGO", left, tableY + 6, { width: wCodigo, align: 'center' });
+    doc.text("DESCRIPCIÓN MATERIAL", left + wCodigo, tableY + 6, { width: wDesc, align: 'center' });
     doc.text("U/MEDIDA", left + wCodigo + wDesc, tableY + 6, { width: wUM, align: 'center' });
     doc.text("CANTIDAD", left + wCodigo + wDesc + wUM, tableY + 6, { width: wCant, align: 'center' });
     doc.text("ACTIVIDAD", left + wCodigo + wDesc + wUM + wCant, tableY + 6, { width: wAct, align: 'center' });
-    doc.fontSize(7).text("CODIGO DE CUENTA", left + wCodigo + wDesc + wUM + wCant + wAct, tableY + 6, { width: wCCO, align: 'center' });
-    doc.fontSize(8);
+    doc.text("C.CUENTA", left + wCodigo + wDesc + wUM + wCant + wAct, tableY + 6, { width: wCCO, align: 'center' });
 
-    for (let i = 0; i <= rowsLimit; i++) {
+    for (let i = 0; i < rowsLimit; i++) {
       const y = tableY + headerH + (i * rowHTable);
-      if (i < rowsLimit) {
-        doc.moveTo(left, y).lineTo(right, y).stroke();
-        const it = detalle[i];
-        if (it) {
-          doc.font("Helvetica").fontSize(8);
-
-          drawCellTextFit(it.Codigo, left, y, wCodigo, 'center');
-          drawCellTextFit(it.Descripcion, left + wCodigo + 5, y, wDesc - 10, 'left', true);
-          drawCellTextFit(it.UnidadMedida, left + wCodigo + wDesc, y, wUM, 'center');
-          drawCellTextFit(String(it.CantidadSolicitada), left + wCodigo + wDesc + wUM, y, wCant, 'center');
-          drawCellTextFit(it.Actividad || cab.AreaNombre || '', left + wCodigo + wDesc + wUM + wCant, y, wAct, 'center', true);
-          drawCellTextFit(it.CodigoCuenta || cab.CodigoCC || '', left + wCodigo + wDesc + wUM + wCant + wAct, y, wCCO, 'center', true, 7, 6);
-        }
+      doc.moveTo(left, y).lineTo(right, y).stroke();
+      const it = detalle[i];
+      if (it) {
+        doc.font("Helvetica").fontSize(8);
+        drawCellTextFit(it.Codigo, left, y, wCodigo, 'center');
+        drawCellTextFit(it.Descripcion, left + wCodigo + 5, y, wDesc - 10, 'left', true);
+        drawCellTextFit(it.UnidadMedida, left + wCodigo + wDesc, y, wUM, 'center');
+        drawCellTextFit(String(it.CantidadSolicitada), left + wCodigo + wDesc + wUM, y, wCant, 'center');
+        drawCellTextFit(
+          it.Actividad || cab.AreaNombre || '',
+          left + wCodigo + wDesc + wUM + wCant + 2,
+          y,
+          wAct - 4,
+          'center',
+          true,
+          8.5,
+          4.5,
+        );
+        drawCellTextFit(
+          it.CodigoCuenta || cab.CodigoCC || '',
+          left + wCodigo + wDesc + wUM + wCant + wAct + 2,
+          y,
+          wCCO - 4,
+          'center',
+          true,
+          8.5,
+          5,
+        );
       }
     }
-    // Vertical lines
-    [wCodigo, wCodigo+wDesc, wCodigo+wDesc+wUM, wCodigo+wDesc+wUM+wCant, wCodigo+wDesc+wUM+wCant+wAct].forEach(x => {
-      doc.moveTo(left + x, tableY).lineTo(left + x, tableY + headerH + (rowsLimit * rowHTable)).stroke();
+    
+    // Lazo de cierre inferior
+    const yLineBottom = tableY + headerH + (rowsLimit * rowHTable);
+    doc.moveTo(left, yLineBottom).lineTo(right, yLineBottom).stroke();
+
+    // Lineas verticales
+    let curX = left;
+    [wCodigo, wDesc, wUM, wCant, wAct].forEach(w => {
+        curX += w;
+        doc.moveTo(curX, tableY).lineTo(curX, tableY + headerH + (rowsLimit * rowHTable)).stroke();
     });
+    // Borde exterior completo
     strokeBox(left, tableY, contentW, headerH + (rowsLimit * rowHTable));
 
-    const footerY = tableY + headerH + (rowsLimit * rowHTable) + 12;
+    const tableBottomY = tableY + headerH + (rowsLimit * rowHTable);
+
+    // Etiqueta FR-F-BD-022
+    doc.font("Helvetica").fontSize(8).fillColor("black");
+    doc.text("FR-F-BD-022", left + 2, tableBottomY + 3);
+
+    const footerY = tableBottomY + 15;
     doc.font("Helvetica").fontSize(9);
-    doc.text("Hora de inicio de despacho: ____________", left, footerY);
-    doc.text("Hora de finalización de despacho: ____________", left + 250, footerY);
+    doc.text("Hora de inicio de despacho: ____________________________", left, footerY);
+    doc.text("Hora de finalización de despacho: ____________________________", right - 280, footerY);
 
-    const sigY = footerY + 40;
-    doc.moveTo(left + 20, sigY).lineTo(left + 180, sigY).stroke();
-    doc.text("Autorizado por", left + 20, sigY + 5, { width: 160, align: 'center' });
-    doc.text("Nombre y firma del jefe de área", left + 20, sigY + 15, { width: 160, align: 'center' });
+    const sigY = footerY + 36;
+    
+    doc.moveTo(left + 25, sigY).lineTo(left + 200, sigY).stroke();
+    doc.text("Autorizado por", left + 25, sigY + 5, { width: 175, align: 'center' });
+    doc.text("Nombre y firma del jefe de área", left + 25, sigY + 15, { width: 175, align: 'center' });
 
-    doc.moveTo(right - 180, sigY).lineTo(right - 20, sigY).stroke();
-    doc.text("Autorizado por", right - 180, sigY + 5, { width: 160, align: 'center' });
-    doc.text("de la persona que retira", right - 180, sigY + 15, { width: 160, align: 'center' });
+    doc.moveTo(right - 200, sigY).lineTo(right - 25, sigY).stroke();
+    doc.text("Nombre y firma", right - 200, sigY + 5, { width: 175, align: 'center' });
+    doc.text("de la persona que retira", right - 200, sigY + 15, { width: 175, align: 'center' });
+
   };
 
   drawRequisa(40);

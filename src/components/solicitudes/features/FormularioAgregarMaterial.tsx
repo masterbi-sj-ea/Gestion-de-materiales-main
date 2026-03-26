@@ -1,10 +1,10 @@
-import { useRef, useMemo, memo } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, memo } from "react";
 import { Label } from "../../ui/label";
 import { Input } from "../../ui/input";
 import { Button } from "../../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select";
-import { Plus } from "lucide-react";
+import { AlertTriangle, ImageIcon, Plus } from "lucide-react";
 import { MaterialDisponible } from "../../../hooks/useCatalogosSolicitud";
 
 interface FormularioAgregarMaterialProps {
@@ -25,6 +25,45 @@ interface FormularioAgregarMaterialProps {
   stockRestante: number | null;
 }
 
+async function getImageAspectRatio(src: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      if (!image.naturalWidth || !image.naturalHeight) {
+        resolve(null);
+        return;
+      }
+
+      resolve(image.naturalWidth / image.naturalHeight);
+    };
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+function getImageViewportStyle(aspectRatio: number | null): CSSProperties {
+  const safeRatio = aspectRatio && Number.isFinite(aspectRatio)
+    ? Math.min(1.65, Math.max(0.72, aspectRatio))
+    : 1;
+
+  const profile =
+    safeRatio < 0.9 ? 'portrait' :
+    safeRatio > 1.15 ? 'landscape' :
+    'square';
+
+  const widthMap = {
+    portrait: 380,
+    square: 470,
+    landscape: 620,
+  } as const;
+
+  return {
+    width: `min(100%, ${widthMap[profile]}px)`,
+    aspectRatio: safeRatio,
+    maxHeight: '460px',
+  };
+}
+
 export const FormularioAgregarMaterial = memo(function FormularioAgregarMaterial({
   gruposUnicos,
   selectedGrupo,
@@ -43,6 +82,35 @@ export const FormularioAgregarMaterial = memo(function FormularioAgregarMaterial
   stockRestante,
 }: FormularioAgregarMaterialProps) {
   const inputCantidadRef = useRef<HTMLInputElement>(null);
+  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
+  const stockFisico = stockActualSeleccionado ?? 0;
+  const imagenEstadoLabel = imagenMaterialLoading
+    ? 'Preparando imagen'
+    : imagenMaterialUrl
+      ? 'Imagen disponible'
+      : imagenMaterialError
+        ? 'Archivo no disponible'
+        : 'Sin imagen disponible';
+  const materialImageViewportStyle = getImageViewportStyle(imageAspectRatio);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!imagenMaterialUrl) {
+      setImageAspectRatio(null);
+      return;
+    }
+
+    getImageAspectRatio(imagenMaterialUrl).then((ratio) => {
+      if (!cancelled) {
+        setImageAspectRatio(ratio);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imagenMaterialUrl]);
 
   const handleKeyDownCantidad = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -111,74 +179,90 @@ export const FormularioAgregarMaterial = memo(function FormularioAgregarMaterial
 
           {/* Fila 2: Previsualización de Material (Aparece al seleccionar uno) */}
           {materialSeleccionado && (
-            <div className="rounded-xl border border-slate-100 bg-white shadow-sm overflow-hidden flex flex-col sm:flex-row transition-all duration-300 animate-in fade-in slide-in-from-top-1">
-              
-              {/* Bloque Izquierdo: Imagen */}
-              <div className="w-full sm:w-28 h-28 sm:h-auto bg-slate-50 flex-shrink-0 flex items-center justify-center p-3 relative group">
-                {imagenMaterialLoading ? (
-                  <div className="absolute inset-0 animate-pulse bg-slate-100" />
-                ) : imagenMaterialUrl ? (
-                  <img
-                    src={imagenMaterialUrl}
-                    alt={materialSeleccionado.descripcionArticulo}
-                    className="max-w-full max-h-full object-contain mix-blend-multiply drop-shadow-sm transition-transform group-hover:scale-110"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center text-slate-300">
-                    <span className="text-2xl font-black opacity-20">
-                      {materialSeleccionado.numeroArticulo.charAt(0)}
-                    </span>
+            <div className="overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-[0_20px_45px_-38px_rgba(15,23,42,0.42)] transition-all duration-300 animate-in fade-in slide-in-from-top-1">
+              <div className="border-b border-slate-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(191,219,254,0.42),_rgba(255,255,255,0.98)_48%),linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.92))] px-4 py-4 sm:px-5 sm:py-5">
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm">
+                        <ImageIcon className="h-3.5 w-3.5 text-blue-600" />
+                        Vista previa
+                      </span>
+                      <span className="rounded-full border border-emerald-200/70 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                        {imagenEstadoLabel}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-slate-950 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-sm">
+                        {materialSeleccionado.numeroArticulo}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-sm">
+                        {materialSeleccionado.grupoArticulos ?? 'General'}
+                      </span>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              {/* Bloque Central: Info Principal */}
-              <div className="flex-grow p-4 sm:py-3 sm:px-5 flex flex-col justify-center border-b sm:border-b-0 sm:border-r border-slate-50">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-bold text-blue-600 tracking-tighter uppercase px-1.5 py-0.5 bg-blue-50 rounded">
-                    {materialSeleccionado.numeroArticulo}
-                  </span>
-                  <span className="text-[10px] font-medium text-slate-400 uppercase tracking-widest">
-                    {materialSeleccionado.grupoArticulos ?? 'General'}
-                  </span>
-                </div>
-                <h4 className="text-sm font-bold text-slate-800 leading-tight">
-                  {materialSeleccionado.descripcionArticulo}
-                </h4>
-                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Disponible: {stockActualSeleccionado ?? 0} {materialSeleccionado.unidadMedida}
-                </div>
-              </div>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                        Material seleccionado
+                      </p>
+                      <h4 className="mt-1 text-lg font-bold leading-tight text-slate-950 sm:text-[1.35rem]">
+                        {materialSeleccionado.descripcionArticulo}
+                      </h4>
+                    </div>
 
-              {/* Bloque Derecho: Métricas Pro */}
-              <div className="bg-slate-50/30 sm:w-44 p-4 sm:p-3 flex sm:flex-col justify-around sm:justify-center gap-3">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Stock Físico</span>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-lg font-black text-slate-700">{stockActualSeleccionado ?? '-'}</span>
-                    <span className="text-[9px] font-medium text-slate-400 uppercase">{materialSeleccionado.unidadMedida}</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Disponibilidad</span>
-                  <div className="flex items-baseline gap-1">
-                    <span className={`text-lg font-black ${ (stockRestante ?? 0) < 0 ? 'text-red-500' : 'text-slate-700'}`}>
-                      {stockRestante ?? '-'}
-                    </span>
-                    <div className={`px-1 rounded text-[8px] font-bold uppercase ${ (stockRestante ?? 0) < 0 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                      {(stockRestante ?? 0) < 0 ? 'Insuficiente' : 'OK'}
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex items-center rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
+                        Unidad: <span className="ml-1 font-semibold text-slate-900">{materialSeleccionado.unidadMedida}</span>
+                      </span>
+                      <span className="inline-flex items-center rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
+                        Stock actual: <span className="ml-1 font-semibold text-slate-900">{stockFisico}</span>
+                      </span>
+                      {stockRestante != null && cantidad && Number(cantidad) > 0 && (
+                        <span className="inline-flex items-center rounded-2xl border border-blue-200/80 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 shadow-sm">
+                          Restante tras solicitud:
+                          <span className="ml-1 font-semibold text-blue-900">{stockRestante}</span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {imagenMaterialError && (
-                <div className="absolute top-2 right-2 group-hover:opacity-100 transition-opacity">
-                   <div className="h-2 w-2 rounded-full bg-yellow-400" title={imagenMaterialError}></div>
+              <div className="bg-slate-50/80 p-3 sm:p-4">
+                <div className="flex min-h-[240px] items-center justify-center overflow-auto rounded-[18px] border border-slate-200 bg-white p-3 shadow-inner sm:min-h-[300px] sm:p-5">
+                  <div
+                    className="mx-auto flex w-full items-center justify-center overflow-hidden rounded-[16px] bg-slate-50"
+                    style={materialImageViewportStyle}
+                  >
+                    {imagenMaterialLoading ? (
+                      <div className="h-full w-full animate-pulse rounded-[14px] bg-slate-100" />
+                    ) : imagenMaterialUrl ? (
+                      <img
+                        src={imagenMaterialUrl}
+                        alt={materialSeleccionado.descripcionArticulo}
+                        className="h-full w-full rounded-[14px] object-contain mix-blend-multiply drop-shadow-sm"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full flex-col items-center justify-center text-slate-300">
+                        <span className="text-3xl font-black opacity-20">
+                          {materialSeleccionado.numeroArticulo.charAt(0)}
+                        </span>
+                        <ImageIcon className="mt-2 h-6 w-6" />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+
+                {imagenMaterialError && (
+                  <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-xs text-amber-700">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                    <span>{imagenMaterialError}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

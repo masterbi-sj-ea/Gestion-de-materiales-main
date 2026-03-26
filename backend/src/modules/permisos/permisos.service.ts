@@ -1,6 +1,7 @@
 import { callSpMany } from '../../infra/spCaller';
 import sql from 'mssql';
 import { getPool } from '../../config/db';
+import { listarRoles } from '../roles/roles.service';
 
 export interface PermisoModulo {
   IdModulo: number;
@@ -15,9 +16,70 @@ export interface PermisoModulo {
   PuedeEliminar: boolean;
 }
 
+export interface PermisoAccionesModulo {
+  puedeVer: boolean;
+  puedeCrear: boolean;
+  puedeEditar: boolean;
+  puedeAprobar: boolean;
+  puedeEliminar: boolean;
+}
+
 export async function obtenerPermisosPorRol(idRol: number): Promise<PermisoModulo[]> {
   const rows = await callSpMany<PermisoModulo>('sp_ObtenerPermisosPorRol', { IdRol: idRol });
   return rows;
+}
+
+export async function obtenerPermisosModuloPorRoles(
+  nombresRol: string[],
+  codigoModulo: string,
+): Promise<PermisoAccionesModulo | null> {
+  const normalizedModulo = String(codigoModulo || '').trim().toLowerCase();
+  const normalizedRoles = Array.from(
+    new Set(
+      (nombresRol || [])
+        .map((rol) => String(rol || '').trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+
+  if (!normalizedModulo || normalizedRoles.length === 0) {
+    return null;
+  }
+
+  const roles = await listarRoles();
+  const idsRol = roles
+    .filter((rol) => normalizedRoles.includes(String(rol.Nombre || '').trim().toLowerCase()))
+    .map((rol) => rol.IdRol);
+
+  if (idsRol.length === 0) {
+    return null;
+  }
+
+  const permisosPorRol = await Promise.all(idsRol.map((idRol) => obtenerPermisosPorRol(idRol)));
+  const permisosModulo = permisosPorRol
+    .flat()
+    .filter((permiso) => String(permiso.Codigo || '').trim().toLowerCase() === normalizedModulo);
+
+  if (permisosModulo.length === 0) {
+    return null;
+  }
+
+  return permisosModulo.reduce<PermisoAccionesModulo>(
+    (acc, permiso) => ({
+      puedeVer: acc.puedeVer || !!permiso.PuedeVer,
+      puedeCrear: acc.puedeCrear || !!permiso.PuedeCrear,
+      puedeEditar: acc.puedeEditar || !!permiso.PuedeEditar,
+      puedeAprobar: acc.puedeAprobar || !!permiso.PuedeAprobar,
+      puedeEliminar: acc.puedeEliminar || !!permiso.PuedeEliminar,
+    }),
+    {
+      puedeVer: false,
+      puedeCrear: false,
+      puedeEditar: false,
+      puedeAprobar: false,
+      puedeEliminar: false,
+    },
+  );
 }
 
 export interface PermisoRolInput {

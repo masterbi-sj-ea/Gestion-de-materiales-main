@@ -84,6 +84,7 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
     const sqlMessage: string | undefined =
       (typeof error?.message === 'string' ? error.message : undefined) ??
       (typeof sqlInfo?.message === 'string' ? sqlInfo.message : undefined);
+    const normalizedSqlMessage = (sqlMessage || '').toLowerCase();
 
     // 2627: PK/Unique constraint violation, 2601: Cannot insert duplicate key row in object with unique index
     if (sqlNumber === 2627 || sqlNumber === 2601) {
@@ -96,6 +97,14 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
       }
 
       return res.status(409).json({ message: sqlMessage || 'Registro duplicado (restricción UNIQUE/PK)' });
+    }
+
+    if (normalizedSqlMessage.includes("invalid object name 'dbo.kardex'")) {
+      return res.status(500).json({
+        code: 'DB_SCHEMA_OUTDATED',
+        message:
+          'La base de datos tiene un procedimiento desactualizado. sp_CrearSolicitudMaterial todavía referencia dbo.Kardex. Actualiza el procedimiento desde backend/sql/init_db.sql y vuelve a intentar.',
+      });
     }
 
     return res.status(500).json({ message: sqlMessage || 'Error al crear solicitud' });

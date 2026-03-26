@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { ImageIcon } from 'lucide-react';
@@ -12,6 +12,45 @@ interface VisorImagenMaterialProps {
   showThumbnail?: boolean;
 }
 
+async function getImageAspectRatio(src: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      if (!image.naturalWidth || !image.naturalHeight) {
+        resolve(null);
+        return;
+      }
+
+      resolve(image.naturalWidth / image.naturalHeight);
+    };
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+function getImageViewportStyle(aspectRatio: number | null): CSSProperties {
+  const safeRatio = aspectRatio && Number.isFinite(aspectRatio)
+    ? Math.min(1.65, Math.max(0.72, aspectRatio))
+    : 1;
+
+  const profile =
+    safeRatio < 0.9 ? 'portrait' :
+    safeRatio > 1.15 ? 'landscape' :
+    'square';
+
+  const widthMap = {
+    portrait: 380,
+    square: 470,
+    landscape: 620,
+  } as const;
+
+  return {
+    width: `min(100%, ${widthMap[profile]}px)`,
+    aspectRatio: safeRatio,
+    maxHeight: '460px',
+  };
+}
+
 export const VisorImagenMaterial: React.FC<VisorImagenMaterialProps> = ({
   tieneImagen,
   rutaImagenFinal,
@@ -20,46 +59,126 @@ export const VisorImagenMaterial: React.FC<VisorImagenMaterialProps> = ({
   showThumbnail = true,
 }) => {
   const [open, setOpen] = useState(false);
-  const [imgObjectUrl, setImgObjectUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [fullUrl, setFullUrl] = useState<string | null>(null);
+
+  const [loadingThumb, setLoadingThumb] = useState(false);
+  const [loadingFull, setLoadingFull] = useState(false);
+
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
+  const thumbUrlRef = useRef<string | null>(null);
+  const fullUrlRef = useRef<string | null>(null);
+  const canOpen = !!numeroArticulo;
 
-  // Para UX pro: permitimos abrir el visor aunque `tieneImagen` venga null/0.
-  // Si no hay imagen, el endpoint responderá 404 y mostraremos el estado “Sin imagen”.
-  const canOpen = !!numeroArticulo || !!rutaImagenFinal;
+  const buildEndpoint = (mode: 'thumb' | 'full') => {
+    const query =
+      mode === 'thumb'
+        ? 'w=96&h=96&format=webp&q=60'
+        : 'w=800&format=webp&q=75';
 
-  // En el navegador no podemos pasar Authorization en <img src>. Por eso descargamos con apiFetch (Bearer)
-  // y mostramos la imagen como blob (Object URL).
-  const filename = useMemo(() => {
-    if (!rutaImagenFinal) return null;
-    const parts = String(rutaImagenFinal).split(/[/\\]+/).filter(Boolean);
-    return parts[parts.length - 1] || null;
-  }, [rutaImagenFinal]);
+    return `/materiales/archivo/por-numero/${encodeURIComponent(String(numeroArticulo))}?${query}`;
+  };
+
+  const replaceThumbUrl = (nextUrl: string | null) => {
+    if (thumbUrlRef.current && thumbUrlRef.current !== nextUrl) {
+      URL.revokeObjectURL(thumbUrlRef.current);
+    }
+
+    thumbUrlRef.current = nextUrl;
+    setThumbUrl(nextUrl);
+  };
+
+  const replaceFullUrl = (nextUrl: string | null) => {
+    if (fullUrlRef.current && fullUrlRef.current !== nextUrl) {
+      URL.revokeObjectURL(fullUrlRef.current);
+    }
+
+    fullUrlRef.current = nextUrl;
+    setFullUrl(nextUrl);
+  };
 
   useEffect(() => {
-    if (!open) return;
-    if (!canOpen) return;
+    replaceThumbUrl(null);
+    replaceFullUrl(null);
+    setLoadError(null);
+    setImageAspectRatio(null);
+  }, [numeroArticulo, rutaImagenFinal, tieneImagen]);
 
-    let revokedUrl: string | null = null;
+  useEffect(() => {
+    return () => {
+      if (thumbUrlRef.current) {
+        URL.revokeObjectURL(thumbUrlRef.current);
+      }
+
+      if (fullUrlRef.current) {
+        URL.revokeObjectURL(fullUrlRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showThumbnail || !numeroArticulo) return;
+
     let cancelled = false;
+    let objectUrl: string | null = null;
 
     const run = async () => {
-      setLoading(true);
+      setLoadingThumb(true);
+
+      try {
+        const resp = await apiFetch(buildEndpoint('thumb'));
+
+        if (resp.status === 204 || resp.status === 404) {
+          if (!cancelled) replaceThumbUrl(null);
+          return;
+        }
+
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+
+        const blob = await resp.blob();
+        objectUrl = URL.createObjectURL(blob);
+
+        if (!cancelled) {
+          replaceThumbUrl(objectUrl);
+        } else {
+          URL.revokeObjectURL(objectUrl);
+        }
+      } catch {
+        if (!cancelled) {
+          replaceThumbUrl(null);
+        }
+      } finally {
+        if (!cancelled) setLoadingThumb(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showThumbnail, numeroArticulo]);
+
+  useEffect(() => {
+    if (!open || !numeroArticulo) return;
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    const run = async () => {
+      setLoadingFull(true);
       setLoadError(null);
 
       try {
-        // Preferimos el endpoint por numeroArticulo (mismo que usa el preview en Crear Solicitud)
-        // y dejamos fallback por filename/ruta.
-        const endpoint = numeroArticulo
-          ? `/materiales/imagen-archivo/${encodeURIComponent(String(numeroArticulo))}`
-          : filename
-            ? `/materiales/archivo/${encodeURIComponent(filename)}`
-            : `/materiales/imagen?ruta=${encodeURIComponent(String(rutaImagenFinal))}`;
+        const resp = await apiFetch(buildEndpoint('full'));
 
-        const resp = await apiFetch(endpoint);
-        if (resp.status === 404) {
+        if (resp.status === 204 || resp.status === 404) {
           if (!cancelled) {
-            setImgObjectUrl(null);
+            replaceFullUrl(null);
             setLoadError('No hay imagen disponible para este material');
           }
           return;
@@ -71,20 +190,23 @@ export const VisorImagenMaterial: React.FC<VisorImagenMaterialProps> = ({
         }
 
         const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        revokedUrl = url;
+        objectUrl = URL.createObjectURL(blob);
+        const ratio = await getImageAspectRatio(objectUrl);
+
         if (!cancelled) {
-          setImgObjectUrl(url);
+          replaceFullUrl(objectUrl);
+          setImageAspectRatio(ratio);
         } else {
-          URL.revokeObjectURL(url);
+          URL.revokeObjectURL(objectUrl);
         }
       } catch (e: any) {
         if (!cancelled) {
+          replaceFullUrl(null);
+          setImageAspectRatio(null);
           setLoadError(e?.message || 'No se pudo cargar la imagen');
-          setImgObjectUrl(null);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadingFull(false);
       }
     };
 
@@ -92,60 +214,83 @@ export const VisorImagenMaterial: React.FC<VisorImagenMaterialProps> = ({
 
     return () => {
       cancelled = true;
-      if (revokedUrl) URL.revokeObjectURL(revokedUrl);
-      setLoading(false);
     };
-  }, [open, filename, rutaImagenFinal, showThumbnail, numeroArticulo, canOpen]);
+  }, [open, numeroArticulo]);
+
+  const imageViewportStyle = getImageViewportStyle(imageAspectRatio);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+
+        if (!nextOpen) {
+          replaceFullUrl(null);
+          setLoadError(null);
+          setImageAspectRatio(null);
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
           className="h-12 w-12 overflow-hidden rounded-lg border border-transparent p-0 hover:border-border hover:bg-accent"
-          title="Ver imagen del artículo"
+          title={canOpen ? 'Ver imagen del artículo' : 'Artículo sin número para consultar imagen'}
           disabled={!canOpen}
         >
-          {showThumbnail && imgObjectUrl ? (
-            <img src={imgObjectUrl} alt={descripcionArticulo} className="h-full w-full object-cover" />
+          {showThumbnail && thumbUrl ? (
+            <img src={thumbUrl} alt={descripcionArticulo} className="h-full w-full object-cover" />
+          ) : loadingThumb ? (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
           ) : (
             <ImageIcon className={canOpen ? 'h-4 w-4 text-muted-foreground' : 'h-4 w-4 text-slate-300'} />
           )}
         </Button>
       </DialogTrigger>
-      <DialogContent className="w-auto min-w-[200px] max-w-[250px] h-auto p-0 overflow-hidden flex flex-col hide-scrollbar border-slate-200">
-        <div className="p-4 pb-2 pb-0 flex-shrink-0">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold">{numeroArticulo}</DialogTitle>
-            <DialogDescription className="text-xs line-clamp-2" title={descripcionArticulo}>
-              {descripcionArticulo}
+
+      <DialogContent className="w-[92vw] max-w-[880px] overflow-hidden border-slate-200 p-0">
+        <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+          <DialogHeader className="space-y-1 text-left">
+            <DialogTitle>Imagen del artículo</DialogTitle>
+            <DialogDescription className="max-w-2xl text-sm leading-relaxed" title={descripcionArticulo}>
+              {numeroArticulo ? `${numeroArticulo} · ${descripcionArticulo}` : descripcionArticulo}
             </DialogDescription>
           </DialogHeader>
         </div>
-        
-        <div className="flex-1 overflow-visible p-4 pt-2 flex flex-col justify-center items-center">
-          <div className="relative flex w-[200px] h-[200px] items-center justify-center overflow-hidden rounded-lg bg-slate-50 border border-slate-100">
-            {loading ? (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-              </div>
-            ) : loadError ? (
-              <p className="px-2 text-center text-[10px] text-slate-500 font-medium">{loadError}</p>
-            ) : imgObjectUrl ? (
-              <img
-                src={imgObjectUrl}
-                alt={descripcionArticulo}
-                className="max-h-[200px] max-w-[200px] object-cover h-full w-full"
-              />
-            ) : (
-              <p className="px-2 text-center text-[10px] text-slate-500 font-medium">No hay imagen</p>
-            )}
+
+        <div className="bg-slate-100/80 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex max-h-[72vh] min-h-[240px] items-center justify-center overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-inner sm:min-h-[300px] sm:p-5">
+            <div
+              className="mx-auto flex w-full items-center justify-center overflow-hidden rounded-xl bg-slate-50"
+              style={imageViewportStyle}
+            >
+              {loadingFull ? (
+                <span className="px-3 text-center text-slate-500">Cargando imagen...</span>
+              ) : loadError ? (
+                <span className="px-3 text-center text-red-500">{loadError}</span>
+              ) : fullUrl ? (
+                <img
+                  src={fullUrl}
+                  alt={descripcionArticulo}
+                  className="h-full w-full rounded-lg object-contain"
+                  loading="lazy"
+                />
+              ) : (
+                <span className="px-3 text-center text-slate-500">Sin imagen</span>
+              )}
+            </div>
           </div>
         </div>
-        
-        <div className="p-2 pt-1 flex justify-center flex-shrink-0 bg-slate-50/50 mt-auto border-t">
-          <Button onClick={() => setOpen(false)} variant="ghost" size="sm" className="h-7 text-xs hover:bg-slate-200 w-full rounded-none">
+
+        <div className="border-t bg-slate-50/60 px-4 py-3 sm:px-6">
+          <Button
+            onClick={() => setOpen(false)}
+            variant="ghost"
+            size="sm"
+            className="h-9 w-full rounded-xl text-sm hover:bg-slate-200"
+          >
             Cerrar
           </Button>
         </div>

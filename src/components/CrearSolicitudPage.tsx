@@ -28,7 +28,7 @@ async function obtenerBlobUrlImagenMaterial(numeroArticulo: string): Promise<str
   
   try {
     const response = await apiFetch(`/materiales/imagen-archivo/${encodeURIComponent(numeroArticulo)}`);
-    if (response.status === 404) return null;
+    if (response.status === 204 || response.status === 404) return null;
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     
     const blob = await response.blob();
@@ -147,6 +147,10 @@ export default function CrearSolicitudPage() {
         return;
       }
 
+      const tieneImagenRegistrada = Boolean(
+        materialSeleccionado.tieneImagen || materialSeleccionado.rutaImagenFinal
+      );
+
       setImagenMaterialLoading(true);
       setImagenMaterialError(null);
 
@@ -156,6 +160,19 @@ export default function CrearSolicitudPage() {
 
         if (cancelled) {
           if (objectUrl) URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        if (!objectUrl) {
+          setImagenMaterialUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+          });
+          setImagenMaterialError(
+            tieneImagenRegistrada
+              ? 'La imagen está registrada, pero el archivo no está disponible en el servidor.'
+              : null
+          );
           return;
         }
 
@@ -183,7 +200,11 @@ export default function CrearSolicitudPage() {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [materialSeleccionado?.numeroArticulo]);
+  }, [
+    materialSeleccionado?.numeroArticulo,
+    materialSeleccionado?.tieneImagen,
+    materialSeleccionado?.rutaImagenFinal,
+  ]);
 
   useEffect(() => {
     const targetId = editId || cloneId;
@@ -246,6 +267,8 @@ export default function CrearSolicitudPage() {
             stockDisponible: d.EnStock ?? null,
             costoUnitario,
             subtotal: cantidad * costoUnitario,
+            tieneImagen: d.TieneImagen ?? d.tieneImagen ?? null,
+            rutaImagenFinal: d.RutaImagenFinal ?? d.rutaImagenFinal ?? null,
           };
         });
 
@@ -268,6 +291,14 @@ export default function CrearSolicitudPage() {
 
   const handleAgregarItem = () => {
     if (!selectedMaterialId || !cantidad || Number(cantidad) <= 0) return;
+
+    if (items.length >= 9) {
+      toast.warning({
+        title: 'Límite máximo alcanzado',
+        description: 'No se pueden agregar más de 9 materiales por solicitud.',
+      });
+      return;
+    }
 
     const material = materiales.find((m) => String(m.idMaterial) === selectedMaterialId);
     if (!material) return;

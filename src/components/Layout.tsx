@@ -55,7 +55,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   
   // Filtrar módulos disponibles según permisos del rol (cargados desde BD)
   const navigation = modulos
-    .filter(modulo => modulosPermitidos.includes(modulo.id))
+    .filter(modulo => modulosPermitidos.includes(modulo.id.toLowerCase()))
     .map(modulo => ({
       label: modulo.nombre,
       path: modulo.path,

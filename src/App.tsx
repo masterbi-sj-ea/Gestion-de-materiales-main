@@ -26,6 +26,36 @@ import { User, UserRole } from './types';
 import { AuthContext } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import { API_BASE_URL, API_ORIGIN } from './services/apiConfig';
+import { usePermisos } from './contexts/PermisosContext';
+
+function ProtectedModuleRoute({
+  moduloId,
+  children,
+}: {
+  moduloId: string;
+  children: JSX.Element;
+}) {
+  const { user } = useAuth();
+  const { cargandoPermisos, puedeAcceder } = usePermisos();
+
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (cargandoPermisos) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+        Validando permisos del módulo...
+      </div>
+    );
+  }
+
+  if (!puedeAcceder(user.role, moduloId)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
 
 function App() {
   const [user, setUser] = useState<User | null>(() => {
@@ -170,7 +200,14 @@ function App() {
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/materiales" element={<MaterialesPage />} />
+                <Route
+                  path="/materiales"
+                  element={
+                    <ProtectedModuleRoute moduloId="materiales">
+                      <MaterialesPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
                 <Route path="/solicitudes/crear" element={<CrearSolicitudPage />} />
                 <Route path="/solicitudes" element={<VerSolicitudesPage />} />
                 <Route path="/aprobaciones" element={<AprobacionPage />} />

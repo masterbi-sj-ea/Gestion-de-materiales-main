@@ -1,12 +1,20 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Alert, AlertDescription } from './ui/alert';
-import { Package, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowRight,
+  Boxes,
+  ClipboardList,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  Package,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 import { sileo as toast } from 'sileo';
+import './Login.css';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -22,99 +30,251 @@ export default function Login() {
     const success = await login(email, password);
     if (!success) {
       setError('Credenciales inválidas. Verifica tu email y contraseña.');
-      toast.error({ title: "Error de acceso", description: 'Credenciales inválidas. Verifica tu email y contraseña.'});
-      return;
+      toast.error({
+        title: 'Error de acceso',
+        description: 'Credenciales inválidas. Verifica tu email y contraseña.',
+      });
     }
- 
   };
 
   const demoUsers = [
-    { email: 'admin@empresa.com', password: 'admin123', role: 'Administrador' },
-    { email: 'solicitante@empresa.com', password: 'sol123', role: 'Solicitante' },
-    { email: 'jefe@empresa.com', password: 'jefe123', role: 'Jefe de Producción' },
-    { email: 'bodega@empresa.com', password: 'bodega123', role: 'Encargado de Bodega' }
+    {
+      email: 'admin@empresa.com',
+      password: 'admin123',
+      role: 'Administrador',
+      tone: 'amber',
+    },
+    {
+      email: 'solicitante@empresa.com',
+      password: 'sol123',
+      role: 'Solicitante',
+      tone: 'sky',
+    },
+    {
+      email: 'jefe@empresa.com',
+      password: 'jefe123',
+      role: 'Jefe de Producción',
+      tone: 'emerald',
+    },
+    {
+      email: 'bodega@empresa.com',
+      password: 'bodega123',
+      role: 'Encargado de Bodega',
+      tone: 'violet',
+    },
   ];
 
+  const featureHighlights = [
+    {
+      icon: Boxes,
+      title: 'Inventario centralizado',
+      description: 'Stock, materiales y movimientos reunidos en una sola entrada.',
+    },
+    {
+      icon: ClipboardList,
+      title: 'Proceso ordenado',
+      description: 'Solicitudes, aprobación y despacho con seguimiento claro.',
+    },
+    {
+      icon: ShieldCheck,
+      title: 'Acceso por rol',
+      description: 'Cada perfil entra con la vista correcta desde el inicio.',
+    },
+  ];
+
+  const mobileModules = ['Stock', 'Solicitudes', 'Despacho', 'Kardex'];
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-slate-100 p-4">
-      <Card className="w-full max-w-md shadow-xl">
-        <CardHeader className="space-y-4 text-center">
-          <div className="mx-auto w-16 h-16 bg-blue-600 rounded-xl flex items-center justify-center">
-            <Package className="w-10 h-10 text-white" />
+    <div className="login-page">
+      <div className="login-orb login-orb-one" />
+      <div className="login-orb login-orb-two" />
+      <div className="login-orb login-orb-three" />
+
+      <div className="login-shell">
+        <section className="login-brand-panel">
+          <div className="login-pill">
+            <Sparkles size={14} />
+            <span>Acceso Operativo</span>
           </div>
-          <CardTitle className="text-2xl">Sistema de Gestión de Materiales</CardTitle>
-          <CardDescription>Ingresa tus credenciales para continuar</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Correo Electrónico</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="usuario@empresa.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+
+          <div className="login-brand-header">
+            <div className="login-logo-box">
+              <Package size={30} />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Contraseña</Label>
-              <div className="relative">
-                <Input
+
+            <div className="login-brand-copy">
+              <div className="login-eyebrow">Gestion de Materiales</div>
+              <h1>Una entrada mas clara para un sistema de trabajo real.</h1>
+              <p>
+                Controla inventario, solicitudes, aprobaciones y despacho desde
+                una pantalla mas firme, moderna y facil de entender.
+              </p>
+            </div>
+          </div>
+
+          <div className="login-feature-grid">
+            {featureHighlights.map((feature) => {
+              const Icon = feature.icon;
+              return (
+                <div key={feature.title} className="login-feature-card">
+                  <div className="login-feature-icon">
+                    <Icon size={18} />
+                  </div>
+                  <h2>{feature.title}</h2>
+                  <p>{feature.description}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="login-brand-banner">
+            <div>
+              <div className="login-banner-label">Flujo principal</div>
+              <strong>Inventario, solicitudes y despacho en un solo lugar.</strong>
+            </div>
+            <div className="login-banner-badge">ERP operativo</div>
+          </div>
+
+          <div className="login-brand-footer">
+            Inventario • Solicitudes • Despacho • Kardex
+          </div>
+        </section>
+
+        <section className="login-form-panel">
+          <div className="login-form-top">
+            <div className="login-form-title-group">
+              <div className="login-form-logo">
+                <Package size={22} />
+              </div>
+              <div>
+                <div className="login-form-kicker">Bienvenido</div>
+                <h2>Iniciar sesion</h2>
+              </div>
+            </div>
+
+            <div className="login-status-badge">Sistema activo</div>
+          </div>
+
+          <div className="login-mobile-showcase">
+            <div className="login-mobile-showcase-top">
+              <div className="login-mobile-showcase-brand">
+                <div className="login-mobile-showcase-logo">
+                  <Package size={18} />
+                </div>
+                <div>
+                  <div className="login-mobile-showcase-kicker">Operacion diaria</div>
+                  <strong>Inventario y despacho sin rodeos</strong>
+                </div>
+              </div>
+
+              <div className="login-mobile-showcase-badge">En linea</div>
+            </div>
+
+            <p>
+              En movil el acceso debe sentirse rapido, claro y listo para trabajar.
+            </p>
+
+            <div className="login-mobile-chip-row">
+              {mobileModules.map((module) => (
+                <span key={module} className="login-mobile-chip">
+                  {module}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="login-form-intro">
+            <strong>Sistema de Gestion de Materiales</strong>
+            <p>
+              Ingresa tus credenciales para continuar con inventario,
+              aprobaciones y despacho.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="login-form">
+            <div className="login-field">
+              <label htmlFor="email">Correo electronico</label>
+              <div className="login-input-wrap">
+                <Mail className="login-input-icon" size={17} />
+                <input
+                  id="email"
+                  type="email"
+                  placeholder="usuario@empresa.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="login-input"
+                />
+              </div>
+            </div>
+
+            <div className="login-field">
+              <label htmlFor="password">Contrasena</label>
+              <div className="login-input-wrap">
+                <Lock className="login-input-icon" size={17} />
+                <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="pr-12"
+                  className="login-input login-input-password"
                 />
                 <button
                   type="button"
                   aria-pressed={showPassword}
-                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                  title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  aria-label={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                  title={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                   onClick={() => setShowPassword((s) => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded border border-transparent bg-white/5 text-muted-foreground hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="login-password-toggle"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
             </div>
-            
+
             {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
+              <div className="login-error">
+                <AlertCircle size={16} />
+                <span>{error}</span>
+              </div>
             )}
-            
-            <Button type="submit" className="w-full">
-              Iniciar Sesión
-            </Button>
+
+            <button type="submit" className="login-submit">
+              <span>Iniciar Sesion</span>
+              <ArrowRight size={17} />
+            </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t">
-            <p className="text-sm text-muted-foreground mb-3">Usuarios de demostración:</p>
-            <div className="space-y-2">
-              {demoUsers.map((user) => (
-                <button
-                  key={user.email}
-                  onClick={() => {
-                    setEmail(user.email);
-                    setPassword(user.password);
-                  }}
-                  className="w-full text-left text-xs bg-slate-50 hover:bg-slate-100 p-2 rounded border"
-                >
-                  <div className="font-medium">{user.role}</div>
-                  <div className="text-muted-foreground">{user.email} / {user.password}</div>
-                </button>
-              ))}
-            </div>
+          <div className="login-demo-header">
+            <span />
+            <p>Usuarios de demostracion</p>
+            <span />
           </div>
-        </CardContent>
-      </Card>
+
+          <div className="login-demo-grid">
+            {demoUsers.map((user) => (
+              <button
+                key={user.email}
+                type="button"
+                className={`login-demo-card login-demo-${user.tone}`}
+                onClick={() => {
+                  setEmail(user.email);
+                  setPassword(user.password);
+                }}
+              >
+                <div className="login-demo-top">
+                  <strong>{user.role}</strong>
+                  <ArrowRight size={15} />
+                </div>
+                <div className="login-demo-email">{user.email}</div>
+                <div className="login-demo-password">{user.password}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

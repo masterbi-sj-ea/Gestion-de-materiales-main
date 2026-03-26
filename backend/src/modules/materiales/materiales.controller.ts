@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
+import crypto from 'crypto';
 import { AuthRequest } from '../../middleware/auth';
 import { env } from '../../config/env';
 import {
@@ -172,6 +174,200 @@ function buildImportRows(records: any[]): MaterialImportRow[] {
     .filter((x) => !!x.NumeroArticulo && !!x.DescripcionArticulo && !!x.UnidadMedida);
 }
 
+function parsePositiveIntParam(value: any, min: number, max: number): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const int = Math.trunc(n);
+  if (int < min) return min;
+  if (int > max) return max;
+  return int;
+}
+
+function normalizeOutputFormat(value: any, originalExt?: string): 'jpeg' | 'png' | 'webp' | 'original' {
+  const raw = String(value || '').trim().toLowerCase();
+
+  if (!raw || raw === 'auto') return 'webp';
+  if (raw === 'jpg' || raw === 'jpeg') return 'jpeg';
+  if (raw === 'png') return 'png';
+  if (raw === 'webp') return 'webp';
+  if (raw === 'original') return 'original';
+
+  const ext = String(originalExt || '').toLowerCase();
+  if (ext === '.png') return 'png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'jpeg';
+  if (ext === '.webp') return 'webp';
+
+  return 'webp';
+}
+
+function getContentTypeForFormat(format: 'jpeg' | 'png' | 'webp', originalExt?: string): string {
+  if (format === 'jpeg') return 'image/jpeg';
+  if (format === 'png') return 'image/png';
+  if (format === 'webp') return 'image/webp';
+
+  const ext = String(originalExt || '').toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.webp') return 'image/webp';
+  return 'image/jpeg';
+}
+
+function isPathInsideBase(basePath: string, targetPath: string): boolean {
+  const baseResolved = path.resolve(basePath);
+  const targetResolved = path.resolve(targetPath);
+
+  const relative = path.relative(baseResolved, targetResolved);
+
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
+}
+
+function resolveMaterialImagePath(ruta: string): string | null {
+  const raw = String(ruta || '').trim();
+  if (!raw) return null;
+
+  const root = env.MATERIALES_IMG_ROOT?.trim() || null;
+  const isAbsoluteWin = /^[a-zA-Z]:[\\/]/.test(raw);
+  const isUnc = raw.startsWith('\\\\');
+
+  if (root) {
+    const rootResolved = path.resolve(root);
+
+    // Si BD trae una ruta absoluta, solo se permite si cae dentro del ROOT configurado
+    if (isAbsoluteWin || isUnc) {
+      const absoluteResolved = path.resolve(raw);
+      return isPathInsideBase(rootResolved, absoluteResolved) ? absoluteResolved : null;
+    }
+
+    // Si BD trae una ruta relativa, la resolvemos dentro del ROOT
+    const cleaned = raw
+      .replace(/^[/\\]+/, '')
+      .replace(/\.\.(?=[/\\]|$)/g, '.');
+
+    const combined = path.resolve(rootResolved, cleaned);
+    return isPathInsideBase(rootResolved, combined) ? combined : null;
+  }
+
+  // Sin ROOT configurado: solo se aceptan rutas absolutas Windows/UNC
+  if (!isAbsoluteWin && !isUnc) {
+    return null;
+  }
+
+  return path.resolve(raw);
+}
+
+async function enviarImagenOptimizada(
+  req: Request,
+  res: Response,
+  filePath: string
+): Promise<Response | void> {
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ message: 'Imagen no encontrada en el almacenamiento' });
+  }
+
+  const stats = await fs.promises.stat(filePath);
+
+  const width = parsePositiveIntParam(req.query.w ?? req.query.width, 50, 2400);
+  const height = parsePositiveIntParam(req.query.h ?? req.query.height, 50, 2400);
+  const quality = parsePositiveIntParam(req.query.q ?? req.query.quality, 40, 95) ?? 72;
+  const format = normalizeOutputFormat(req.query.format, ext);
+
+  const etag = `W/"${stats.size}-${Math.trunc(stats.mtimeMs)}-${width ?? 0}-${height ?? 0}-${quality}-${format}"`;
+
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.setHeader('ETag', etag);
+  res.setHeader('Last-Modified', stats.mtime.toUTCString());
+
+  if (ext === '.svg' || ext === '.gif') {
+    const contentType =
+      ext === '.svg' ? 'image/svg+xml' :
+      ext === '.gif' ? 'image/gif' :
+      'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    return res.sendFile(filePath);
+  }
+
+  const outputFormat: 'jpeg' | 'png' | 'webp' =
+    format === 'original'
+      ? (ext === '.png' ? 'png' : ext === '.webp' ? 'webp' : 'jpeg')
+      : format;
+
+  const outputExt =
+    outputFormat === 'jpeg' ? 'jpg' :
+    outputFormat === 'png' ? 'png' :
+    'webp';
+
+  const cacheRoot = process.env.MATERIALES_IMG_CACHE?.trim();
+  const cacheKey = crypto
+    .createHash('sha1')
+    .update(
+      JSON.stringify({
+        filePath,
+        size: stats.size,
+        mtime: Math.trunc(stats.mtimeMs),
+        width: width ?? 0,
+        height: height ?? 0,
+        quality,
+        format: outputFormat,
+      })
+    )
+    .digest('hex');
+
+  const cacheFilePath = cacheRoot
+    ? path.resolve(cacheRoot, `${cacheKey}.${outputExt}`)
+    : null;
+
+  if (cacheFilePath && fs.existsSync(cacheFilePath)) {
+    res.setHeader('Content-Type', getContentTypeForFormat(outputFormat, ext));
+    return res.sendFile(cacheFilePath);
+  }
+
+  let pipeline = sharp(filePath, { failOn: 'none' }).rotate();
+
+  if (width || height) {
+    pipeline = pipeline.resize({
+      width: width ?? undefined,
+      height: height ?? undefined,
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
+  }
+
+  if (outputFormat === 'jpeg') {
+    pipeline = pipeline.jpeg({ quality, mozjpeg: true });
+  } else if (outputFormat === 'png') {
+    pipeline = pipeline.png({ compressionLevel: 9 });
+  } else {
+    pipeline = pipeline.webp({ quality });
+  }
+
+  if (cacheFilePath) {
+    await fs.promises.mkdir(path.dirname(cacheFilePath), { recursive: true });
+    await pipeline.toFile(cacheFilePath);
+
+    res.setHeader('Content-Type', getContentTypeForFormat(outputFormat, ext));
+    return res.sendFile(cacheFilePath);
+  }
+
+  const buffer = await pipeline.toBuffer();
+
+  res.setHeader('Content-Type', getContentTypeForFormat(outputFormat, ext));
+  res.setHeader('Content-Length', String(buffer.length));
+
+  return res.end(buffer);
+}
+
 export async function listarMaterialesController(_req: Request, res: Response) {
   try {
     const materiales = await listarMateriales();
@@ -243,7 +439,7 @@ export async function obtenerArchivoImagenMaterialController(req: Request, res: 
       return res.status(404).json({ message: 'Imagen no encontrada' });
     }
 
-    return res.sendFile(fullPath);
+    return await enviarImagenOptimizada(req, res, fullPath);
   } catch (error) {
     console.error('Error en obtenerArchivoImagenMaterialController', error);
     return res.status(500).json({ message: 'Error al servir la imagen del material' });
@@ -261,23 +457,24 @@ export async function obtenerArchivoImagenMaterialPorNumeroArticuloController(re
     const data = await obtenerImagenMaterialPorNumeroArticulo(numeroArticulo);
 
     if (!data || !data.RutaImagenFinal) {
-      return res.status(404).json({ message: 'Imagen no encontrada para el material' });
+      return res.status(204).end();
     }
 
-    console.log('MATERIALES_IMG_ROOT = ', process.env.MATERIALES_IMG_ROOT);
-    const root = process.env.MATERIALES_IMG_ROOT;
-    if (!root) {
-      return res.status(500).json({ message: 'Ruta de imágenes no configurada en el servidor' });
+    const resolvedPath = resolveMaterialImagePath(data.RutaImagenFinal);
+
+    if (!resolvedPath) {
+      console.warn('Ruta de imagen inválida para material', {
+        numeroArticulo,
+        rutaImagenFinal: data.RutaImagenFinal,
+      });
+      return res.status(204).end();
     }
 
-    const filename = path.basename(data.RutaImagenFinal);
-    const fullPath = path.join(root, filename);
-
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ message: 'Archivo de imagen no encontrado en NAS' });
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(204).end();
     }
 
-    return res.sendFile(fullPath);
+    return await enviarImagenOptimizada(req, res, resolvedPath);
   } catch (error) {
     console.error('Error en obtenerArchivoImagenMaterialPorNumeroArticuloController', error);
     return res.status(500).json({ message: 'Error al obtener el archivo de imagen del material' });
@@ -286,58 +483,23 @@ export async function obtenerArchivoImagenMaterialPorNumeroArticuloController(re
 
 export async function verImagenMaterialController(req: Request, res: Response) {
   try {
-    const ruta = String(req.query.ruta || '');
+    const ruta = String(req.query.ruta || '').trim();
 
     if (!ruta) {
       return res.status(400).json({ message: 'Ruta de imagen no proporcionada' });
     }
 
-    const root = env.MATERIALES_IMG_ROOT;
-    const isAbsoluteWin = /^[a-zA-Z]:\\/.test(ruta);
-    const isUnc = ruta.startsWith('\\\\') || ruta.startsWith('\\');
+    const resolvedPath = resolveMaterialImagePath(ruta);
 
-    // Normalizar: aceptamos ruta relativa (recomendada) o absoluta UNC/Windows.
-    // Si hay ROOT configurado, forzamos que la ruta resuelva dentro del ROOT.
-    let resolvedPath: string;
-    if (root) {
-      // Evitar path traversal: quitamos prefijos de separadores y resolvemos.
-      const cleaned = ruta.replace(/^[\\/]+/, '').replace(/\.{2,}/g, '.');
-      resolvedPath = path.resolve(root, cleaned);
-      const rootResolved = path.resolve(root);
-      if (!resolvedPath.toLowerCase().startsWith(rootResolved.toLowerCase() + path.sep) && resolvedPath.toLowerCase() !== rootResolved.toLowerCase()) {
-        return res.status(400).json({ message: 'Ruta de imagen inválida' });
-      }
-    } else {
-      // Sin ROOT: permitimos el comportamiento anterior (absoluto), pero bloqueamos relativas sospechosas.
-      if (!isAbsoluteWin && !isUnc) {
-        return res.status(400).json({ message: 'Configura MATERIALES_IMG_ROOT para usar rutas relativas' });
-      }
-      resolvedPath = ruta;
+    if (!resolvedPath) {
+      return res.status(400).json({ message: 'Ruta de imagen inválida o fuera del directorio permitido' });
     }
 
-    // Comprobar si el archivo existe
     if (!fs.existsSync(resolvedPath)) {
       return res.status(404).json({ message: 'Imagen no encontrada en el almacenamiento' });
     }
 
-    // Configurar encabezados básicos (pueder ser mejorado con mime-types según extensión)
-    const ext = path.extname(resolvedPath).toLowerCase();
-    let contentType = 'image/jpeg';
-    if (ext === '.png') contentType = 'image/png';
-    else if (ext === '.gif') contentType = 'image/gif';
-    else if (ext === '.webp') contentType = 'image/webp';
-    else if (ext === '.svg') contentType = 'image/svg+xml';
-
-    res.setHeader('Content-Type', contentType);
-
-    // Streamear el archivo desde el NAS/FileSystem al frontend
-    const stream = fs.createReadStream(resolvedPath);
-    stream.on('error', (err) => {
-      console.error('Error enviando la imagen:', err);
-      res.status(500).end('Error al leer la imagen');
-    });
-
-    stream.pipe(res);
+    return await enviarImagenOptimizada(req, res, resolvedPath);
   } catch (error) {
     console.error('Error en verImagenMaterialController:', error);
     return res.status(500).json({ message: 'Error interno del servidor al procesar la imagen' });
@@ -508,7 +670,11 @@ export async function importarMaterialesController(req: AuthRequest, res: Respon
       return res.status(400).json({ message: 'El archivo no contiene filas válidas de materiales' });
     }
 
-    await importarMaterialesYStock(datos, req.userId);
+    const modoRaw = String(req.body?.modo || 'ACTUALIZAR').trim().toUpperCase();
+    const modo: 'ACTUALIZAR' | 'REEMPLAZAR' =
+      modoRaw === 'REEMPLAZAR' ? 'REEMPLAZAR' : 'ACTUALIZAR';
+
+    await importarMaterialesYStock(datos, req.userId, modo);
 
     // Crear automáticamente un corte STOCK vigente asociado a la carga (mejora trazabilidad).
     let idCorteCreado: number | null = null;
@@ -551,6 +717,7 @@ export async function importarMaterialesController(req: AuthRequest, res: Respon
         entidad: 'Importación masiva de materiales y stock',
         filas: datos.length,
         nombreArchivo: file.originalname,
+        modo,
       });
     } catch (auditError) {
       console.error('Error al registrar auditoría IMPORTAR_MATERIALES_STOCK', auditError);
@@ -567,6 +734,7 @@ export async function importarMaterialesController(req: AuthRequest, res: Respon
       message,
       filas: datos.length,
       formato: isXlsx ? 'xlsx' : 'csv',
+      modo,
       idCorte: idCorteCreado,
       stats: {
         totalProcesados: datos.length,
