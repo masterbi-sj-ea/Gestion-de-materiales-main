@@ -155,14 +155,44 @@ export function useCatalogosSolicitud(
     if (!idAreaDestino) return [] as RecursoListado[];
     const permitidos = permitidosData ?? { recursos: [], applied: false } as any;
     if (!permitidos.applied) return recursos;
-    // El endpoint devuelve catálogos (normalizados en "recursos" más arriba),
-    // por lo que debemos comparar el `catalogoId` del recurso contra los ids de catálogo permitidos.
-    const allowed = new Set<number>(
-      (permitidos.recursos || []).map((c: any) =>
-        Number(c.IdCatalogoSolicitud ?? c.idCatalogoSolicitud ?? c.IdCatalogo ?? c.id ?? c.Id)
-      ),
-    );
-    return recursos.filter((r: RecursoListado) => allowed.has(Number(r.catalogoId ?? 0)));
+    // El endpoint `/area-recursos/permitidos` puede devolver dos formatos dependiendo
+    // de la implementación en la BD: una lista de *recursos* ({ IdRecurso, Nombre, ... })
+    // o una lista de *catálogos* ({ IdCatalogoSolicitud, NombreCatalogo, ... }).
+    // Detectamos el formato y aplicamos el filtro adecuado.
+    const allowedRaw = permitidos.recursos || [];
+    if (!Array.isArray(allowedRaw) || allowedRaw.length === 0) {
+      // Se aplicó el filtro pero la lista está vacía: no hay recursos permitidos
+      return [];
+    }
+
+    const sample = allowedRaw[0] ?? {};
+
+    // Caso 1: la lista contiene recursos (IdRecurso / id)
+    if (sample.IdRecurso !== undefined || sample.id !== undefined || sample.Id !== undefined) {
+      const allowed = new Set<number>(
+        allowedRaw.map((c: any) => Number(c.IdRecurso ?? c.id ?? c.Id ?? 0)),
+      );
+      return recursos.filter((r: RecursoListado) => allowed.has(Number(r.id ?? 0)));
+    }
+
+    // Caso 2: la lista contiene catálogos (IdCatalogoSolicitud / idCatalogo)
+    if (
+      sample.IdCatalogoSolicitud !== undefined ||
+      sample.idCatalogoSolicitud !== undefined ||
+      sample.IdCatalogo !== undefined ||
+      sample.id !== undefined
+    ) {
+      const allowed = new Set<number>(
+        allowedRaw.map((c: any) =>
+          Number(c.IdCatalogoSolicitud ?? c.idCatalogoSolicitud ?? c.IdCatalogo ?? c.id ?? c.Id ?? 0),
+        ),
+      );
+      return recursos.filter((r: RecursoListado) => allowed.has(Number(r.catalogoId ?? 0)));
+    }
+
+    // Fallback: intentar comparar por `id` o `catalogoId` si no podemos identificar el formato
+    const fallbackSet = new Set<number>(allowedRaw.map((c: any) => Number(c.id ?? c.Id ?? 0)));
+    return recursos.filter((r: RecursoListado) => fallbackSet.has(Number(r.id ?? 0)) || fallbackSet.has(Number(r.catalogoId ?? 0)));
   })();
 
   return {
