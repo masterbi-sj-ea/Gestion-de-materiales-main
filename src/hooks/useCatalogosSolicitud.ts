@@ -25,6 +25,7 @@ export interface AreaListado {
 export interface RecursoListado {
   id: number;
   nombre: string;
+  catalogoId?: number | null;
 }
 
 export function useCatalogosSolicitud(
@@ -38,11 +39,11 @@ export function useCatalogosSolicitud(
     error: errorBase,
     isLoading: isLoadingBase
   } = useQuery({
-    queryKey: ['catalogosBase'],
+    queryKey: ['catalogosBase', token],
     queryFn: async () => {
       const [matResp, areasResp] = await Promise.all([
         apiFetch('/materiales/con-stock'),
-        apiFetch('/areas'),
+        apiFetch('/areas/mis-areas-permitidas'),
       ]);
 
       if (!matResp.ok) throw new Error('No se pudieron cargar los materiales');
@@ -94,10 +95,38 @@ export function useCatalogosSolicitud(
       return (recursosJson || []).map((r: any) => ({
         id: r.IdRecurso ?? r.id,
         nombre: r.Nombre ?? r.nombre,
+        catalogoId: r.IdCatalogoSolicitud ?? r.IdCatalogo ?? null,
       }));
     },
     enabled: !!token && !!idAreaDestino, // Sólo dispara si hay token y área seleccionada
     staleTime: 10 * 60 * 1000, // 10 minutos
+  });
+
+  // 2.b Cargar catálogos permitidos por usuario/área (para filtrar recursos por catálogo cuando aplique)
+  const { data: permitidosData } = useQuery({
+    queryKey: ['catalogosPermitidos', token, idAreaDestino],
+    queryFn: async () => {
+      if (!idAreaDestino) return { recursos: [], applied: false };
+      const resp = await apiFetch(`/area-recursos/permitidos?areaId=${idAreaDestino}`);
+      if (!resp.ok) return { catalogos: [], applied: false };
+        try {
+          const json = await resp.json();
+
+          // El endpoint devuelve un array de recursos o un objeto { recursos: [], applied: boolean }
+          if (Array.isArray(json)) {
+            return { recursos: json, applied: json.length > 0 } as any;
+          }
+
+          const recursos = json.recursos ?? json.catalogos ?? [];
+          const applied = !!json.applied || (Array.isArray(recursos) && recursos.length > 0);
+          return { recursos, applied } as any;
+        } catch (err) {
+          console.error('[useCatalogosSolicitud] error parsing /area-recursos/permitidos response', err);
+          return { recursos: [], applied: false } as any;
+        }
+    },
+    enabled: !!token && !!idAreaDestino,
+    staleTime: 5 * 60 * 1000,
   });
 
   // 3. Cargar Código de Cuenta cuando tengamos Área Y Recurso
@@ -121,11 +150,26 @@ export function useCatalogosSolicitud(
     ? (errorBase?.message || 'Error al cargar los catálogos o recursos requeridos') 
     : null;
 
+  // Si el endpoint de permitidos devolvió aplicación de filtro, usamos sólo recursos cuyo catalogoId esté en la lista permitida
+  const recursosFiltrados = (() => {
+    if (!idAreaDestino) return [] as RecursoListado[];
+    const permitidos = permitidosData ?? { recursos: [], applied: false } as any;
+    if (!permitidos.applied) return recursos;
+    // El endpoint devuelve catálogos (normalizados en "recursos" más arriba),
+    // por lo que debemos comparar el `catalogoId` del recurso contra los ids de catálogo permitidos.
+    const allowed = new Set<number>(
+      (permitidos.recursos || []).map((c: any) =>
+        Number(c.IdCatalogoSolicitud ?? c.idCatalogoSolicitud ?? c.IdCatalogo ?? c.id ?? c.Id)
+      ),
+    );
+    return recursos.filter((r: RecursoListado) => allowed.has(Number(r.catalogoId ?? 0)));
+  })();
+
   return {
     materiales: datosBase?.materiales || [],
     areas: datosBase?.areas || [],
     // Si no hay área seleccionada, garantizamos enviar arreglo vacío
-    recursos: idAreaDestino ? recursos : [],
+    recursos: idAreaDestino ? recursosFiltrados : [],
     // Si falta alguno de los 2 no deberíamos tener un código de cuenta devuelto
     codigoCuenta: (idAreaDestino && idRecurso) ? (dataCuenta?.codigoCuenta || '') : '',
     idCentroCostoCalculado: (idAreaDestino && idRecurso) ? (dataCuenta?.idCentroCosto || null) : null,
