@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { listarRecursosPorAreaController, obtenerCodigoCuentaController } from './areaRecursoCuenta.controller';
+import { listarRecursosPorAreaController, obtenerCodigoCuentaController, listarRecursosPermitidosController } from './areaRecursoCuenta.controller';
 
 const router = Router();
 
 router.get('/codigo-cuenta', obtenerCodigoCuentaController);
 router.get('/recursos', listarRecursosPorAreaController);
+router.get('/permitidos', listarRecursosPermitidosController);
 
 export default router;

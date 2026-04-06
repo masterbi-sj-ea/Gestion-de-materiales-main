@@ -15,6 +15,7 @@ import despachosRoutes from './modules/despacho/despachos.routes';
 import recursosRoutes from './modules/recursos/recursos.routes';
 import areaRecursoCuentaRoutes from './modules/areaRecursoCuenta/areaRecursoCuenta.routes';
 import kardexRoutes from './modules/kardex/kardex.routes';
+import coberturasAccesoRoutes from './modules/coberturasAcceso/coberturasAcceso.routes';
 import { authMiddleware } from './middleware/auth';
 
 const router = Router();
@@ -36,6 +37,7 @@ router.use('/despachos', authMiddleware, despachosRoutes);
 router.use('/recursos', authMiddleware, recursosRoutes);
 router.use('/area-recursos', authMiddleware, areaRecursoCuentaRoutes);
 router.use('/kardex', authMiddleware, kardexRoutes);
+router.use('/coberturas-acceso', authMiddleware, coberturasAccesoRoutes);
 router.use('/cortes', cortesRoutes);
 
 // TODO: agregar rutas de módulos (usuarios, roles, permisos, materiales, solicitudes, etc.)

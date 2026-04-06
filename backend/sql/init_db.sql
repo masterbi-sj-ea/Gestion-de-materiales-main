@@ -2053,6 +2053,27 @@ BEGIN
 END
 GO
 
+-- Coberturas de Acceso
+IF NOT EXISTS (SELECT 1
+FROM dbo.Modulos
+WHERE Codigo = 'coberturas-acceso')
+BEGIN
+    INSERT INTO dbo.Modulos
+        (Codigo, Nombre, Path, Descripcion, Icono)
+    VALUES
+        ('coberturas-acceso', 'Coberturas de Acceso', '/coberturas-acceso', 'Administración de coberturas por usuarios, áreas y catálogos', 'Shield');
+END
+ELSE
+BEGIN
+    UPDATE dbo.Modulos
+    SET Nombre = 'Coberturas de Acceso',
+        Path = '/coberturas-acceso',
+        Descripcion = 'Administración de coberturas por usuarios, áreas y catálogos',
+        Icono = 'Shield'
+    WHERE Codigo = 'coberturas-acceso';
+END
+GO
+
 -- Permisos
 IF NOT EXISTS (SELECT 1
 FROM dbo.Modulos

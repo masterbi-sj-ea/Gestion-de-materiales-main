@@ -1,5 +1,12 @@
 import { Request, Response } from 'express';
-import { listarAreas, crearArea, actualizarArea, eliminarArea } from './areas.service';
+import { AuthRequest } from '../../middleware/auth';
+import {
+  listarAreas,
+  listarAreasPermitidasPorUsuario,
+  crearArea,
+  actualizarArea,
+  eliminarArea,
+} from './areas.service';
 
 export async function listarAreasController(_req: Request, res: Response) {
   try {
@@ -8,6 +15,20 @@ export async function listarAreasController(_req: Request, res: Response) {
   } catch (error: any) {
     console.error('Error en listarAreasController', error);
     return res.status(500).json({ message: 'Error al listar áreas' });
+  }
+}
+
+export async function listarMisAreasPermitidasController(req: AuthRequest, res: Response) {
+  if (!req.userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado' });
+  }
+
+  try {
+    const areas = await listarAreasPermitidasPorUsuario(req.userId);
+    return res.json(areas);
+  } catch (error: any) {
+    console.error('Error en listarMisAreasPermitidasController', error);
+    return res.status(500).json({ message: 'Error al listar las áreas permitidas del usuario' });
   }
 }
 

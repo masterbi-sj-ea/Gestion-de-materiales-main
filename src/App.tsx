@@ -21,6 +21,7 @@ import PermisosPage from './components/PermisosPage';
 import RolesPage from './components/RolesPage';
 import AreasPage from './components/AreasPage';
 import CortesPage from './components/CortesPage';
+import CoberturasAccesoPage from './components/CoberturasAccesoPage';
 
 import { User, UserRole } from './types';
 import { AuthContext } from './contexts/AuthContext';
@@ -85,6 +86,7 @@ function App() {
 
       socket.on('connect', () => {
         console.log('socket.io conectado');
+        socket.emit('join', `user:${user.id}`);
         // Unirse a salas según rol si es necesario
         if (user.role === 'Bodeguero' || user.role === 'Administrador') {
           socket.emit('join', 'bodega');
@@ -208,19 +210,118 @@ function App() {
                     </ProtectedModuleRoute>
                   }
                 />
-                <Route path="/solicitudes/crear" element={<CrearSolicitudPage />} />
-                <Route path="/solicitudes" element={<VerSolicitudesPage />} />
-                <Route path="/aprobaciones" element={<AprobacionPage />} />
-                <Route path="/despacho" element={<DespachoPage />} />
-                <Route path="/kardex" element={<KardexPage />} />
-                <Route path="/presupuesto" element={<PresupuestoPage />} />
-                <Route path="/cortes" element={<CortesPage />} />
-                <Route path="/auditoria" element={<AuditoriaPage />} />
-                <Route path="/reportes" element={<ReportesPage />} />
-                <Route path="/usuarios" element={<UsuariosPage />} />
-                <Route path="/permisos" element={<PermisosPage />} />
-                <Route path="/roles" element={<RolesPage />} />
-                <Route path="/areas" element={<AreasPage />} />
+                <Route
+                  path="/solicitudes/crear"
+                  element={
+                    <ProtectedModuleRoute moduloId="solicitudes">
+                      <CrearSolicitudPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/solicitudes"
+                  element={
+                    <ProtectedModuleRoute moduloId="solicitudes">
+                      <VerSolicitudesPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/aprobaciones"
+                  element={
+                    <ProtectedModuleRoute moduloId="aprobaciones">
+                      <AprobacionPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/despacho"
+                  element={
+                    <ProtectedModuleRoute moduloId="despacho">
+                      <DespachoPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/kardex"
+                  element={
+                    <ProtectedModuleRoute moduloId="kardex">
+                      <KardexPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/presupuesto"
+                  element={
+                    <ProtectedModuleRoute moduloId="presupuesto">
+                      <PresupuestoPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/cortes"
+                  element={
+                    <ProtectedModuleRoute moduloId="cortes">
+                      <CortesPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/auditoria"
+                  element={
+                    <ProtectedModuleRoute moduloId="auditoria">
+                      <AuditoriaPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/reportes"
+                  element={
+                    <ProtectedModuleRoute moduloId="reportes">
+                      <ReportesPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/usuarios"
+                  element={
+                    <ProtectedModuleRoute moduloId="usuarios">
+                      <UsuariosPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/permisos"
+                  element={
+                    <ProtectedModuleRoute moduloId="permisos">
+                      <PermisosPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/roles"
+                  element={
+                    <ProtectedModuleRoute moduloId="roles">
+                      <RolesPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/areas"
+                  element={
+                    <ProtectedModuleRoute moduloId="areas">
+                      <AreasPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
+                <Route
+                  path="/coberturas-acceso"
+                  element={
+                    <ProtectedModuleRoute moduloId="coberturas-acceso">
+                      <CoberturasAccesoPage />
+                    </ProtectedModuleRoute>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>

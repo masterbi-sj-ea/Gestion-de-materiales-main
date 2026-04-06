@@ -7,6 +7,7 @@ import { apiFetch } from '../services/apiClient';
 // Componentes UI
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription } from './ui/alert';
@@ -414,29 +415,29 @@ export default function CrearSolicitudPage() {
     setLoading(true);
     setErrorLocal(null);
 
-    try {
+      try {
       const payload = {
+        idSolicitante: user?.id ? Number(user.id) : null,
         fechaSolicitud,
         estado: 'PENDIENTE',
         nuevoEstado: 'PENDIENTE',
-        area: null,
-        comentario: observaciones || null,
+        area: areaSeleccionada ? (areaSeleccionada.nombre ?? null) : null,
+        comentario: observaciones?.trim() || null,
         idCorteStock: null,
-        idArea: areaSeleccionada ? areaSeleccionada.id : null,
+        idArea: areaSeleccionada ? Number(areaSeleccionada.id) : null,
         idRecurso: idRecurso ? Number(idRecurso) : null,
-        idCentroCosto: idCentroCostoCalculado || (areaSeleccionada ? areaSeleccionada.idCentroCosto : null),
-        ot: ot || null,
+        idCentroCosto: idCentroCostoCalculado ?? (areaSeleccionada ? areaSeleccionada.idCentroCosto ?? null : null),
+        ot: ot?.trim() || null,
         detalle: items.map((it) => ({
           idMaterial: it.idMaterial,
           cantidadSolicitada: it.cantidad,
-          unidadMedida: it.unidadMedida,
-          comentarioLinea: null,
-          idArea: it.idArea ?? (areaSeleccionada ? areaSeleccionada.id : null),
+          unidadMedida: it.unidadMedida ?? null,
+          comentarioLinea: (it as any).comentarioLinea ?? null,
+          idArea: it.idArea ?? (areaSeleccionada ? Number(areaSeleccionada.id) : null),
           idRecurso: it.idRecurso ?? (idRecurso ? Number(idRecurso) : null),
-          areaNombre: it.areaNombre || (areaSeleccionada ? areaSeleccionada.nombre : null),
-          codigoCuenta: it.codigoCuenta || null,
         })),
       };
+      console.log('[FRONT] payload crear solicitud:', payload);
 
       const resp = await apiFetch(
         editId ? `/solicitudes/${editId}` : '/solicitudes',
@@ -558,12 +559,14 @@ export default function CrearSolicitudPage() {
                 </div>
                 <div className="rounded-full bg-slate-50 px-3 py-1 border border-slate-200 flex items-center gap-2">
                   <Tag className="w-3 h-3 text-slate-500" />
-                  <input
-                    placeholder="OT (opcional)"
-                    value={ot}
-                    onChange={(e) => setOt(e.target.value)}
-                    className="border-0 bg-transparent text-[10px] sm:text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-0 w-20 sm:min-w-[90px]"
-                  />
+                  <div className="w-20 sm:min-w-[90px]">
+                    <Input
+                      value={ot}
+                      onChange={(e) => setOt(e.target.value)}
+                      placeholder="OT / Comentario"
+                      className="border-0 bg-transparent text-[10px] sm:text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

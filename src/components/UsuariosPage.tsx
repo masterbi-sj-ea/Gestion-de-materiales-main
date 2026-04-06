@@ -52,6 +52,8 @@ export default function UsuariosPage() {
   const [formRolId, setFormRolId] = useState<string>('');
   const [formAreaId, setFormAreaId] = useState<string>('');
   const [formEstado, setFormEstado] = useState<'activo' | 'inactivo'>('activo');
+  const [formPassword, setFormPassword] = useState('');
+  const [formPasswordConfirm, setFormPasswordConfirm] = useState('');
   const [roles, setRoles] = useState<{ id: number; nombre: string }[]>([]);
   const [areas, setAreas] = useState<{ id: number; nombre: string }[]>([]);
   const [page, setPage] = useState(1);
@@ -138,12 +140,31 @@ export default function UsuariosPage() {
     setFormRolId(usuario?.rolId ? String(usuario.rolId) : '');
     setFormAreaId(usuario?.areaId ? String(usuario.areaId) : '');
     setFormEstado(usuario?.estado || 'activo');
+    setFormPassword('');
+    setFormPasswordConfirm('');
     setDialogOpen(true);
   };
 
   const handleGuardarUsuario = async () => {
     try {
       if (!formNombre || !formEmail) return;
+
+      if (!editingUsuario) {
+        if (!formPassword) {
+          sileo.error('Contrasena requerida', { description: 'Debes ingresar una contrasena para crear el usuario.' });
+          return;
+        }
+
+        if (formPassword.length < 6) {
+          sileo.error('Contrasena muy corta', { description: 'La contrasena debe tener al menos 6 caracteres.' });
+          return;
+        }
+
+        if (formPassword !== formPasswordConfirm) {
+          sileo.error('Contrasenas no coinciden', { description: 'Verifica que ambas contrasenas sean iguales.' });
+          return;
+        }
+      }
 
       if (editingUsuario) {
         await fetch(`${API_BASE_URL}/usuarios/${editingUsuario.id}`, {
@@ -170,7 +191,7 @@ export default function UsuariosPage() {
           body: JSON.stringify({
             nombreCompleto: formNombre,
             email: formEmail,
-            hashPassword: '123456',
+            hashPassword: formPassword,
             activo: formEstado === 'activo',
             idRolPrincipal: formRolId ? Number(formRolId) : null,
             idArea: formAreaId ? Number(formAreaId) : null,
@@ -331,6 +352,8 @@ export default function UsuariosPage() {
                         id="password"
                         type="password"
                         placeholder="••••••••"
+                        value={formPassword}
+                        onChange={(e) => setFormPassword(e.target.value)}
                       />
                     </div>
                     <div className="space-y-2">
@@ -339,6 +362,8 @@ export default function UsuariosPage() {
                         id="password-confirm"
                         type="password"
                         placeholder="••••••••"
+                        value={formPasswordConfirm}
+                        onChange={(e) => setFormPasswordConfirm(e.target.value)}
                       />
                     </div>
                   </div>

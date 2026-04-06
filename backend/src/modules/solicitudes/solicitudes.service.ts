@@ -6,6 +6,7 @@ import PDFDocument from 'pdfkit';
 import { PassThrough } from 'stream';
 import fs from 'fs';
 import path from 'path';
+import { listarPresupuestos, type Presupuesto } from '../presupuestos/presupuestos.service';
 
 export interface SolicitudResumen {
   IdSolicitud: number;
@@ -24,6 +25,12 @@ export interface SolicitudResumen {
   Comentario: string | null;
   TotalItems: number;
   TotalMonto: number;
+  FechaAprobacion?: string | null;
+  EstadoAprobacion?: string | null;
+  ComentarioAprobacion?: string | null;
+  NombreAprobador?: string | null;
+  PresupuestoArea?: number | null;
+  ConsumoAcumulado?: number | null;
 }
 
 export interface SolicitudCabecera {
@@ -68,6 +75,140 @@ export interface SolicitudCompleta {
   detalle: SolicitudDetalle[];
 }
 
+export interface SolicitudMeta {
+  IdSolicitud: number;
+  CodigoSolicitud: string;
+  Estado: string;
+  IdSolicitante: number;
+  FechaAprobacion: string | null;
+  EstadoAprobacion: string | null;
+  ComentarioAprobacion: string | null;
+  NombreAprobador: string | null;
+}
+
+interface SolicitudAprobacionReciente {
+  IdSolicitud: number;
+  FechaAprobacion: string | null;
+  EstadoAprobacion: string | null;
+  ComentarioAprobacion: string | null;
+  NombreAprobador: string | null;
+}
+
+function seleccionarPresupuestoArea(presupuestos: Presupuesto[], idArea: number | null): Presupuesto | null {
+  if (!idArea) {
+    return null;
+  }
+
+  const year = new Date().getFullYear();
+  const month = new Date().getMonth() + 1;
+
+  const candidatos = presupuestos.filter((presupuesto) => presupuesto.IdArea === idArea);
+  if (candidatos.length === 0) {
+    return null;
+  }
+
+  const rankPresupuesto = (presupuesto: Presupuesto) => {
+    const isCurrentMonth = presupuesto.Anio === year && presupuesto.Mes === month;
+    const isCurrentAnnual = presupuesto.Anio === year && presupuesto.Mes == null;
+    const isCurrentYear = presupuesto.Anio === year;
+
+    return [
+      isCurrentMonth ? 1 : 0,
+      isCurrentAnnual ? 1 : 0,
+      isCurrentYear ? 1 : 0,
+      presupuesto.Anio,
+      presupuesto.Mes ?? 0,
+      presupuesto.IdPresupuesto,
+    ];
+  };
+
+  return candidatos.sort((left, right) => {
+    const rankLeft = rankPresupuesto(left);
+    const rankRight = rankPresupuesto(right);
+
+    for (let index = 0; index < rankLeft.length; index += 1) {
+      if (rankLeft[index] !== rankRight[index]) {
+        return rankRight[index] - rankLeft[index];
+      }
+    }
+
+    return 0;
+  })[0];
+}
+
+async function obtenerAprobacionesRecientes(idsSolicitud: number[]): Promise<Map<number, SolicitudAprobacionReciente>> {
+  if (idsSolicitud.length === 0) {
+    return new Map();
+  }
+
+  const pool = await getPool();
+  const request = pool.request();
+  const placeholders = idsSolicitud.map((idSolicitud, index) => {
+    const paramName = `IdSolicitud${index}`;
+    request.input(paramName, sql.Int, idSolicitud);
+    return `@${paramName}`;
+  });
+
+  const result = await request.query<SolicitudAprobacionReciente>(`
+    WITH UltimaAprobacion AS (
+      SELECT
+        a.IdSolicitud,
+        a.FechaAprobacion,
+        a.Estado AS EstadoAprobacion,
+        a.Comentario AS ComentarioAprobacion,
+        a.IdAprobador,
+        ROW_NUMBER() OVER (
+          PARTITION BY a.IdSolicitud
+          ORDER BY a.FechaAprobacion DESC, a.IdAprobacion DESC
+        ) AS rn
+      FROM dbo.Aprobaciones a
+      WHERE a.IdSolicitud IN (${placeholders.join(', ')})
+    )
+    SELECT
+      ua.IdSolicitud,
+      ua.FechaAprobacion,
+      ua.EstadoAprobacion,
+      ua.ComentarioAprobacion,
+      u.NombreCompleto AS NombreAprobador
+    FROM UltimaAprobacion ua
+    LEFT JOIN dbo.Usuarios u
+      ON u.IdUsuario = ua.IdAprobador
+    WHERE ua.rn = 1;
+  `);
+
+  return new Map(result.recordset.map((row) => [row.IdSolicitud, row]));
+}
+
+async function enriquecerSolicitudes(solicitudes: SolicitudResumen[]): Promise<SolicitudResumen[]> {
+  if (solicitudes.length === 0) {
+    return solicitudes;
+  }
+
+  const idsSolicitud = solicitudes.map((solicitud) => solicitud.IdSolicitud);
+  const [aprobacionesRecientes, presupuestos] = await Promise.all([
+    obtenerAprobacionesRecientes(idsSolicitud),
+    listarPresupuestos().catch((error) => {
+      console.error('No se pudo obtener el presupuesto para enriquecer solicitudes', error);
+      return [] as Presupuesto[];
+    }),
+  ]);
+
+  return solicitudes.map((solicitud) => {
+    const aprobacion = aprobacionesRecientes.get(solicitud.IdSolicitud);
+    const presupuesto = seleccionarPresupuestoArea(presupuestos, solicitud.IdArea ?? null);
+
+    return {
+      ...solicitud,
+      FechaAprobacion: aprobacion?.FechaAprobacion ?? null,
+      EstadoAprobacion: aprobacion?.EstadoAprobacion ?? null,
+      ComentarioAprobacion: aprobacion?.ComentarioAprobacion ?? null,
+      NombreAprobador: aprobacion?.NombreAprobador ?? null,
+      PresupuestoArea: presupuesto ? Number(presupuesto.Presupuesto ?? 0) : null,
+      ConsumoAcumulado: presupuesto ? Number(presupuesto.Consumo ?? 0) : null,
+    };
+  });
+}
+
 export interface CrearSolicitudDetalleInput {
   idMaterial: number;
   cantidadSolicitada: number;
@@ -87,6 +228,7 @@ export interface CrearSolicitudInput {
   idArea?: number | null;
   idRecurso?: number | null;
   idCentroCosto?: number | null;
+  ot?: string | null;
   detalle: CrearSolicitudDetalleInput[];
 }
 
@@ -99,6 +241,7 @@ export interface ActualizarSolicitudInput {
   idArea?: number | null;
   idRecurso?: number | null;
   idCentroCosto?: number | null;
+  ot?: string | null;
   detalle: CrearSolicitudDetalleInput[];
 }
 
@@ -117,8 +260,8 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
   tvp.columns.add('IdMaterial', sql.Int);
   tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
-  tvp.columns.add('UnidadMedida', sql.NVarChar(50));
-  tvp.columns.add('ComentarioLinea', sql.NVarChar(255));
+  tvp.columns.add('UnidadMedida', sql.NVarChar(100));
+  tvp.columns.add('ComentarioLinea', sql.NVarChar(510));
   tvp.columns.add('IdArea', sql.Int);
   tvp.columns.add('IdRecurso', sql.Int);
 
@@ -143,7 +286,22 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   request.input('IdCorteStock', sql.Int, input.idCorteStock ?? null);
   request.input('IdArea', sql.Int, input.idArea ?? null);
   request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
+  request.input('OT', sql.NVarChar(100), input.ot ?? null);
   request.input('Detalle', tvp as any);
+
+  // Log temporal para depuración: muestra la cabecera que se enviará al SP
+  try {
+    console.log('[BACK] crearSolicitud cabecera:', {
+      idSolicitante: input.idSolicitante,
+      area: input.area,
+      comentario: input.comentario,
+      idArea: input.idArea,
+      idCentroCosto: input.idCentroCosto,
+      ot: input.ot,
+    });
+  } catch (e) {
+    console.error('[BACK] error log crearSolicitud cabecera', e);
+  }
 
   const result = await request.execute<{ IdSolicitud: number; CodigoSolicitud: string }>('sp_CrearSolicitudMaterial');
 
@@ -180,8 +338,8 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
   const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
   tvp.columns.add('IdMaterial', sql.Int);
   tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
-  tvp.columns.add('UnidadMedida', sql.NVarChar(50));
-  tvp.columns.add('ComentarioLinea', sql.NVarChar(255));
+  tvp.columns.add('UnidadMedida', sql.NVarChar(100));
+  tvp.columns.add('ComentarioLinea', sql.NVarChar(510));
   tvp.columns.add('IdArea', sql.Int);
   tvp.columns.add('IdRecurso', sql.Int);
 
@@ -198,13 +356,14 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
 
   const request = pool.request();
   request.input('IdSolicitud', sql.Int, input.idSolicitud);
-  request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
-  request.input('NuevoEstado', sql.NVarChar(30), input.nuevoEstado ?? 'PENDIENTE');
-  request.input('Area', sql.NVarChar(100), input.area ?? null);
-  request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
-  request.input('IdArea', sql.Int, input.idArea ?? null);
-  request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
-  request.input('Detalle', tvp as any);
+request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
+request.input('NuevoEstado', sql.NVarChar(30), input.nuevoEstado ?? null);
+request.input('Area', sql.NVarChar(100), input.area ?? null);
+request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
+request.input('IdArea', sql.Int, input.idArea ?? null);
+request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
+request.input('OT', sql.NVarChar(100), input.ot ?? null);
+request.input('Detalle', tvp as any);
 
   await request.execute('sp_ActualizarSolicitudMaterial');
 }
@@ -216,13 +375,15 @@ export async function listarSolicitudes(params: {
   fechaDesde?: string;
   fechaHasta?: string;
 } = {}): Promise<SolicitudResumen[]> {
-  return callSpMany<SolicitudResumen>('sp_ListarSolicitudesMaterial', {
+  const solicitudes = await callSpMany<SolicitudResumen>('sp_ListarSolicitudesMaterial', {
     IdSolicitante: params.idSolicitante ?? null,
     Estado: params.estado ?? null,
     IdArea: params.idArea ?? null,
     FechaDesde: params.fechaDesde ?? null,
     FechaHasta: params.fechaHasta ?? null,
   });
+
+  return enriquecerSolicitudes(solicitudes);
 }
 
 export async function obtenerSolicitud(idSolicitud: number): Promise<SolicitudCompleta> {
@@ -242,32 +403,122 @@ export async function obtenerSolicitud(idSolicitud: number): Promise<SolicitudCo
   };
 }
 
+export async function obtenerSolicitudMeta(idSolicitud: number): Promise<SolicitudMeta | null> {
+  const pool = await getPool();
+  const request = pool.request();
+  request.input('IdSolicitud', sql.Int, idSolicitud);
+
+  const result = await request.query<SolicitudMeta>(`
+    SELECT
+      s.IdSolicitud,
+      s.CodigoSolicitud,
+      s.Estado,
+      s.IdSolicitante,
+      ap.FechaAprobacion,
+      ap.EstadoAprobacion,
+      ap.ComentarioAprobacion,
+      ap.NombreAprobador
+    FROM dbo.SolicitudesMaterial s
+    OUTER APPLY (
+      SELECT TOP 1
+        a.FechaAprobacion,
+        a.Estado AS EstadoAprobacion,
+        a.Comentario AS ComentarioAprobacion,
+        u.NombreCompleto AS NombreAprobador
+      FROM dbo.Aprobaciones a
+      LEFT JOIN dbo.Usuarios u
+        ON u.IdUsuario = a.IdAprobador
+      WHERE a.IdSolicitud = s.IdSolicitud
+      ORDER BY a.FechaAprobacion DESC, a.IdAprobacion DESC
+    ) ap
+    WHERE s.IdSolicitud = @IdSolicitud;
+  `);
+
+  return result.recordset[0] ?? null;
+}
+
 export async function registrarAprobacionSolicitud(input: {
   idSolicitud: number;
   idAprobador: number;
   estado: 'APROBADA' | 'RECHAZADA';
   comentario?: string | null;
 }): Promise<void> {
-  await callSpOne('sp_RegistrarAprobacionSolicitud', {
-    IdSolicitud: input.idSolicitud,
-    IdAprobador: input.idAprobador,
-    Estado: input.estado,
-    Comentario: input.comentario ?? null,
-  });
+  const comentarioNormalizado = typeof input.comentario === 'string' ? input.comentario.trim() : '';
+  const comentarioFinal = comentarioNormalizado.length > 0 ? comentarioNormalizado : null;
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+  let transactionOpen = false;
+  let solicitudBloqueada: Pick<SolicitudMeta, 'CodigoSolicitud' | 'Estado' | 'IdSolicitante'> | null = null;
 
-  // Notificar al solicitante
-  if (input.estado === 'APROBADA') {
+  try {
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    transactionOpen = true;
+
+    const lockRequest = new sql.Request(transaction);
+    lockRequest.input('IdSolicitud', sql.Int, input.idSolicitud);
+    const lockResult = await lockRequest.query<Pick<SolicitudMeta, 'CodigoSolicitud' | 'Estado' | 'IdSolicitante'>>(`
+      SELECT
+        s.CodigoSolicitud,
+        s.Estado,
+        s.IdSolicitante
+      FROM dbo.SolicitudesMaterial s WITH (UPDLOCK, HOLDLOCK)
+      WHERE s.IdSolicitud = @IdSolicitud;
+    `);
+
+    solicitudBloqueada = lockResult.recordset[0] ?? null;
+
+    if (!solicitudBloqueada) {
+      throw new Error('Solicitud no encontrada');
+    }
+
+    if (String(solicitudBloqueada.Estado || '').trim().toUpperCase() !== 'PENDIENTE') {
+      throw new Error(`La solicitud ${solicitudBloqueada.CodigoSolicitud} ya no está pendiente y no puede procesarse nuevamente.`);
+    }
+
+    const writeRequest = new sql.Request(transaction);
+    writeRequest.input('IdSolicitud', sql.Int, input.idSolicitud);
+    writeRequest.input('IdAprobador', sql.Int, input.idAprobador);
+    writeRequest.input('Estado', sql.NVarChar(30), input.estado);
+    writeRequest.input('Comentario', sql.NVarChar(500), comentarioFinal);
+    await writeRequest.query(`
+      INSERT INTO dbo.Aprobaciones (
+        IdSolicitud,
+        IdAprobador,
+        FechaAprobacion,
+        Estado,
+        Comentario
+      )
+      VALUES (
+        @IdSolicitud,
+        @IdAprobador,
+        SYSDATETIME(),
+        @Estado,
+        @Comentario
+      );
+
+      UPDATE dbo.SolicitudesMaterial
+      SET Estado = @Estado
+      WHERE IdSolicitud = @IdSolicitud;
+    `);
+
+    await transaction.commit();
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error('Error al revertir transacción de aprobación', rollbackError);
+      }
+    }
+    throw error;
+  }
+
+  if (input.estado === 'APROBADA' && solicitudBloqueada?.IdSolicitante) {
     try {
-      // Obtenemos el código de la solicitud para el toast
-      const pool = await getPool();
-      const res = await pool.request()
-        .input('id', sql.Int, input.idSolicitud)
-        .query('SELECT CodigoSolicitud FROM SolicitudesMaterial WHERE IdSolicitud = @id');
-      const codigo = res.recordset[0]?.CodigoSolicitud;
-
-      io.emit('solicitud_aprobada', {
+      io.to(`user:${solicitudBloqueada.IdSolicitante}`).emit('solicitud_aprobada', {
         id: input.idSolicitud,
-        codigo: codigo || `#${input.idSolicitud}`
+        codigo: solicitudBloqueada.CodigoSolicitud || `#${input.idSolicitud}`,
       });
     } catch (err) {
       console.error('Error emitiendo socket solicitud_aprobada:', err);
@@ -299,11 +550,13 @@ export async function actualizarEstadoSolicitud(idSolicitud: number, nuevoEstado
 
 export async function registrarDespachoSolicitud(input: {
   idSolicitud: number;
+  idUsuarioDespacho: number;
   nuevoEstado?: string;
   detalle: { idMaterial: number; cantidadAprobada: number; comentarioLinea?: string | null }[];
 }): Promise<void> {
   await callSpOne('sp_RegistrarDespachoSolicitud', {
     IdSolicitud: input.idSolicitud,
+    IdUsuarioDespacho: input.idUsuarioDespacho,
     NuevoEstado: input.nuevoEstado ?? 'DESPACHADA',
     DetalleDesp: {
       type: 'TDespachoSolicitudDetalle',
@@ -325,15 +578,34 @@ function dibujarLogoPlaceholder(doc: any, x: number, y: number) {
   doc.text("Extraceite", x, y + 40, { width: 40, align: "center" });
 }
 
+type SolicitudPdfCabecera = {
+  IdSolicitud: number;
+  CodigoSolicitud: string;
+  FechaSolicitud: string;
+  FechaSolicitudTexto: string;
+  NumeroSolicitudCorta: string;
+  Estado: string;
+  NombreSolicitante: string;
+  AreaNombre: string | null;
+  CodigoCC: string | null;
+  IdArea: number | null;
+  OT?: string | null;
+  NombreAprobador: string | null;
+};
+
 export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThrough> {
   const pool = await getPool();
 
   // 1. Obtener datos de la solicitud
-  const query = `
+ const query = `
     SELECT 
       s.IdSolicitud,
       s.CodigoSolicitud,
       s.FechaSolicitud,
+      s.OT AS OT,
+      CONVERT(VARCHAR(10), CAST(s.FechaSolicitud AS DATE), 103) AS FechaSolicitudTexto,
+      RIGHT('000000' + CAST(s.IdSolicitud AS VARCHAR(6)), 6) AS NumeroSolicitudCorta,
+      s.Estado,
       u.NombreCompleto AS NombreSolicitante,
       COALESCE(a.Nombre, s.Area) AS AreaNombre,
       COALESCE(
@@ -341,13 +613,34 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
         a.Codigo,
         (SELECT TOP 1 arc.CodigoCuenta 
          FROM AreaRecursoCuenta arc 
-         WHERE arc.IdArea = s.IdArea AND arc.IdRecurso = 1 AND ISNULL(arc.Activo, 1) = 1)
+         WHERE arc.IdArea = s.IdArea 
+           AND arc.IdRecurso = 1 
+           AND ISNULL(arc.Activo, 1) = 1)
       ) AS CodigoCC,
-      s.IdArea
+      s.IdArea,
+      ap.NombreAprobador
     FROM SolicitudesMaterial s
-    JOIN Usuarios u ON s.IdSolicitante = u.IdUsuario
-    LEFT JOIN Areas a ON s.IdArea = a.IdArea
-    LEFT JOIN CentrosCosto cc ON cc.IdCentroCosto = COALESCE(s.IdCentroCosto, a.IdCentroCosto)
+    JOIN Usuarios u 
+      ON s.IdSolicitante = u.IdUsuario
+    LEFT JOIN Areas a 
+      ON s.IdArea = a.IdArea
+    LEFT JOIN CentrosCosto cc 
+      ON cc.IdCentroCosto = COALESCE(s.IdCentroCosto, a.IdCentroCosto)
+    OUTER APPLY (
+  SELECT TOP 1 
+    uap.NombreCompleto AS NombreAprobador
+  FROM dbo.Aprobaciones ap
+  INNER JOIN dbo.Usuarios uap
+    ON uap.IdUsuario = ap.IdAprobador
+  INNER JOIN dbo.UsuariosRoles ur
+    ON ur.IdUsuario = uap.IdUsuario
+  INNER JOIN dbo.Roles r
+    ON r.IdRol = ur.IdRol
+  WHERE ap.IdSolicitud = s.IdSolicitud
+    AND ap.Estado = 'APROBADA'
+    AND r.Nombre = 'Jefe de Producción'
+  ORDER BY ap.FechaAprobacion DESC, ap.IdAprobacion DESC
+) ap
     WHERE s.IdSolicitud = @id
   `;
 
@@ -359,7 +652,7 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     throw new Error('Solicitud no encontrada');
   }
 
-  const cab = cabeceraResult.recordset[0];
+  const cab = cabeceraResult.recordset[0] as SolicitudPdfCabecera;
 
   const queryDetalle = `
   SELECT 
@@ -430,7 +723,7 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     doc.save().fillColor(color).rect(x, y, w, h).fill().restore();
     doc.rect(x, y, w, h).stroke();
   };
-  const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("es-NI") : "";
+  const fmtDate = (texto: any) => texto ? String(texto) : "";
 
   const drawRequisa = (startY: number) => {
     // Elevamos todo substancialmente reduciendo el startY aquí
@@ -468,27 +761,24 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     doc.text("SOLICITUD DE PEDIDO A BODEGA EXTRACEITE, S.A.", left + 60, titleY, { align: 'center', width: contentW - 140 });
     
     // N° Number in Red / Dark Pink
-    const numDespacho = String(cab.CodigoSolicitud).replace(/\D/g, '').slice(-6) || '000000';
-    doc.font("Helvetica").fontSize(14).fillColor("#a13854"); // Color rojo/granate similar a la imagen
-    doc.text(`Nº  ${numDespacho}`, right - 110, titleY, { align: 'right', width: 110 });
+    const numeroSolicitud = cab.NumeroSolicitudCorta || '000000';
+doc.font("Helvetica").fontSize(14).fillColor("#a13854");
+doc.text(`N°  ${numeroSolicitud}`, right - 110, titleY, { align: 'right', width: 110 });
 
-    doc.fillColor("black");
+doc.fillColor("black");
 
-    // Push header down slightly to clear the taller logo
-    const headerTextY = titleY + 45; 
-    
-    // FECHA
-    doc.font("Helvetica").fontSize(9);
-    doc.text("FECHA:", left, headerTextY);
-    // Movemos la fecha un poquito abajo para equilibrar
-    doc.text(fmtDate(cab.FechaSolicitud), left + 45, headerTextY - 2);
-    doc.moveTo(left + 35, headerTextY + 10).lineTo(left + 220, headerTextY + 10).stroke();
+const headerTextY = titleY + 45;
 
-    // REQUISA DE SALIDA Nº
-    doc.text("REQUISA DE SALIDA Nº:", right - 280, headerTextY);
-    // Bajamos el texto del codigo de solicitud
-    doc.text(cab.CodigoSolicitud, right - 150, headerTextY - 2);
-    doc.moveTo(right - 155, headerTextY + 10).lineTo(right, headerTextY + 10).stroke();
+// FECHA
+doc.font("Helvetica").fontSize(9);
+doc.text("FECHA:", left, headerTextY);
+doc.text(fmtDate(cab.FechaSolicitudTexto), left + 45, headerTextY - 2);
+doc.moveTo(left + 35, headerTextY + 10).lineTo(left + 220, headerTextY + 10).stroke();
+
+// ESTADO
+doc.text("ESTADO:", right - 220, headerTextY);
+doc.text(String(cab.Estado || "PENDIENTE"), right - 150, headerTextY - 2);
+doc.moveTo(right - 155, headerTextY + 10).lineTo(right, headerTextY + 10).stroke();
 
     const tableY = headerTextY + 15; // Reducido algo de espacio aquí también
     const headerH = 22;
@@ -572,8 +862,10 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
         drawCellTextFit(it.Descripcion, left + wCodigo + 5, y, wDesc - 10, 'left', true);
         drawCellTextFit(it.UnidadMedida, left + wCodigo + wDesc, y, wUM, 'center');
         drawCellTextFit(String(it.CantidadSolicitada), left + wCodigo + wDesc + wUM, y, wCant, 'center');
+        // Mostrar OT en ACTIVIDAD si existe y no es vacío; si no, usar la actividad del detalle o el nombre del área
+        const actividadValor = (cab.OT && String(cab.OT).trim() !== '') ? String(cab.OT) : (it.Actividad || cab.AreaNombre || '');
         drawCellTextFit(
-          it.Actividad || cab.AreaNombre || '',
+          actividadValor,
           left + wCodigo + wDesc + wUM + wCant + 2,
           y,
           wAct - 4,
@@ -614,20 +906,20 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     doc.font("Helvetica").fontSize(8).fillColor("black");
     doc.text("FR-F-BD-022", left + 2, tableBottomY + 3);
 
-    const footerY = tableBottomY + 15;
+    const sigY = tableBottomY + 45;
     doc.font("Helvetica").fontSize(9);
-    doc.text("Hora de inicio de despacho: ____________________________", left, footerY);
-    doc.text("Hora de finalización de despacho: ____________________________", right - 280, footerY);
-
-    const sigY = footerY + 36;
     
-    doc.moveTo(left + 25, sigY).lineTo(left + 200, sigY).stroke();
-    doc.text("Autorizado por", left + 25, sigY + 5, { width: 175, align: 'center' });
-    doc.text("Nombre y firma del jefe de área", left + 25, sigY + 15, { width: 175, align: 'center' });
+    const nombreAprobador = String(cab.NombreAprobador || 'PENDIENTE DE APROBACIÓN');
 
-    doc.moveTo(right - 200, sigY).lineTo(right - 25, sigY).stroke();
-    doc.text("Nombre y firma", right - 200, sigY + 5, { width: 175, align: 'center' });
-    doc.text("de la persona que retira", right - 200, sigY + 15, { width: 175, align: 'center' });
+doc.moveTo(left + 25, sigY).lineTo(left + 200, sigY).stroke();
+doc.font("Helvetica").fontSize(9);
+doc.text(nombreAprobador, left + 25, sigY - 12, { width: 175, align: 'center' });
+doc.text("Autorizado por", left + 25, sigY + 5, { width: 175, align: 'center' });
+doc.text("Jefe de Producción", left + 25, sigY + 15, { width: 175, align: 'center' });
+
+doc.moveTo(right - 200, sigY).lineTo(right - 25, sigY).stroke();
+doc.text("Retirado por", right - 200, sigY + 5, { width: 175, align: 'center' });
+doc.text("Nombre y firma", right - 200, sigY + 15, { width: 175, align: 'center' });
 
   };
 
