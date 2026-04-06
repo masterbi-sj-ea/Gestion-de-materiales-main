@@ -257,3 +257,29 @@ html {
   --sileo-state-action: #38bdf8;  /* sky-400 */
 }
 
+.sidebar-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(59, 130, 246, 0.7) rgba(226, 232, 240, 0.75);
+  scrollbar-gutter: stable;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar {
+  width: 12px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.75);
+  border-radius: 999px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.95) 0%, rgba(59, 130, 246, 0.95) 100%);
+  border: 2px solid rgba(248, 250, 252, 0.95);
+  border-radius: 999px;
+  min-height: 48px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 1) 0%, rgba(29, 78, 216, 1) 100%);
+  border: 2px solid rgba(248, 250, 252, 0.95);
+}

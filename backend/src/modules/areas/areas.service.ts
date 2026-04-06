@@ -12,8 +12,34 @@ export interface Area {
   NombreCuenta?: string | null;
 }
 
+interface AccesoAreaResult {
+  TieneAcceso?: boolean | number | null;
+}
+
 export async function listarAreas(): Promise<Area[]> {
   return callSpMany<Area>('sp_ListarAreas');
+}
+
+export async function listarAreasPermitidasPorUsuario(idUsuario: number): Promise<Area[]> {
+  return callSpMany<Area>('sp_ListarAreasPermitidasPorUsuario', { IdUsuario: idUsuario });
+}
+
+export async function usuarioTieneAccesoArea(idUsuario: number, idArea: number): Promise<boolean> {
+  try {
+    const result = await callSpOne<AccesoAreaResult>('sp_UsuarioTieneAccesoArea', {
+      IdUsuario: idUsuario,
+      IdArea: idArea,
+    });
+
+    return Number(result?.TieneAcceso ?? 0) === 1;
+  } catch (error) {
+    try {
+      const areas = await listarAreasPermitidasPorUsuario(idUsuario);
+      return areas.some((area) => Number(area?.IdArea ?? 0) === idArea);
+    } catch {
+      return false;
+    }
+  }
 }
 
 export async function crearArea(input: {

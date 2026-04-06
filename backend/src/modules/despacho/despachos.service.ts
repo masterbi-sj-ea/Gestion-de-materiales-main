@@ -453,6 +453,7 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
       d.FechaDespacho,
       d.Observaciones,
       s.CodigoSolicitud,
+      s.OT AS OT,
       s.FechaSolicitud,
       u_sol.NombreCompleto AS NombreSolicitante,
       u_desp.NombreCompleto AS NombreDespachador,
@@ -698,16 +699,18 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
         drawCellTextFit(it.Descripcion, left + wCodigo + 5, curY, wDesc - 10, 'left', true, 9, 5);
         drawCellTextFit(it.UnidadMedida, left + wCodigo + wDesc, curY, wUM, 'center', true, 8.5, 5.5);
         drawCellTextFit(String(it.CantidadDespachada ?? ''), left + wCodigo + wDesc + wUM, curY, wCant, 'center');
-        drawCellTextFit(
-          it.ActividadLinea || cab?.AreaNombre || '',
-          left + wCodigo + wDesc + wUM + wCant + 2,
-          curY,
-          wAct - 4,
-          'center',
-          true,
-          8.5,
-          4.5,
-        );
+          // Mostrar OT en ACTIVIDAD si existe y no es vacío; si no, usar la actividad del detalle o el nombre del área
+          const actividadValor = (cab?.OT && String(cab.OT).trim() !== '') ? String(cab.OT) : (it.ActividadLinea || cab?.AreaNombre || '');
+          drawCellTextFit(
+            actividadValor,
+            left + wCodigo + wDesc + wUM + wCant + 2,
+            curY,
+            wAct - 4,
+            'center',
+            true,
+            8.5,
+            4.5,
+          );
         drawCellTextFit(
           it.CodigoCuentaLinea || cab?.CodigoCC || '',
           left + wCodigo + wDesc + wUM + wCant + wAct + 2,
@@ -757,9 +760,13 @@ export async function generarPdfDespacho(idDespacho: number): Promise<PassThroug
     const signW = 150;
     const gap = (contentW - (signW * 3)) / 2;
 
-    doc.moveTo(left, signY).lineTo(left + signW, signY).stroke();
-    doc.text("Entrega bodega", left, signY + 5, { width: signW, align: "center" });
-    doc.text("Nombre y firma", left, signY + 15, { width: signW, align: "center" });
+    const nombreDespachador = String(cab?.NombreDespachador || '');
+
+    doc.moveTo(left + 25, signY).lineTo(left + 200, signY).stroke();
+    doc.font("Helvetica").fontSize(9);
+    doc.text(nombreDespachador, left + 25, signY - 12, { width: 175, align: 'center' });
+    doc.text("Entrega bodega", left + 25, signY + 5, { width: 175, align: 'center' });
+    doc.text("Nombre y firma", left + 25, signY + 15, { width: 175, align: 'center' });
 
     doc.moveTo(left + signW + gap, signY).lineTo(left + signW * 2 + gap, signY).stroke();
     doc.text("Retirado por", left + signW + gap, signY + 5, { width: signW, align: "center" });

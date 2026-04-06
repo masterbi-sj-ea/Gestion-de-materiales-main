@@ -1,1 +1,10 @@
-node_modules
+node_modules/
+.tmp-*
+dist/
+build/
+.env
+backend/.env
+
+backend/cache/
+.tmp-materiales-import-clean/
+backend/imports/*.xlsx

@@ -33,9 +33,9 @@ export const FormularioDestino = memo(function FormularioDestino({
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
             <Label>Área destino</Label>
-            <Select value={idAreaDestino} onValueChange={setIdAreaDestino}>
+            <Select value={idAreaDestino} onValueChange={setIdAreaDestino} disabled={areas.length === 0}>
               <SelectTrigger>
-                <SelectValue placeholder="Seleccionar área" />
+                <SelectValue placeholder={areas.length === 0 ? 'No tienes áreas permitidas' : 'Seleccionar área'} />
               </SelectTrigger>
               <SelectContent>
                 {areas.map((a) => (
@@ -55,7 +55,7 @@ export const FormularioDestino = memo(function FormularioDestino({
                     !idAreaDestino
                       ? 'Selecciona un área primero'
                       : recursos.length === 0
-                        ? 'Sin recursos disponibles'
+                        ? 'Sin recursos permitidos por la cobertura'
                         : 'Seleccionar recurso'
                   }
                 />

@@ -4,6 +4,7 @@ import {
   crearSolicitud,
   listarSolicitudes,
   obtenerSolicitud,
+  obtenerSolicitudMeta,
   actualizarSolicitud,
   registrarAprobacionSolicitud,
   listarAprobacionesPorSolicitud,
@@ -12,6 +13,93 @@ import {
   generarPdfSolicitud,
 } from './solicitudes.service';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
+import { usuarioTieneAccesoArea } from '../areas/areas.service';
+
+const ESTADOS_SOLICITUD_VALIDOS = new Set([
+  'PENDIENTE',
+  'APROBADA',
+  'RECHAZADA',
+  'EN_DESPACHO',
+  'PARCIALMENTE_DESPACHADA',
+  'DESPACHADA',
+]);
+
+const TRANSICIONES_SOLICITUD_PERMITIDAS: Record<string, string[]> = {
+  PENDIENTE: ['APROBADA', 'RECHAZADA'],
+  APROBADA: ['EN_DESPACHO', 'PARCIALMENTE_DESPACHADA', 'DESPACHADA'],
+  EN_DESPACHO: ['PARCIALMENTE_DESPACHADA', 'DESPACHADA'],
+  PARCIALMENTE_DESPACHADA: ['EN_DESPACHO', 'DESPACHADA'],
+};
+
+function normalizarEstadoSolicitud(value: unknown): string {
+  return String(value ?? '').trim().toUpperCase();
+}
+
+function puedeTransicionarSolicitud(estadoActual: string, nuevoEstado: string): boolean {
+  if (estadoActual === nuevoEstado) {
+    return true;
+  }
+
+  return (TRANSICIONES_SOLICITUD_PERMITIDAS[estadoActual] ?? []).includes(nuevoEstado);
+}
+
+function normalizarIdEnteroPositivo(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    return null;
+  }
+
+  return normalized;
+}
+
+async function validarAccesoAreasSolicitud(userId: number, idAreaCabecera: unknown, detalle: any[]): Promise<void> {
+  const idsArea = new Set<number>();
+
+  const idAreaCabeceraNormalizado = normalizarIdEnteroPositivo(idAreaCabecera);
+  if (idAreaCabecera !== null && idAreaCabecera !== undefined && idAreaCabecera !== '' && idAreaCabeceraNormalizado == null) {
+    const error: any = new Error('El área de la solicitud no es válida.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (idAreaCabeceraNormalizado != null) {
+    idsArea.add(idAreaCabeceraNormalizado);
+  }
+
+  for (const linea of detalle) {
+    const idAreaLinea = normalizarIdEnteroPositivo(linea?.idArea);
+    if (idAreaLinea == null) {
+      const error: any = new Error('Cada línea debe tener un Área destino válida (idArea).');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    idsArea.add(idAreaLinea);
+  }
+
+  const idsAreaNoAutorizadas: number[] = [];
+
+  await Promise.all(
+    Array.from(idsArea).map(async (idArea) => {
+      const tieneAcceso = await usuarioTieneAccesoArea(userId, idArea);
+      if (!tieneAcceso) {
+        idsAreaNoAutorizadas.push(idArea);
+      }
+    }),
+  );
+
+  if (idsAreaNoAutorizadas.length > 0) {
+    const error: any = new Error('No tienes autorización para crear solicitudes en esta área.');
+    error.statusCode = 403;
+    error.code = 'AREA_ACCESS_DENIED';
+    error.idsArea = idsAreaNoAutorizadas;
+    throw error;
+  }
+}
 
 export async function crearSolicitudController(req: AuthRequest, res: Response) {
   const userId = req.userId;
@@ -28,6 +116,7 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
     idArea,
     idRecurso,
     idCentroCosto,
+    ot,
     detalle,
   } = req.body || {};
 
@@ -42,6 +131,8 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
   }
 
   try {
+    await validarAccesoAreasSolicitud(userId, idArea, detalle);
+
     const result = await crearSolicitud({
       idSolicitante: userId,
       fechaSolicitud: fechaSolicitud ?? null,
@@ -52,13 +143,14 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
       idArea: idArea ?? null,
       idRecurso: idRecurso ?? null,
       idCentroCosto: idCentroCosto ?? null,
+      ot: ot ?? null,
       detalle: detalle.map((d: any) => ({
         idMaterial: d.idMaterial,
         cantidadSolicitada: d.cantidadSolicitada,
         unidadMedida: d.unidadMedida,
         comentarioLinea: d.comentarioLinea,
-        idArea: d.idArea ?? null,
-        idRecurso: d.idRecurso ?? null,
+        idArea: normalizarIdEnteroPositivo(d.idArea),
+        idRecurso: normalizarIdEnteroPositivo(d.idRecurso),
       })),
     });
 
@@ -104,6 +196,14 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
         code: 'DB_SCHEMA_OUTDATED',
         message:
           'La base de datos tiene un procedimiento desactualizado. sp_CrearSolicitudMaterial todavía referencia dbo.Kardex. Actualiza el procedimiento desde backend/sql/init_db.sql y vuelve a intentar.',
+      });
+    }
+
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({
+        code: error?.code,
+        idsArea: Array.isArray(error?.idsArea) ? error.idsArea : undefined,
+        message: error?.message || 'No fue posible crear la solicitud',
       });
     }
 
@@ -166,6 +266,7 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
     idCentroCosto,
     detalle,
     nuevoEstado,
+    ot,
   } = req.body || {};
 
   if (!Array.isArray(detalle) || !detalle.length) {
@@ -177,6 +278,13 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
   }
 
   try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ message: 'Usuario no autenticado' });
+    }
+
+    await validarAccesoAreasSolicitud(userId, idArea, detalle);
+
     await actualizarSolicitud({
       idSolicitud,
       fechaSolicitud: fechaSolicitud ?? null,
@@ -185,14 +293,15 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
       idArea: idArea ?? null,
       idRecurso: idRecurso ?? null,
       idCentroCosto: idCentroCosto ?? null,
+      ot: ot ?? null,
       area: null,
       detalle: detalle.map((d: any) => ({
         idMaterial: d.idMaterial,
         cantidadSolicitada: d.cantidadSolicitada,
         unidadMedida: d.unidadMedida,
         comentarioLinea: d.comentarioLinea,
-        idArea: d.idArea ?? null,
-        idRecurso: d.idRecurso ?? null,
+        idArea: normalizarIdEnteroPositivo(d.idArea),
+        idRecurso: normalizarIdEnteroPositivo(d.idRecurso),
       })),
     });
 
@@ -208,6 +317,15 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
     return res.status(200).json({ message: 'Solicitud actualizada correctamente' });
   } catch (error: any) {
     console.error('Error en actualizarSolicitudController', error);
+
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({
+        code: error?.code,
+        idsArea: Array.isArray(error?.idsArea) ? error.idsArea : undefined,
+        message: error?.message || 'Error al actualizar solicitud',
+      });
+    }
+
     return res.status(500).json({ message: error?.message || 'Error al actualizar solicitud' });
   }
 }
@@ -221,29 +339,47 @@ export async function registrarAprobacionSolicitudController(req: AuthRequest, r
   const { id } = req.params;
   const { estado, comentario } = req.body || {};
   const idSolicitud = Number(id);
+  const estadoNormalizado = normalizarEstadoSolicitud(estado);
+  const comentarioNormalizado =
+    typeof comentario === 'string' && comentario.trim().length > 0 ? comentario.trim() : null;
 
   if (!idSolicitud || Number.isNaN(idSolicitud)) {
     return res.status(400).json({ message: 'Id de solicitud inválido' });
   }
 
-  if (estado !== 'APROBADA' && estado !== 'RECHAZADA') {
+  if (estadoNormalizado !== 'APROBADA' && estadoNormalizado !== 'RECHAZADA') {
     return res.status(400).json({ message: 'Estado inválido, use APROBADA o RECHAZADA' });
   }
 
+  if (estadoNormalizado === 'RECHAZADA' && !comentarioNormalizado) {
+    return res.status(400).json({ message: 'Debes ingresar un comentario al rechazar la solicitud' });
+  }
+
   try {
+    const solicitudMeta = await obtenerSolicitudMeta(idSolicitud);
+    if (!solicitudMeta) {
+      return res.status(404).json({ message: 'Solicitud no encontrada' });
+    }
+
+    if (normalizarEstadoSolicitud(solicitudMeta.Estado) !== 'PENDIENTE') {
+      return res.status(409).json({
+        message: `La solicitud ${solicitudMeta.CodigoSolicitud} ya no está pendiente y no puede volver a aprobarse o rechazarse.`,
+      });
+    }
+
     await registrarAprobacionSolicitud({
       idSolicitud,
       idAprobador: userId,
-      estado,
-      comentario: comentario ?? null,
+      estado: estadoNormalizado as 'APROBADA' | 'RECHAZADA',
+      comentario: comentarioNormalizado,
     });
 
     try {
       await registrarAuditoria(userId, 'APROBAR_SOLICITUD', {
         modulo: 'Solicitudes',
         idSolicitud,
-        estado,
-        comentario,
+        estado: estadoNormalizado,
+        comentario: comentarioNormalizado,
       });
     } catch (auditError) {
       console.error('Error al registrar auditoría APROBAR_SOLICITUD', auditError);
@@ -252,6 +388,15 @@ export async function registrarAprobacionSolicitudController(req: AuthRequest, r
     return res.status(200).json({ message: 'Aprobación registrada correctamente' });
   } catch (error: any) {
     console.error('Error en registrarAprobacionSolicitudController', error);
+
+    const message = String(error?.message || '').trim();
+    if (message === 'Solicitud no encontrada') {
+      return res.status(404).json({ message });
+    }
+
+    if (message.includes('ya no está pendiente')) {
+      return res.status(409).json({ message });
+    }
 
     const sqlInfo = error?.originalError?.info;
     const sqlNumber: number | undefined =
@@ -324,23 +469,40 @@ export async function actualizarEstadoSolicitudController(req: AuthRequest, res:
   const { id } = req.params;
   const { estado } = req.body || {};
   const idSolicitud = Number(id);
+  const estadoNormalizado = normalizarEstadoSolicitud(estado);
 
   if (!idSolicitud || Number.isNaN(idSolicitud)) {
     return res.status(400).json({ message: 'Id de solicitud inválido' });
   }
 
-  if (!estado) {
+  if (!estadoNormalizado) {
     return res.status(400).json({ message: 'estado es requerido' });
   }
 
   try {
-    await actualizarEstadoSolicitud(idSolicitud, estado);
+    if (!ESTADOS_SOLICITUD_VALIDOS.has(estadoNormalizado)) {
+      return res.status(400).json({ message: 'Estado inválido para la solicitud' });
+    }
+
+    const solicitudMeta = await obtenerSolicitudMeta(idSolicitud);
+    if (!solicitudMeta) {
+      return res.status(404).json({ message: 'Solicitud no encontrada' });
+    }
+
+    const estadoActual = normalizarEstadoSolicitud(solicitudMeta.Estado);
+    if (!puedeTransicionarSolicitud(estadoActual, estadoNormalizado)) {
+      return res.status(409).json({
+        message: `No se permite cambiar la solicitud ${solicitudMeta.CodigoSolicitud} de ${estadoActual} a ${estadoNormalizado}.`,
+      });
+    }
+
+    await actualizarEstadoSolicitud(idSolicitud, estadoNormalizado);
 
     try {
       await registrarAuditoria(req.userId ?? null, 'ACTUALIZAR_ESTADO_SOLICITUD', {
         modulo: 'Solicitudes',
         idSolicitud,
-        estado,
+        estado: estadoNormalizado,
       });
     } catch (auditError) {
       console.error('Error al registrar auditoría ACTUALIZAR_ESTADO_SOLICITUD', auditError);
@@ -367,8 +529,24 @@ export async function registrarDespachoSolicitudController(req: AuthRequest, res
   }
 
   try {
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ message: 'Usuario no autenticado' });
+
+    const solicitudMeta = await obtenerSolicitudMeta(idSolicitud);
+    if (!solicitudMeta) {
+      return res.status(404).json({ message: 'Solicitud no encontrada' });
+    }
+
+    const estadoActual = normalizarEstadoSolicitud(solicitudMeta.Estado);
+    if (!['APROBADA', 'EN_DESPACHO', 'PARCIALMENTE_DESPACHADA'].includes(estadoActual)) {
+      return res.status(409).json({
+        message: `La solicitud ${solicitudMeta.CodigoSolicitud} no está lista para despacho.`,
+      });
+    }
+
     await registrarDespachoSolicitud({
       idSolicitud,
+      idUsuarioDespacho: userId,
       nuevoEstado: nuevoEstado || undefined,
       detalle: detalle.map((d: any) => ({
         idMaterial: d.idMaterial,
