@@ -1,11 +1,16 @@
 import { Router } from 'express';
-import { 
-  listarPendientesController, 
+import {
+  listarPendientesController,
   listarDespachadasController,
-  obtenerDetalleController, 
+  obtenerDetalleController,
   registrarDespachoController,
   contarDespachosHoyController,
-  generarPdfController
+  generarPdfController,
+  generarDevolucionPdfController,
+  listarDevolucionesPorDespachoController,
+  obtenerDetalleParaDevolucionController,
+  registrarDevolucionController,
+  anularDevolucionController,
 } from './despachos.controller';
 import { requireAnyModulePermission, requireModulePermission } from '../../middleware/accessControl';
 
@@ -24,5 +29,30 @@ router.post(
 );
 router.get('/metrics/hoy', requireModulePermission('despacho', 'ver'), contarDespachosHoyController);
 router.get('/:id/pdf', requireModulePermission('despacho', 'ver'), generarPdfController);
+router.get('/devoluciones/:id/pdf', requireModulePermission('despacho', 'ver'), generarDevolucionPdfController);
+
+router.get(
+  '/:id/devoluciones',
+  requireModulePermission('despacho', 'editar'),
+  listarDevolucionesPorDespachoController,
+);
+
+router.get(
+  '/:id/devolucion-detalle',
+  requireModulePermission('despacho', 'editar'),
+  obtenerDetalleParaDevolucionController,
+);
+
+router.post(
+  '/:id/devoluciones',
+  requireModulePermission('despacho', 'editar'),
+  registrarDevolucionController,
+);
+
+router.post(
+  '/devoluciones/:id/anular',
+  requireModulePermission('despacho', 'eliminar'),
+  anularDevolucionController,
+);
 
 export default router;

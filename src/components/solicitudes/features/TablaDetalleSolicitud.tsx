@@ -15,6 +15,7 @@ interface ItemSolicitud {
   unidadMedida: string;
   idArea?: number | null;
   idRecurso?: number | null;
+  recursoNombre?: string | null;
   codigoCuenta?: string | null;
   areaNombre?: string | null;
   cantidad: number;
@@ -71,6 +72,7 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
                     <TableHead className="min-w-[100px]">N° Artículo</TableHead>
                     <TableHead className="min-w-[200px]">Descripción</TableHead>
                     <TableHead className="min-w-[150px]">Área Destino</TableHead>
+                    <TableHead className="min-w-[140px]">Recurso</TableHead>
                     <TableHead className="min-w-[80px]">Unidad</TableHead>
                     <TableHead className="text-right min-w-[80px]">Stock</TableHead>
                     <TableHead className="text-right min-w-[120px]">Cantidad</TableHead>
@@ -102,6 +104,7 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
                           {item.codigoCuenta || (item.areaNombre ? 'Sin cuenta asignada' : '')}
                         </div>
                       </TableCell>
+                      <TableCell>{item.recursoNombre || '-'}</TableCell>
                       <TableCell>{item.unidadMedida}</TableCell>
                       <TableCell className={`text-right ${(!item.stockDisponible || item.stockDisponible < item.cantidad) ? 'text-red-500 font-bold' : ''}`}>
                         {item.stockDisponible ?? 0}

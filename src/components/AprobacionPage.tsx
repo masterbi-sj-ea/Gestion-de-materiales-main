@@ -4,12 +4,33 @@ import { usePermisos } from '../contexts/PermisosContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { sileo } from 'sileo';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { CheckCircle, XCircle, Eye, Clock, AlertCircle, DollarSign, Building2, ClipboardList, Package, UserRound } from 'lucide-react';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from './ui/pagination';
+import {
+  CheckCircle,
+  XCircle,
+  Eye,
+  Clock,
+  AlertCircle,
+  DollarSign,
+  FileText,
+  Package,
+  Search,
+  RefreshCw,
+} from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import {
   Table,
@@ -21,28 +42,85 @@ import {
 } from './ui/table';
 import { apiFetch } from '../services/apiClient';
 
+type TabKey = 'pendientes' | 'aprobadas' | 'rechazadas';
+
 interface Solicitud {
   id: string;
   numero: string;
   fecha: string;
+  estado: string;
   area: string;
+  areaResumen?: string;
+  areasDetalle: string[];
+  codigoCuenta?: string | null;
+  codigoCuentaResumen?: string;
+  codigosCuentaDetalle: string[];
+  ot?: string | null;
+  centroCostoCodigo?: string | null;
+  centroCostoNombre?: string | null;
+  comentario?: string | null;
+  rolSolicitante?: string | null;
   solicitante: string;
   items: number;
   total: number;
   presupuestoArea: number;
   consumoAcumulado: number;
-  excedePresupuesto: boolean;
+  presupuestoEstado: 'CONTROLADO' | 'SIN_PRESUPUESTO' | 'EXCEDE_PRESUPUESTO';
+  presupuestoBloqueada: boolean;
+  presupuestoMensaje?: string | null;
+  presupuestoSolicitudActual: number;
+  presupuestoDisponibleDespues: number | null;
   fechaAprobacion?: string;
   estadoAprobacion?: string;
   comentarioAprobacion?: string | null;
   nombreAprobador?: string | null;
 }
 
+function toOptionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function resolvePresupuestoEstado(args: {
+  rawEstado: unknown;
+  presupuestoArea: number;
+  consumoAcumulado: number;
+  solicitudActual: number;
+}): Solicitud['presupuestoEstado'] {
+  const normalized = String(args.rawEstado ?? '').trim().toUpperCase();
+
+  if (
+    normalized === 'CONTROLADO'
+    || normalized === 'SIN_PRESUPUESTO'
+    || normalized === 'EXCEDE_PRESUPUESTO'
+  ) {
+    return normalized as Solicitud['presupuestoEstado'];
+  }
+
+  if (args.presupuestoArea <= 0) {
+    return 'SIN_PRESUPUESTO';
+  }
+
+  return args.consumoAcumulado + args.solicitudActual > args.presupuestoArea
+    ? 'EXCEDE_PRESUPUESTO'
+    : 'CONTROLADO';
+}
+
 interface DetalleSolicitudItem {
+  IdArea?: number | null;
+  AreaNombre?: string | null;
+  IdRecurso?: number | null;
+  RecursoNombre?: string | null;
   NumeroArticulo?: string | null;
   DescripcionArticulo?: string | null;
   CantidadSolicitada?: number | null;
+  CantidadAprobada?: number | null;
   UnidadMedidaMaterial?: string | null;
+  CodigoCuenta?: string | null;
   UltimoPrecioCompra?: number | null;
   EnStock?: number | null;
   GrupoArticulos?: string | null;
@@ -50,19 +128,489 @@ interface DetalleSolicitudItem {
   ComentarioLinea?: string | null;
 }
 
+interface SolicitudCabeceraDetalle {
+  numero: string;
+  fecha: string;
+  area: string;
+  areaResumen?: string;
+  areasDetalle: string[];
+  codigoCuenta?: string | null;
+  codigoCuentaResumen?: string;
+  codigosCuentaDetalle: string[];
+  solicitante: string;
+  comentario?: string | null;
+  estado: string;
+  centroCostoCodigo?: string | null;
+  centroCostoNombre?: string | null;
+  ot?: string | null;
+  catalogoNombre?: string | null;
+}
+
+interface AprobacionHistorialItem {
+  IdAprobacion: number;
+  NombreAprobador: string;
+  EmailAprobador?: string | null;
+  FechaAprobacion: string;
+  Estado: string;
+  Comentario?: string | null;
+}
+
+interface PaginationByTab {
+  pendientes: number;
+  aprobadas: number;
+  rechazadas: number;
+}
+
+interface TotalsByTab {
+  pendientes: number;
+  aprobadas: number;
+  rechazadas: number;
+}
+
+interface TabSummaryMetrics {
+  totalMonto: number;
+  aprobadasHoyCount: number;
+  aprobadasHoyMonto: number;
+}
+
+interface SummaryByTab {
+  pendientes: TabSummaryMetrics;
+  aprobadas: TabSummaryMetrics;
+  rechazadas: TabSummaryMetrics;
+}
+
+interface SolicitudesListResponse {
+  data: any[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary?: Partial<TabSummaryMetrics>;
+}
+
+type LoadMode = 'paged' | 'full';
+
+type SummaryCarrier = {
+  area?: string;
+  areaResumen?: string;
+  areasDetalle?: string[];
+  codigoCuenta?: string | null;
+  codigoCuentaResumen?: string;
+  codigosCuentaDetalle?: string[];
+};
+
+function createEmptyTabSummary(): TabSummaryMetrics {
+  return {
+    totalMonto: 0,
+    aprobadasHoyCount: 0,
+    aprobadasHoyMonto: 0,
+  };
+}
+
+function createEmptySummaryByTab(): SummaryByTab {
+  return {
+    pendientes: createEmptyTabSummary(),
+    aprobadas: createEmptyTabSummary(),
+    rechazadas: createEmptyTabSummary(),
+  };
+}
+
+function isSolicitudesListResponse(value: unknown): value is SolicitudesListResponse {
+  return typeof value === 'object'
+    && value !== null
+    && Array.isArray((value as SolicitudesListResponse).data)
+    && typeof (value as SolicitudesListResponse).total === 'number';
+}
+
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError';
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const maybeError = error as { name?: unknown; message?: unknown };
+    return String(maybeError.name ?? '') === 'AbortError'
+      || String(maybeError.message ?? '').includes('signal is aborted');
+  }
+
+  return false;
+}
+
+function uniqueStrings(values: Array<unknown>): string[] {
+  return Array.from(
+    new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean)),
+  );
+}
+
+function getAreaValues(entry: SummaryCarrier): string[] {
+  if ((entry.areasDetalle?.length ?? 0) > 0) {
+    return uniqueStrings(entry.areasDetalle ?? []);
+  }
+
+  return uniqueStrings([entry.areaResumen ?? null, entry.area ?? null]);
+}
+
+function getCodigoCuentaValues(entry: SummaryCarrier): string[] {
+  if ((entry.codigosCuentaDetalle?.length ?? 0) > 0) {
+    return uniqueStrings(entry.codigosCuentaDetalle ?? []);
+  }
+
+  return uniqueStrings([entry.codigoCuentaResumen ?? null, entry.codigoCuenta ?? null]);
+}
+
+function getPaginationItems(page: number, totalPages: number): Array<number | 'ellipsis'> {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  if (page <= 3) {
+    return [1, 2, 3, 4, 'ellipsis', totalPages];
+  }
+
+  if (page >= totalPages - 2) {
+    return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', totalPages];
+}
+
+function getBadgeToneClasses(tone: 'default' | 'accent' | 'success' = 'default') {
+  if (tone === 'accent') {
+    return 'border-sky-200 bg-sky-50 text-sky-700';
+  }
+
+  if (tone === 'success') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function SummaryBadges({
+  values,
+  emptyLabel,
+  tone = 'default',
+}: {
+  values: string[];
+  emptyLabel: string;
+  tone?: 'default' | 'accent' | 'success';
+}) {
+  if (values.length === 0) {
+    return <span className="text-xs text-muted-foreground">{emptyLabel}</span>;
+  }
+
+  const visibleValues = values.slice(0, 2);
+  const overflow = values.length - visibleValues.length;
+  const className = getBadgeToneClasses(tone);
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {visibleValues.map((value) => (
+        <Badge key={value} variant="outline" className={`max-w-full truncate ${className}`}>
+          {value}
+        </Badge>
+      ))}
+      {overflow > 0 && (
+        <Badge variant="outline" className={className}>
+          +{overflow}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+function TablePagination({
+  page,
+  pageSize,
+  totalItems,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  onPageChange: (nextPage: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-200/80 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-muted-foreground">
+        Mostrando {start}-{end} de {totalItems}
+      </p>
+
+      {totalPages > 1 && (
+        <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#"
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (page > 1) {
+                    onPageChange(page - 1);
+                  }
+                }}
+              />
+            </PaginationItem>
+
+            {getPaginationItems(page, totalPages).map((item, index) => (
+              <PaginationItem key={`${item}-${index}`}>
+                {item === 'ellipsis' ? (
+                  <PaginationEllipsis />
+                ) : (
+                  <PaginationLink
+                    href="#"
+                    isActive={item === page}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onPageChange(item);
+                    }}
+                  >
+                    {item}
+                  </PaginationLink>
+                )}
+              </PaginationItem>
+            ))}
+
+            <PaginationItem>
+              <PaginationNext
+                href="#"
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (page < totalPages) {
+                    onPageChange(page + 1);
+                  }
+                }}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      )}
+    </div>
+  );
+}
+
+function normalizeSearch(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function matchesSolicitudSearch(solicitud: Solicitud, searchTerm: string): boolean {
+  const query = normalizeSearch(searchTerm);
+  if (!query) {
+    return true;
+  }
+
+  const haystack = normalizeSearch([
+    solicitud.numero,
+    solicitud.estado,
+    solicitud.area,
+    solicitud.areaResumen,
+    solicitud.areasDetalle.join(' '),
+    solicitud.codigoCuenta,
+    solicitud.codigoCuentaResumen,
+    solicitud.codigosCuentaDetalle.join(' '),
+    solicitud.ot,
+    solicitud.centroCostoCodigo,
+    solicitud.centroCostoNombre,
+    solicitud.solicitante,
+    solicitud.comentario,
+  ].join(' '));
+
+  return haystack.includes(query);
+}
+
+function fallbackCabeceraFromSolicitud(solicitud: Solicitud): SolicitudCabeceraDetalle {
+  return {
+    numero: solicitud.numero,
+    fecha: solicitud.fecha,
+    area: solicitud.areaResumen ?? solicitud.area,
+    areaResumen: solicitud.areaResumen ?? solicitud.area,
+    areasDetalle: getAreaValues(solicitud),
+    codigoCuenta: solicitud.codigoCuenta ?? null,
+    codigoCuentaResumen: solicitud.codigoCuentaResumen ?? solicitud.codigoCuenta ?? '',
+    codigosCuentaDetalle: getCodigoCuentaValues(solicitud),
+    solicitante: solicitud.solicitante,
+    comentario: solicitud.comentario ?? null,
+    estado: solicitud.estado,
+    centroCostoCodigo: solicitud.centroCostoCodigo ?? null,
+    centroCostoNombre: solicitud.centroCostoNombre ?? null,
+    ot: solicitud.ot ?? null,
+    catalogoNombre: null,
+  };
+}
+
+function mapCabeceraDetalle(cabecera: any, fallback: Solicitud): SolicitudCabeceraDetalle {
+  const base = fallbackCabeceraFromSolicitud(fallback);
+
+  if (!cabecera || typeof cabecera !== 'object') {
+    return base;
+  }
+
+  return {
+    numero: cabecera.CodigoSolicitud ?? base.numero,
+    fecha: cabecera.FechaSolicitud ?? base.fecha,
+    area: cabecera.AreaResumen ?? cabecera.AreaNombre ?? cabecera.Area ?? base.area,
+    areaResumen: cabecera.AreaResumen ?? cabecera.AreaNombre ?? cabecera.Area ?? base.areaResumen,
+    areasDetalle: uniqueStrings([
+      ...(Array.isArray(cabecera.AreasDetalle) ? cabecera.AreasDetalle : []),
+      cabecera.AreaResumen,
+      cabecera.AreaNombre,
+      cabecera.Area,
+      ...base.areasDetalle,
+    ]),
+    codigoCuenta: cabecera.CodigoCuenta ?? base.codigoCuenta ?? null,
+    codigoCuentaResumen: cabecera.CodigoCuentaResumen ?? cabecera.CodigoCuenta ?? base.codigoCuentaResumen ?? '',
+    codigosCuentaDetalle: uniqueStrings([
+      ...(Array.isArray(cabecera.CodigosCuentaDetalle) ? cabecera.CodigosCuentaDetalle : []),
+      cabecera.CodigoCuentaResumen,
+      cabecera.CodigoCuenta,
+      ...base.codigosCuentaDetalle,
+    ]),
+    solicitante: cabecera.NombreSolicitante ?? base.solicitante,
+    comentario: cabecera.Comentario ?? base.comentario,
+    estado: cabecera.Estado ?? base.estado,
+    centroCostoCodigo: cabecera.CentroCostoCodigo ?? base.centroCostoCodigo,
+    centroCostoNombre: cabecera.CentroCostoNombre ?? base.centroCostoNombre,
+    ot: cabecera.OT ?? base.ot,
+    catalogoNombre: cabecera.CatalogoNombre ?? null,
+  };
+}
+
+function mapDetalleSolicitudItem(item: any): DetalleSolicitudItem {
+  return {
+    IdArea: item.IdArea ?? null,
+    AreaNombre: item.AreaNombre ?? null,
+    IdRecurso: item.IdRecurso ?? null,
+    RecursoNombre: item.RecursoNombre ?? null,
+    NumeroArticulo: item.NumeroArticulo ?? item.Codigo ?? null,
+    DescripcionArticulo: item.DescripcionArticulo ?? item.Descripcion ?? null,
+    CantidadSolicitada: Number(item.CantidadSolicitada ?? 0),
+    CantidadAprobada: item.CantidadAprobada == null ? null : Number(item.CantidadAprobada),
+    UnidadMedidaMaterial: item.UnidadMedidaMaterial ?? item.UnidadMedidaDetalle ?? item.UnidadMedida ?? null,
+    CodigoCuenta: item.CodigoCuenta ?? null,
+    UltimoPrecioCompra: item.UltimoPrecioCompra == null ? null : Number(item.UltimoPrecioCompra),
+    EnStock: item.EnStock == null ? null : Number(item.EnStock),
+    GrupoArticulos: item.GrupoArticulos ?? null,
+    UltimaFechaCompra: item.UltimaFechaCompra ?? null,
+    ComentarioLinea: item.ComentarioLinea ?? null,
+  };
+}
+
+function mapAprobacionHistorial(item: any): AprobacionHistorialItem {
+  return {
+    IdAprobacion: Number(item.IdAprobacion ?? 0),
+    NombreAprobador: item.NombreAprobador ?? 'Sin responsable',
+    EmailAprobador: item.EmailAprobador ?? null,
+    FechaAprobacion: item.FechaAprobacion ?? new Date().toISOString(),
+    Estado: item.Estado ?? 'PENDIENTE',
+    Comentario: item.Comentario ?? null,
+  };
+}
+
+function getEstadoBadgeConfig(estado: string | null | undefined) {
+  const normalized = String(estado ?? '').trim().toUpperCase();
+
+  switch (normalized) {
+    case 'APROBADA':
+      return {
+        label: 'Aprobada',
+        className: 'bg-green-100 text-green-700 border border-green-300',
+        icon: CheckCircle,
+      };
+    case 'RECHAZADA':
+      return {
+        label: 'Rechazada',
+        className: 'bg-red-100 text-red-700 border border-red-300',
+        icon: XCircle,
+      };
+    case 'COMPLETADA':
+    case 'DESPACHADA':
+      return {
+        label: 'Completada',
+        className: 'bg-teal-100 text-teal-700 border border-teal-300',
+        icon: CheckCircle,
+      };
+    case 'CERRADA_PARCIAL':
+      return {
+        label: 'Cerrada parcial',
+        className: 'bg-rose-100 text-rose-700 border border-rose-300',
+        icon: XCircle,
+      };
+    case 'PARCIALMENTE_DESPACHADA':
+      return {
+        label: 'Parcialmente despachada',
+        className: 'bg-orange-100 text-orange-700 border border-orange-300',
+        icon: Clock,
+      };
+    case 'EN_DESPACHO':
+      return {
+        label: 'En despacho',
+        className: 'bg-blue-100 text-blue-700 border border-blue-300',
+        icon: Clock,
+      };
+    default:
+      return {
+        label: 'Pendiente',
+        className: 'bg-amber-100 text-amber-700 border border-amber-300',
+        icon: Clock,
+      };
+  }
+}
+
+function getPresupuestoBadgeConfig(estado: Solicitud['presupuestoEstado']) {
+  switch (estado) {
+    case 'CONTROLADO':
+      return {
+        label: 'Controlado',
+        className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      };
+    case 'EXCEDE_PRESUPUESTO':
+      return {
+        label: 'Excede presupuesto',
+        className: 'border-red-200 bg-red-50 text-red-700',
+      };
+    case 'SIN_PRESUPUESTO':
+    default:
+      return {
+        label: 'Sin presupuesto',
+        className: 'border-amber-200 bg-amber-50 text-amber-700',
+      };
+  }
+}
+
+function shouldBlockBudgetApproval(solicitud: Pick<Solicitud, 'presupuestoBloqueada'>): boolean {
+  return Boolean(solicitud.presupuestoBloqueada);
+}
+
 export default function AprobacionPage() {
   const { token, user } = useAuth();
   const { getPermisosModulo } = usePermisos();
+  const pageSize = 8;
   const [pendientes, setPendientes] = useState<Solicitud[]>([]);
   const [aprobadas, setAprobadas] = useState<Solicitud[]>([]);
   const [rechazadas, setRechazadas] = useState<Solicitud[]>([]);
+  const [totals, setTotals] = useState<TotalsByTab>({ pendientes: 0, aprobadas: 0, rechazadas: 0 });
+  const [tabSummaries, setTabSummaries] = useState<SummaryByTab>(createEmptySummaryByTab());
+  const [loadMode, setLoadMode] = useState<LoadMode>('paged');
   const [selectedSolicitud, setSelectedSolicitud] = useState<Solicitud | null>(null);
+  const [detalleCabecera, setDetalleCabecera] = useState<SolicitudCabeceraDetalle | null>(null);
   const [detalleSolicitud, setDetalleSolicitud] = useState<DetalleSolicitudItem[]>([]);
+  const [aprobacionesHistorial, setAprobacionesHistorial] = useState<AprobacionHistorialItem[]>([]);
   const [modalAction, setModalAction] = useState<'aprobar' | 'rechazar' | 'ver' | null>(null);
   const [comentario, setComentario] = useState('');
   const [cargando, setCargando] = useState(false);
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
+  const [cargandoAprobaciones, setCargandoAprobaciones] = useState(false);
   const [procesandoAccion, setProcesandoAccion] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<TabKey>('pendientes');
+  const [pages, setPages] = useState<PaginationByTab>({ pendientes: 1, aprobadas: 1, rechazadas: 1 });
+  const isSearchMode = searchTerm.trim().length > 0;
 
   const permisosModulo = user ? getPermisosModulo(user.role, 'aprobaciones') : null;
   const puedeAprobar = !!permisosModulo?.puedeAprobar;
@@ -71,30 +619,102 @@ export default function AprobacionPage() {
     id: String(s.IdSolicitud ?? s.id ?? ''),
     numero: s.CodigoSolicitud ?? s.numero ?? '-',
     fecha: s.FechaSolicitud ?? s.fecha ?? new Date().toISOString(),
-    area: s.AreaNombre ?? s.area ?? 'Sin área',
+    estado: s.Estado ?? s.estado ?? 'PENDIENTE',
+    area: s.AreaResumen ?? s.AreaNombre ?? s.area ?? 'Sin área',
+    areaResumen: s.AreaResumen ?? s.AreaNombre ?? s.area ?? 'Sin área',
+    areasDetalle: uniqueStrings([
+      ...(Array.isArray(s.AreasDetalle) ? s.AreasDetalle : []),
+      s.AreaResumen,
+      s.AreaNombre,
+      s.area,
+    ]),
+    codigoCuenta: s.CodigoCuenta ?? s.AreaCodigoCuenta ?? s.CentroCostoCodigo ?? s.codigoCuenta ?? null,
+    codigoCuentaResumen: s.CodigoCuentaResumen ?? s.AreaCodigoCuenta ?? s.CentroCostoCodigo ?? '',
+    codigosCuentaDetalle: uniqueStrings([
+      ...(Array.isArray(s.CodigosCuentaDetalle) ? s.CodigosCuentaDetalle : []),
+      s.CodigoCuenta,
+      s.AreaCodigoCuenta,
+      s.CentroCostoCodigo,
+      s.codigoCuenta,
+    ]),
+    ot: s.OT ?? s.ot ?? null,
+    centroCostoCodigo: s.CentroCostoCodigo ?? null,
+    centroCostoNombre: s.CentroCostoNombre ?? null,
+    comentario: s.Comentario ?? s.comentario ?? null,
+    rolSolicitante: s.RolSolicitante ?? null,
     solicitante: s.NombreSolicitante ?? s.solicitante ?? 'Sin solicitante',
     items: Number(s.TotalItems ?? s.items ?? 0),
     total: Number(s.TotalMonto ?? s.total ?? 0),
+
     presupuestoArea: Number(s.PresupuestoArea ?? 0),
     consumoAcumulado: Number(s.ConsumoAcumulado ?? 0),
-    excedePresupuesto:
-      Number(s.PresupuestoArea ?? 0) > 0
-        ? Number(s.ConsumoAcumulado ?? 0) + Number(s.TotalMonto ?? 0) > Number(s.PresupuestoArea ?? 0)
-        : false,
+
+    presupuestoEstado: String(s.PresupuestoEstado ?? 'SIN_PRESUPUESTO').toUpperCase() as Solicitud['presupuestoEstado'],
+    presupuestoBloqueada: Boolean(s.PresupuestoBloqueada ?? false),
+    presupuestoMensaje: s.PresupuestoMensaje ?? null,
+    presupuestoSolicitudActual: Number(s.PresupuestoSolicitudActual ?? s.TotalMonto ?? s.total ?? 0),
+    presupuestoDisponibleDespues:
+      s.PresupuestoDisponibleDespues == null ? null : Number(s.PresupuestoDisponibleDespues),
+
     fechaAprobacion: s.FechaAprobacion,
     estadoAprobacion: s.EstadoAprobacion,
     comentarioAprobacion: s.ComentarioAprobacion ?? null,
     nombreAprobador: s.NombreAprobador ?? null,
   });
 
-  const cargarSolicitudes = async () => {
+  const isApprovalToday = (value?: string | null) => {
+    if (!value) {
+      return false;
+    }
+
+    return new Date(String(value).replace('Z', '')).toDateString() === new Date().toDateString();
+  };
+
+  const buildSummaryFromSolicitudes = (items: Solicitud[]): TabSummaryMetrics => {
+    const aprobadasHoy = items.filter((item) => isApprovalToday(item.fechaAprobacion));
+
+    return {
+      totalMonto: items.reduce((sum, item) => sum + item.total, 0),
+      aprobadasHoyCount: aprobadasHoy.length,
+      aprobadasHoyMonto: aprobadasHoy.reduce((sum, item) => sum + item.total, 0),
+    };
+  };
+
+  const normalizeListPayload = (payload: unknown): SolicitudesListResponse => {
+    if (isSolicitudesListResponse(payload)) {
+      return payload;
+    }
+
+    const data = Array.isArray(payload) ? payload : [];
+    return {
+      data,
+      total: data.length,
+      page: 1,
+      pageSize: data.length || pageSize,
+      summary: undefined,
+    };
+  };
+
+  const cargarSolicitudes = async (mode: LoadMode, signal?: AbortSignal) => {
     if (!token) return;
     setCargando(true);
     try {
+      const endpoints = mode === 'full'
+        ? [
+          '/solicitudes?estado=PENDIENTE',
+          '/solicitudes?estado=APROBADA',
+          '/solicitudes?estado=RECHAZADA',
+        ]
+        : [
+          `/solicitudes?estado=PENDIENTE&page=${pages.pendientes}&pageSize=${pageSize}`,
+          `/solicitudes?estado=APROBADA&page=${pages.aprobadas}&pageSize=${pageSize}`,
+          `/solicitudes?estado=RECHAZADA&page=${pages.rechazadas}&pageSize=${pageSize}`,
+        ];
+
       const [pendResp, aprResp, rejResp] = await Promise.all([
-        apiFetch('/solicitudes?estado=PENDIENTE'),
-        apiFetch('/solicitudes?estado=APROBADA'),
-        apiFetch('/solicitudes?estado=RECHAZADA'),
+        apiFetch(endpoints[0], { signal }),
+        apiFetch(endpoints[1], { signal }),
+        apiFetch(endpoints[2], { signal }),
       ]);
 
       const [pendJson, aprJson, rejJson] = await Promise.all([
@@ -103,46 +723,162 @@ export default function AprobacionPage() {
         rejResp.ok ? rejResp.json() : [],
       ]);
 
-      setPendientes((pendJson || []).map(mapSolicitud));
-      setAprobadas((aprJson || []).map(mapSolicitud));
-      setRechazadas((rejJson || []).map(mapSolicitud));
+      const pendingPayload = normalizeListPayload(pendJson);
+      const approvedPayload = normalizeListPayload(aprJson);
+      const rejectedPayload = normalizeListPayload(rejJson);
+
+      const pendingData = pendingPayload.data.map(mapSolicitud);
+      const approvedData = approvedPayload.data.map(mapSolicitud);
+      const rejectedData = rejectedPayload.data.map(mapSolicitud);
+
+      setPendientes(pendingData);
+      setAprobadas(approvedData);
+      setRechazadas(rejectedData);
+
+      if (mode === 'full') {
+        setTotals({
+          pendientes: pendingData.length,
+          aprobadas: approvedData.length,
+          rechazadas: rejectedData.length,
+        });
+        setTabSummaries({
+          pendientes: buildSummaryFromSolicitudes(pendingData),
+          aprobadas: buildSummaryFromSolicitudes(approvedData),
+          rechazadas: buildSummaryFromSolicitudes(rejectedData),
+        });
+      } else {
+        setTotals({
+          pendientes: pendingPayload.total,
+          aprobadas: approvedPayload.total,
+          rechazadas: rejectedPayload.total,
+        });
+        setTabSummaries({
+          pendientes: {
+            ...createEmptyTabSummary(),
+            ...(pendingPayload.summary ?? {}),
+          },
+          aprobadas: {
+            ...createEmptyTabSummary(),
+            ...(approvedPayload.summary ?? {}),
+          },
+          rechazadas: {
+            ...createEmptyTabSummary(),
+            ...(rejectedPayload.summary ?? {}),
+          },
+        });
+      }
+
+      setLoadMode(mode);
     } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
       console.error('Error al cargar aprobaciones', error);
     } finally {
-      setCargando(false);
+      if (!signal?.aborted) {
+        setCargando(false);
+      }
     }
   };
 
+  const closeModal = () => {
+    setModalAction(null);
+    setSelectedSolicitud(null);
+    setDetalleCabecera(null);
+    setComentario('');
+    setDetalleSolicitud([]);
+    setAprobacionesHistorial([]);
+  };
+
   useEffect(() => {
-    cargarSolicitudes();
-  }, [token]);
+    if (!token) return;
+    if (isSearchMode || loadMode !== 'paged') return;
+
+    const controller = new AbortController();
+    cargarSolicitudes('paged', controller.signal);
+    return () => controller.abort();
+  }, [token, isSearchMode, loadMode, pages.pendientes, pages.aprobadas, pages.rechazadas]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const controller = new AbortController();
+
+    if (isSearchMode && loadMode !== 'full') {
+      cargarSolicitudes('full', controller.signal);
+    }
+
+    if (!isSearchMode && loadMode === 'full') {
+      cargarSolicitudes('paged', controller.signal);
+    }
+
+    return () => controller.abort();
+  }, [token, isSearchMode, loadMode]);
 
   useEffect(() => {
     if (!selectedSolicitud || !token) return;
 
+    const controller = new AbortController();
+
     const cargarDetalle = async () => {
       setCargandoDetalle(true);
+      setCargandoAprobaciones(true);
       try {
-        const resp = await apiFetch(`/solicitudes/${selectedSolicitud.id}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setDetalleSolicitud(data.detalle || []);
+        const [detalleResp, aprobacionesResp] = await Promise.all([
+          apiFetch(`/solicitudes/${selectedSolicitud.id}`, { signal: controller.signal }),
+          apiFetch(`/solicitudes/${selectedSolicitud.id}/aprobaciones`, { signal: controller.signal }),
+        ]);
+
+        if (detalleResp.ok) {
+          const data = await detalleResp.json();
+          setDetalleCabecera(mapCabeceraDetalle(data?.cabecera, selectedSolicitud));
+          setDetalleSolicitud(
+            Array.isArray(data?.detalle)
+              ? data.detalle.map(mapDetalleSolicitudItem)
+              : [],
+          );
+        } else {
+          setDetalleCabecera(fallbackCabeceraFromSolicitud(selectedSolicitud));
+          setDetalleSolicitud([]);
+        }
+
+        if (aprobacionesResp.ok) {
+          const data = await aprobacionesResp.json();
+          const historial = Array.isArray(data)
+            ? data
+              .map(mapAprobacionHistorial)
+              .sort((left, right) => new Date(right.FechaAprobacion).getTime() - new Date(left.FechaAprobacion).getTime())
+            : [];
+          setAprobacionesHistorial(historial);
+        } else if (aprobacionesResp.status === 404) {
+          setAprobacionesHistorial([]);
         }
       } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
         console.error('Error al cargar detalle', error);
+        setDetalleCabecera(fallbackCabeceraFromSolicitud(selectedSolicitud));
       } finally {
-        setCargandoDetalle(false);
+        if (!controller.signal.aborted) {
+          setCargandoDetalle(false);
+          setCargandoAprobaciones(false);
+        }
       }
     };
 
     cargarDetalle();
+
+    return () => controller.abort();
   }, [selectedSolicitud, token]);
 
   const handleOpenModal = (solicitud: Solicitud, action: 'aprobar' | 'rechazar' | 'ver') => {
     setSelectedSolicitud(solicitud);
+    setDetalleCabecera(fallbackCabeceraFromSolicitud(solicitud));
     setModalAction(action);
     setComentario('');
     setDetalleSolicitud([]);
+    setAprobacionesHistorial([]);
   };
 
   const handleConfirmarAccion = async () => {
@@ -163,6 +899,14 @@ export default function AprobacionPage() {
     }
 
     if (!selectedSolicitud || !token) return;
+
+    if (modalAction === 'aprobar' && shouldBlockBudgetApproval(selectedSolicitud)) {
+      sileo.error({
+        title: 'Aprobación bloqueada',
+        description: selectedSolicitud.presupuestoMensaje || 'La solicitud no cumple la validación presupuestaria.',
+      });
+      return;
+    }
 
     try {
       setProcesandoAccion(true);
@@ -193,11 +937,8 @@ export default function AprobacionPage() {
         return;
       }
 
-      await cargarSolicitudes();
-      setSelectedSolicitud(null);
-      setModalAction(null);
-      setComentario('');
-      setDetalleSolicitud([]);
+      await cargarSolicitudes(isSearchMode ? 'full' : 'paged');
+      closeModal();
     } catch (error) {
       console.error('Error al aprobar/rechazar solicitud', error);
       sileo.error({
@@ -218,6 +959,8 @@ export default function AprobacionPage() {
     });
   const formatOptionalDate = (iso?: string | null) =>
     iso ? new Date(String(iso).replace('Z', '')).toLocaleDateString() : 'Sin referencia';
+  const formatDateTime = (iso?: string | null) =>
+    iso ? new Date(String(iso).replace('Z', '')).toLocaleString() : 'Sin registro';
 
   const getMaterialTotal = (item: DetalleSolicitudItem) =>
     Number(item.CantidadSolicitada ?? 0) * Number(item.UltimoPrecioCompra ?? 0);
@@ -246,70 +989,188 @@ export default function AprobacionPage() {
     };
   };
 
+  const detalleContext = useMemo(() => {
+    if (!selectedSolicitud) {
+      return null;
+    }
+
+    return detalleCabecera ?? fallbackCabeceraFromSolicitud(selectedSolicitud);
+  }, [detalleCabecera, selectedSolicitud]);
+
+  const buildTabView = (tab: TabKey, items: Solicitud[], currentPage: number) => {
+    if (!isSearchMode) {
+      return {
+        filtered: items,
+        safePage: currentPage,
+        pageItems: items,
+        totalItems: totals[tab],
+      };
+    }
+
+    const filtered = items.filter((item) => matchesSolicitudSearch(item, searchTerm));
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const safePage = Math.min(currentPage, totalPages);
+    const start = (safePage - 1) * pageSize;
+
+    return {
+      filtered,
+      safePage,
+      pageItems: filtered.slice(start, start + pageSize),
+      totalItems: filtered.length,
+    };
+  };
+
+  const pendientesView = useMemo(
+    () => buildTabView('pendientes', pendientes, pages.pendientes),
+    [pendientes, pages.pendientes, searchTerm, isSearchMode, totals.pendientes],
+  );
+  const aprobadasView = useMemo(
+    () => buildTabView('aprobadas', aprobadas, pages.aprobadas),
+    [aprobadas, pages.aprobadas, searchTerm, isSearchMode, totals.aprobadas],
+  );
+  const rechazadasView = useMemo(
+    () => buildTabView('rechazadas', rechazadas, pages.rechazadas),
+    [rechazadas, pages.rechazadas, searchTerm, isSearchMode, totals.rechazadas],
+  );
+
+  useEffect(() => {
+    setPages({ pendientes: 1, aprobadas: 1, rechazadas: 1 });
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (isSearchMode) {
+      return;
+    }
+
+    const nextPages = { ...pages };
+    let changed = false;
+
+    (['pendientes', 'aprobadas', 'rechazadas'] as TabKey[]).forEach((tab) => {
+      const maxPages = Math.max(1, Math.ceil(totals[tab] / pageSize));
+      if (pages[tab] > maxPages) {
+        nextPages[tab] = maxPages;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      setPages(nextPages);
+    }
+  }, [isSearchMode, pageSize, pages, totals]);
+
+  const goToPage = (tab: TabKey, nextPage: number) => {
+    setPages((current) => ({ ...current, [tab]: nextPage }));
+  };
+
   const renderTable = (
-    solicitudes: Solicitud[],
+    tab: TabKey,
+    view: { filtered: Solicitud[]; pageItems: Solicitud[]; safePage: number; totalItems: number },
     options: { showViewAction?: boolean; showDecisionActions?: boolean } = {},
   ) => {
     const showViewAction = options.showViewAction ?? false;
     const showDecisionActions = options.showDecisionActions ?? false;
     const showActionsColumn = showViewAction || showDecisionActions;
+    const solicitudes = view.pageItems;
 
     return (
-      <div className="rounded-lg border bg-card">
-        <Table>
+      <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_60px_-42px_rgba(15,23,42,0.45)]">
+        <div className="overflow-x-auto">
+        <Table className="min-w-[700px]">
           <TableHeader className="bg-muted/30">
             <TableRow className="hover:bg-muted/30">
-              <TableHead className="text-xs font-semibold text-muted-foreground">Número</TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground">Fecha</TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground">Área</TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground">Solicitud</TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground">Cobertura</TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Solicitante</TableHead>
               <TableHead className="text-center text-xs font-semibold text-muted-foreground">Items</TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground">Presupuesto</TableHead>
               <TableHead className="text-right text-xs font-semibold text-muted-foreground">Total</TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground">Estado Presup.</TableHead>
-              {showActionsColumn && <TableHead className="text-right text-xs font-semibold text-muted-foreground">Acciones</TableHead>}
+              {showActionsColumn && (
+                <TableHead className="text-right text-xs font-semibold text-muted-foreground">Acciones</TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {solicitudes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={showActionsColumn ? 8 : 7} className="text-center py-12 text-muted-foreground">
-                  {cargando ? 'Cargando...' : 'No hay solicitudes en este estado'}
+                <TableCell colSpan={showActionsColumn ? 7 : 6} className="py-14 text-center text-muted-foreground">
+                  {cargando
+                    ? 'Cargando solicitudes...'
+                    : searchTerm.trim()
+                      ? 'No hay resultados para la búsqueda actual'
+                      : 'No hay solicitudes en este estado'}
                 </TableCell>
               </TableRow>
             ) : (
               solicitudes.map((solicitud) => {
-                const tienePresupuesto = solicitud.presupuestoArea > 0;
+                const areas = getAreaValues(solicitud);
+                const codigosCuenta = getCodigoCuentaValues(solicitud);
 
                 return (
                   <TableRow key={solicitud.id}>
-                    <TableCell className="font-medium tabular-nums">{solicitud.numero}</TableCell>
-                    <TableCell className="tabular-nums">{formatDate(solicitud.fecha)}</TableCell>
-                    <TableCell className="max-w-[260px] truncate" title={solicitud.area}>
-                      {solicitud.area}
+                    <TableCell className="min-w-[240px] align-top">
+                      <div className="space-y-2 py-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold tabular-nums text-slate-900">{solicitud.numero}</span>
+                          <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
+                            {formatDate(solicitud.fecha)}
+                          </Badge>
+                          {solicitud.ot && (
+                            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+                              OT {solicitud.ot}
+                            </Badge>
+                          )}
+                        </div>
+                        <SummaryBadges values={areas} emptyLabel="Sin área registrada" />
+                      </div>
                     </TableCell>
-                    <TableCell className="max-w-[260px] truncate" title={solicitud.solicitante}>
-                      {solicitud.solicitante}
+                    <TableCell className="min-w-[220px] align-top">
+                      <div className="space-y-2 py-1">
+                        <SummaryBadges values={codigosCuenta} emptyLabel="Sin cuenta configurada" tone="accent" />
+                        <div className="text-xs text-slate-500">
+                          {solicitud.comentario?.trim() || 'Sin comentario del solicitante'}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-[220px] align-top">
+                      <div className="space-y-1 py-1">
+                        <div className="font-medium text-slate-900">{solicitud.solicitante}</div>
+                        <div className="text-xs text-slate-500">
+                          {solicitud.rolSolicitante?.trim() || 'Rol no informado'}
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell className="text-center tabular-nums">{solicitud.items}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">{formatCurrency(solicitud.total)}</TableCell>
-                    <TableCell>
-                      {!tienePresupuesto ? (
-                        <Badge variant="outline">N/D</Badge>
-                      ) : solicitud.excedePresupuesto ? (
-                        <Badge variant="destructive">
-                          <AlertCircle className="w-3 h-3" />
-                          Excede
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">
-                          <CheckCircle className="w-3 h-3" />
-                          OK
-                        </Badge>
-                      )}
+                    <TableCell className="min-w-[240px] align-top">
+                      {(() => {
+                        const presupuestoBadge = getPresupuestoBadgeConfig(solicitud.presupuestoEstado);
+                        const saldoTexto =
+                          solicitud.presupuestoDisponibleDespues == null
+                            ? 'N/D'
+                            : formatCurrency(solicitud.presupuestoDisponibleDespues);
+
+                        return (
+                          <div className="space-y-2 py-1">
+                            <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                              <span>{formatCurrency(solicitud.presupuestoSolicitudActual)} solicitud</span>
+                              <span>{solicitud.presupuestoArea > 0 ? formatCurrency(solicitud.presupuestoArea) : 'Sin base'}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <Badge variant="outline" className={presupuestoBadge.className}>
+                                {presupuestoBadge.label}
+                              </Badge>
+                              <span className="text-xs text-slate-500">Disponible después: {saldoTexto}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums font-semibold text-slate-900">
+                      {formatCurrency(solicitud.total)}
                     </TableCell>
                     {showActionsColumn && (
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
+                      <TableCell className="text-right align-top">
+                        <div className="flex justify-end gap-1 py-1">
                           {showViewAction && (
                             <Button
                               size="icon"
@@ -326,17 +1187,20 @@ export default function AprobacionPage() {
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                className="text-primary hover:text-primary"
+                                className="text-emerald-700 hover:bg-emerald-50 hover:text-emerald-700 disabled:text-slate-300 disabled:hover:bg-transparent"
                                 aria-label="Aprobar"
-                                title="Aprobar"
+                                title={shouldBlockBudgetApproval(solicitud)
+                                  ? (solicitud.presupuestoMensaje || 'Solicitud bloqueada por presupuesto')
+                                  : 'Aprobar'}
                                 onClick={() => handleOpenModal(solicitud, 'aprobar')}
+                                disabled={shouldBlockBudgetApproval(solicitud)}
                               >
                                 <CheckCircle className="w-4 h-4" />
                               </Button>
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                className="text-destructive hover:text-destructive"
+                                className="text-red-700 hover:bg-red-50 hover:text-red-700"
                                 aria-label="Rechazar"
                                 title="Rechazar"
                                 onClick={() => handleOpenModal(solicitud, 'rechazar')}
@@ -354,32 +1218,49 @@ export default function AprobacionPage() {
             )}
           </TableBody>
         </Table>
+        </div>
+
+        <TablePagination
+          page={view.safePage}
+          pageSize={pageSize}
+          totalItems={view.totalItems}
+          onPageChange={(nextPage) => goToPage(tab, nextPage)}
+        />
       </div>
     );
   };
 
-  const aprobadasHoy = useMemo(() => {
-    const hoy = new Date().toDateString();
-    return aprobadas.filter((s) => {
-      if (!s.fechaAprobacion) return false;
-      return new Date(s.fechaAprobacion.replace('Z', '')).toDateString() === hoy;
-    });
-  }, [aprobadas]);
+  const aprobadasHoyFiltradas = useMemo(
+    () => aprobadasView.filtered.filter((item) => isApprovalToday(item.fechaAprobacion)),
+    [aprobadasView.filtered],
+  );
+
+  const pendientesCount = pendientesView.totalItems;
+  const rechazadasCount = rechazadasView.totalItems;
+  const montoPendiente = isSearchMode
+    ? pendientesView.filtered.reduce((sum, item) => sum + item.total, 0)
+    : tabSummaries.pendientes.totalMonto;
+  const aprobadasHoyCount = isSearchMode
+    ? aprobadasHoyFiltradas.length
+    : tabSummaries.aprobadas.aprobadasHoyCount;
+  const aprobadasHoyMonto = isSearchMode
+    ? aprobadasHoyFiltradas.reduce((sum, item) => sum + item.total, 0)
+    : tabSummaries.aprobadas.aprobadasHoyMonto;
 
   const presupuestoModal = useMemo(() => {
     if (!selectedSolicitud) return null;
 
-    const presupuestoArea = Number(selectedSolicitud.presupuestoArea || 0);
-    const consumoAcumulado = Number(selectedSolicitud.consumoAcumulado || 0);
-    const disponibleActual = presupuestoArea - consumoAcumulado;
-    const saldoPosterior = disponibleActual - Number(selectedSolicitud.total || 0);
-
     return {
-      presupuestoArea,
-      consumoAcumulado,
-      disponibleActual,
-      saldoPosterior,
-      tienePresupuesto: presupuestoArea > 0,
+      presupuestoArea: Number(selectedSolicitud.presupuestoArea || 0),
+      consumoAcumulado: Number(selectedSolicitud.consumoAcumulado || 0),
+      solicitudActual: Number(selectedSolicitud.presupuestoSolicitudActual || selectedSolicitud.total || 0),
+      disponibleDespues: selectedSolicitud.presupuestoDisponibleDespues == null
+        ? null
+        : Number(selectedSolicitud.presupuestoDisponibleDespues),
+      tienePresupuesto: selectedSolicitud.presupuestoEstado !== 'SIN_PRESUPUESTO',
+      bloqueada: selectedSolicitud.presupuestoBloqueada,
+      estado: selectedSolicitud.presupuestoEstado,
+      mensaje: selectedSolicitud.presupuestoMensaje ?? null,
     };
   }, [selectedSolicitud]);
 
@@ -424,431 +1305,278 @@ export default function AprobacionPage() {
     };
   }, [selectedSolicitud]);
 
-  const renderMaterialShowcase = () => {
+  const estadoSolicitudBadge = getEstadoBadgeConfig(detalleContext?.estado ?? selectedSolicitud?.estado);
+
+  const renderDetalleMateriales = () => {
     if (cargandoDetalle) {
       return (
-        <div className="space-y-4">
-          <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-[linear-gradient(135deg,rgba(15,23,42,0.98)_0%,rgba(30,41,59,0.96)_56%,rgba(248,250,252,0.98)_100%)] px-6 py-6 text-white shadow-[0_24px_50px_-30px_rgba(15,23,42,0.75)]">
-            <div className="max-w-2xl space-y-3">
-              <div className="h-3 w-32 rounded-full bg-white/20" />
-              <div className="h-8 w-3/4 rounded-full bg-white/15" />
-              <div className="h-4 w-full rounded-full bg-white/10" />
-            </div>
-          </div>
-          <div className="grid gap-4">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div
-                key={index}
-                className="overflow-hidden rounded-[26px] border border-slate-200/80 bg-white/95 px-5 py-5 shadow-[0_22px_50px_-38px_rgba(15,23,42,0.45)]"
-              >
-                <div className="animate-pulse space-y-4">
-                  <div className="h-4 w-40 rounded-full bg-slate-200" />
-                  <div className="h-6 w-4/5 rounded-full bg-slate-200" />
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="h-20 rounded-2xl bg-slate-100" />
-                    <div className="h-20 rounded-2xl bg-slate-100" />
-                    <div className="h-20 rounded-2xl bg-slate-100" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Cargando detalle...
         </div>
       );
     }
 
     if (detalleSolicitud.length === 0) {
       return (
-        <div className="overflow-hidden rounded-[28px] border border-dashed border-slate-300 bg-white/90 px-6 py-10 text-center shadow-[0_20px_50px_-40px_rgba(15,23,42,0.5)]">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
-            <Package className="h-7 w-7" />
-          </div>
-          <h3 className="mt-4 text-lg font-semibold tracking-tight text-slate-950">
-            No encontramos materiales para mostrar
-          </h3>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-            Esta solicitud no devolvio lineas de detalle en la consulta actual. Cuando haya materiales disponibles,
-            los veras aqui con un resumen visual completo.
-          </p>
+        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+          <Package className="h-4 w-4 shrink-0" />
+          No hay líneas de detalle registradas.
         </div>
       );
     }
 
     return (
-      <div className="space-y-4">
-        <div className="relative overflow-hidden rounded-[30px] border border-slate-200/80 bg-[linear-gradient(140deg,rgba(15,23,42,0.98)_0%,rgba(30,41,59,0.98)_48%,rgba(240,253,250,0.96)_100%)] px-5 py-5 text-white shadow-[0_24px_60px_-34px_rgba(15,23,42,0.85)] sm:px-6 sm:py-6">
-          <div className="absolute -right-10 top-0 h-40 w-40 rounded-full bg-cyan-300/15 blur-3xl" />
-          <div className="absolute bottom-0 left-1/3 h-24 w-24 rounded-full bg-white/10 blur-2xl" />
-          <div className="relative space-y-5">
-            <div className="space-y-3">
-              <div className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-200">
-                Radiografia de materiales
-              </div>
-              <div className="max-w-2xl">
-                <h3 className="text-xl font-semibold tracking-tight text-white sm:text-[1.75rem]">
-                  Una vista clara para decidir con contexto, no con tablas frias.
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  Cada tarjeta muestra el impacto economico, la cobertura de stock y el contexto operativo de cada
-                  linea solicitada.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-[22px] border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                  Lineas solicitadas
-                </div>
-                <div className="mt-2 text-2xl font-semibold tracking-tight text-white">{resumenMateriales.lineas}</div>
-                <p className="mt-2 text-xs text-slate-300">Materiales distintos incluidos en la solicitud.</p>
-              </div>
-              <div className="rounded-[22px] border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                  Volumen requerido
-                </div>
-                <div className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  {formatQuantity(resumenMateriales.unidades)}
-                </div>
-                <p className="mt-2 text-xs text-slate-300">Suma de unidades pedidas en todas las lineas.</p>
-              </div>
-              <div className="rounded-[22px] border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                  Cobertura inmediata
-                </div>
-                <div className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  {resumenMateriales.lineasCubiertas}/{resumenMateriales.lineas}
-                </div>
-                <p className="mt-2 text-xs text-slate-300">Lineas con stock suficiente segun el inventario visible.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4">
-          {detalleSolicitud.map((item, index) => {
-            const stockStatus = getStockStatus(item);
-            const materialTotal = getMaterialTotal(item);
-
-            return (
-              <article
-                key={`${item.NumeroArticulo ?? 'linea'}-${index}`}
-                className="group relative overflow-hidden rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.95)_100%)] shadow-[0_24px_50px_-38px_rgba(15,23,42,0.45)] transition-transform duration-300 hover:-translate-y-0.5"
-              >
-                <div className="absolute inset-y-0 left-0 w-1.5 bg-[linear-gradient(180deg,#0f172a_0%,#14b8a6_100%)]" />
-                <div className="px-5 py-5 sm:px-6 sm:py-6">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-sm font-semibold text-white shadow-lg shadow-slate-950/10">
-                          {String(index + 1).padStart(2, '0')}
-                        </span>
-                        <Badge variant="outline" className="border-slate-200 bg-white text-slate-700 hover:bg-white">
-                          {item.NumeroArticulo || 'Sin codigo'}
-                        </Badge>
-                        {item.GrupoArticulos && (
-                          <Badge variant="outline" className="border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-100">
-                            {item.GrupoArticulos}
-                          </Badge>
-                        )}
-                        <Badge variant="outline" className={stockStatus.className}>
-                          {stockStatus.label}
-                        </Badge>
-                      </div>
-
-                      <div className="space-y-2">
-                        <h4 className="text-lg font-semibold leading-tight text-slate-950 sm:text-xl">
-                          {item.DescripcionArticulo || 'Material sin descripcion'}
-                        </h4>
-                        {item.ComentarioLinea && (
-                          <p className="max-w-3xl text-sm leading-6 text-slate-500">{item.ComentarioLinea}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[22px] border border-slate-200 bg-white/80 px-4 py-3 text-left shadow-sm lg:min-w-[220px] lg:text-right">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Impacto economico
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                        {formatCurrency(materialTotal)}
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-slate-500">
-                        Estimado con ultimo precio de compra registrado.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/80 px-4 py-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Cantidad</div>
-                      <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                        {formatQuantity(Number(item.CantidadSolicitada ?? 0))}
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">{item.UnidadMedidaMaterial || 'Unidad no definida'}</p>
-                    </div>
-
-                    <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/80 px-4 py-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Ultimo precio
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                        {formatCurrency(Number(item.UltimoPrecioCompra ?? 0))}
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">Referencia historica disponible.</p>
-                    </div>
-
-                    <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/80 px-4 py-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Stock visible</div>
-                      <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                        {formatQuantity(Number(item.EnStock ?? 0))}
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">Existencia reflejada por el backend.</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                      Unidad: {item.UnidadMedidaMaterial || 'Sin definir'}
-                    </span>
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                      Ultima compra: {formatOptionalDate(item.UltimaFechaCompra)}
-                    </span>
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                      Valor lineal: {formatCurrency(materialTotal)}
-                    </span>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
+      <div className="overflow-hidden rounded-lg border">
+        <div className="max-h-72 overflow-y-auto overflow-x-auto">
+          <Table className="text-sm min-w-[680px]">
+            <TableHeader className="sticky top-0 z-10 bg-slate-50">
+              <TableRow>
+                <TableHead className="text-xs w-24">N° Artículo</TableHead>
+                <TableHead className="text-xs">Descripción</TableHead>
+                <TableHead className="text-xs">Área</TableHead>
+                <TableHead className="text-xs">Cuenta</TableHead>
+                <TableHead className="text-right text-xs w-24">Cant. Sol.</TableHead>
+                <TableHead className="text-right text-xs w-24">Cant. Apr.</TableHead>
+                <TableHead className="text-xs w-20">Unidad</TableHead>
+                <TableHead className="text-right text-xs w-20">En Stock</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {detalleSolicitud.map((item, index) => (
+                <TableRow key={`${item.NumeroArticulo ?? 'detalle'}-${index}`} className="text-sm">
+                  <TableCell className="font-mono text-xs">{item.NumeroArticulo || '-'}</TableCell>
+                  <TableCell className="max-w-[200px] truncate">{item.DescripcionArticulo || 'Sin descripción'}</TableCell>
+                  <TableCell>
+                    {item.AreaNombre ? (
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 truncate max-w-[120px]">
+                        {item.AreaNombre}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {item.CodigoCuenta ? (
+                      <span className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
+                        {item.CodigoCuenta}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">{formatQuantity(Number(item.CantidadSolicitada ?? 0))}</TableCell>
+                  <TableCell className="text-right">
+                    {item.CantidadAprobada != null ? (
+                      <span
+                        className={
+                          Number(item.CantidadAprobada) < Number(item.CantidadSolicitada ?? 0)
+                            ? 'font-medium text-amber-600'
+                            : 'font-medium text-green-700'
+                        }
+                      >
+                        {formatQuantity(Number(item.CantidadAprobada))}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs">{item.UnidadMedidaMaterial || '-'}</TableCell>
+                  <TableCell className="text-right">
+                    {item.EnStock != null ? (
+                      <span
+                        className={
+                          Number(item.EnStock) === 0
+                            ? 'font-medium text-red-600'
+                            : Number(item.EnStock) < Number(item.CantidadSolicitada ?? 0)
+                              ? 'font-medium text-amber-600'
+                              : ''
+                        }
+                      >
+                        {formatQuantity(Number(item.EnStock))}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       </div>
     );
   };
 
-  const renderSidebarPanels = () => {
-    if (!selectedSolicitud) return null;
+  const renderApprovalHistory = () => {
+    if (!selectedSolicitud) {
+      return null;
+    }
+
+    if (cargandoAprobaciones) {
+      return (
+        <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Cargando aprobaciones...
+        </div>
+      );
+    }
+
+    if (aprobacionesHistorial.length === 0) {
+      return (
+        <p className="py-2 text-sm text-muted-foreground">Sin aprobaciones registradas aún.</p>
+      );
+    }
 
     return (
-      <div className="space-y-4">
-        <div
-          className={`overflow-hidden rounded-[28px] border shadow-[0_20px_55px_-40px_rgba(15,23,42,0.55)] ${selectedSolicitud.excedePresupuesto
-            ? 'border-red-200 bg-[linear-gradient(180deg,rgba(254,242,242,0.98),rgba(255,255,255,0.98))]'
-            : 'border-emerald-200 bg-[linear-gradient(180deg,rgba(236,253,245,0.98),rgba(255,255,255,0.98))]'
-            }`}
-        >
-          <div className="border-b border-black/5 px-5 py-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                  Analisis presupuestario
-                </div>
-                <div className="mt-2 flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-950">
-                  <DollarSign className="h-5 w-5" />
-                  {presupuestoModal?.tienePresupuesto ? 'Control presupuestario del area' : 'Sin presupuesto configurado'}
-                </div>
-              </div>
-              <Badge
-                variant="outline"
-                className={
-                  selectedSolicitud.excedePresupuesto
-                    ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-50'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50'
-                }
-              >
-                {selectedSolicitud.excedePresupuesto ? 'Riesgo alto' : 'Saldo saludable'}
-              </Badge>
-            </div>
-          </div>
+      <div className="space-y-2">
+        {aprobacionesHistorial.map((item) => {
+          const aprobada = String(item.Estado).toUpperCase() === 'APROBADA';
+          const rechazada = String(item.Estado).toUpperCase() === 'RECHAZADA';
 
-          <div className="space-y-3 px-5 py-5">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-[22px] border border-white/80 bg-white/85 px-4 py-4 shadow-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Presupuesto area</div>
-                <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                  {formatCurrency(presupuestoModal?.presupuestoArea ?? 0)}
+          return (
+            <div
+              key={item.IdAprobacion}
+              className={`flex items-start gap-3 rounded-lg border p-3 ${aprobada
+                ? 'border-green-200 bg-green-50'
+                : rechazada
+                  ? 'border-red-200 bg-red-50'
+                  : 'border-slate-200 bg-slate-50'
+                }`}
+            >
+              <div className="mt-0.5">
+                {aprobada ? (
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                ) : rechazada ? (
+                  <XCircle className="h-4 w-4 text-red-600" />
+                ) : (
+                  <Clock className="h-4 w-4 text-amber-500" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{item.NombreAprobador}</span>
+                  <Badge
+                    className={`px-1.5 py-0.5 text-xs ${aprobada
+                      ? 'bg-green-100 text-green-700'
+                      : rechazada
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-amber-100 text-amber-700'
+                      }`}
+                  >
+                    {String(item.Estado).replace(/_/g, ' ')}
+                  </Badge>
                 </div>
-              </div>
-              <div className="rounded-[22px] border border-white/80 bg-white/85 px-4 py-4 shadow-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Consumo acumulado</div>
-                <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                  {formatCurrency(presupuestoModal?.consumoAcumulado ?? 0)}
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {formatDateTime(item.FechaAprobacion)}
+                  {item.EmailAprobador ? ` · ${item.EmailAprobador}` : ''}
                 </div>
-              </div>
-            </div>
-
-            <div className="rounded-[24px] border border-white/80 bg-white/90 px-4 py-4 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm text-slate-500">Disponible actual</span>
-                <span className="text-base font-semibold text-slate-950">
-                  {presupuestoModal?.tienePresupuesto ? formatCurrency(presupuestoModal.disponibleActual) : 'N/D'}
-                </span>
-              </div>
-              <div className="my-4 h-px bg-slate-200" />
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-slate-700">Saldo despues de esta decision</span>
-                <span className={`text-xl font-semibold tracking-tight ${selectedSolicitud.excedePresupuesto ? 'text-red-600' : 'text-emerald-600'}`}>
-                  {presupuestoModal?.tienePresupuesto ? formatCurrency(presupuestoModal.saldoPosterior) : 'N/D'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/95 shadow-[0_20px_55px_-40px_rgba(15,23,42,0.45)]">
-          <div className="border-b border-slate-200/80 px-5 py-4">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-              <ClipboardList className="h-4 w-4 text-slate-400" />
-              Contexto de la solicitud
-            </div>
-          </div>
-          <div className="space-y-3 px-5 py-5 text-sm">
-            <div className="flex items-start justify-between gap-4">
-              <span className="text-slate-500">Fecha registrada</span>
-              <span className="font-medium text-slate-900">{formatDate(selectedSolicitud.fecha)}</span>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <span className="text-slate-500">Estado de revision</span>
-              <span className={`font-medium ${modalAction === 'aprobar' ? 'text-emerald-700' : modalAction === 'rechazar' ? 'text-red-700' : 'text-slate-900'}`}>
-                {modalAction === 'aprobar' ? 'Lista para aprobar' : modalAction === 'rechazar' ? 'Lista para rechazar' : 'Solo lectura'}
-              </span>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <span className="text-slate-500">Lineas cubiertas</span>
-              <span className="font-medium text-slate-900">
-                {resumenMateriales.lineasCubiertas}/{resumenMateriales.lineas || 0}
-              </span>
-            </div>
-            <div className="flex items-start justify-between gap-4">
-              <span className="text-slate-500">Valor estimado</span>
-              <span className="font-medium text-slate-900">{formatCurrency(resumenMateriales.valorTotal)}</span>
-            </div>
-          </div>
-        </div>
-
-        {modalAction === 'ver' && resumenDecision && (
-          <div className={`overflow-hidden rounded-[28px] border border-slate-200/80 bg-gradient-to-br ${resumenDecision.accentClassName} shadow-[0_20px_55px_-40px_rgba(15,23,42,0.45)]`}>
-            <div className="space-y-4 px-5 py-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                    Ultima decision registrada
+                {item.Comentario?.trim() && (
+                  <div className="mt-1.5 rounded border border-slate-200 bg-white/80 px-2 py-1.5 text-sm text-slate-700">
+                    {item.Comentario}
                   </div>
-                  <div className="mt-2 text-lg font-semibold tracking-tight text-slate-950">
-                    Historial mas reciente de aprobacion
-                  </div>
-                </div>
-                <Badge variant="outline" className={resumenDecision.badgeClassName}>
-                  {resumenDecision.label}
-                </Badge>
-              </div>
-
-              <div className="space-y-3 text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <span className="text-slate-500">Responsable</span>
-                  <span className="font-medium text-slate-900">{selectedSolicitud.nombreAprobador || 'Sin registro'}</span>
-                </div>
-                <div className="flex items-start justify-between gap-4">
-                  <span className="text-slate-500">Fecha</span>
-                  <span className="font-medium text-slate-900">{formatOptionalDate(selectedSolicitud.fechaAprobacion)}</span>
-                </div>
-                <div className="rounded-[22px] border border-white/70 bg-white/80 px-4 py-4 text-slate-700 shadow-sm">
-                  {selectedSolicitud.comentarioAprobacion?.trim()
-                    ? selectedSolicitud.comentarioAprobacion
-                    : 'No se registro comentario en la ultima decision.'}
-                </div>
+                )}
               </div>
             </div>
-          </div>
-        )}
-
-        {(modalAction === 'rechazar' || modalAction === 'aprobar') && (
-          <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/95 shadow-[0_20px_55px_-40px_rgba(15,23,42,0.45)]">
-            <div className="border-b border-slate-200/80 px-5 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                {modalAction === 'rechazar' ? 'Motivo de rechazo' : 'Comentario de aprobacion'}
-              </div>
-              <div className="mt-2 text-lg font-semibold tracking-tight text-slate-950">
-                {modalAction === 'rechazar' ? 'Deja una justificacion clara para el solicitante.' : 'Agrega contexto util para el seguimiento interno.'}
-              </div>
-            </div>
-            <div className="px-5 py-5">
-              <Label htmlFor="comentario" className="sr-only">
-                Comentario
-              </Label>
-              <Textarea
-                id="comentario"
-                placeholder={
-                  modalAction === 'rechazar'
-                    ? 'Explica claramente por que la solicitud no puede avanzar...'
-                    : 'Agrega una observacion que ayude al equipo a entender la decision...'
-                }
-                value={comentario}
-                onChange={(e) => setComentario(e.target.value)}
-                rows={modalAction === 'rechazar' ? 5 : 4}
-                className="min-h-[140px] rounded-[22px] border-slate-200 bg-slate-50/80 text-sm shadow-inner"
-              />
-              <p className="mt-3 text-xs leading-5 text-slate-500">
-                {modalAction === 'rechazar'
-                  ? 'Este comentario es obligatorio y quedara registrado como parte del historial de aprobacion.'
-                  : 'Este comentario es opcional, pero ayuda a dejar trazabilidad para auditoria y seguimiento.'}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {selectedSolicitud.excedePresupuesto && (
-          <Alert variant="destructive" className="border-red-200 bg-red-50/90">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              Esta solicitud excede el presupuesto disponible del area.
-            </AlertDescription>
-          </Alert>
-        )}
+          );
+        })}
       </div>
     );
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1>Gestión de Aprobaciones</h1>
-        <p className="text-muted-foreground mt-1">
-          Revisar y aprobar solicitudes de materiales
-        </p>
-        {!puedeAprobar && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Tu acceso actual es de solo lectura. Puedes revisar solicitudes, pero no aprobarlas ni rechazarlas.
-          </p>
-        )}
-      </div>
+      <Card className="overflow-hidden border-slate-200/80 shadow-[0_24px_70px_-48px_rgba(15,23,42,0.45)]">
+        <CardContent className="bg-[linear-gradient(135deg,rgba(248,250,252,0.98)_0%,rgba(241,245,249,0.95)_48%,rgba(236,253,245,0.9)_100%)] px-6 py-6">
+          <div className="space-y-6">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+              <div className="max-w-3xl space-y-4">
+                <div className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                  Bandeja de aprobaciones
+                </div>
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-950">Gestión de Aprobaciones</h1>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                    Revisa solicitudes con contexto operativo, presupuestario y contable real antes de aprobar o rechazar.
+                  </p>
+                  {!puedeAprobar && (
+                    <p className="mt-3 text-sm text-slate-500">
+                      Tu acceso actual es de solo lectura. Puedes revisar solicitudes, pero no aprobarlas ni rechazarlas.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
 
-      {/* KPIs */}
-      <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 rounded-[24px] border border-white/70 bg-white/85 p-5 shadow-[0_20px_55px_-38px_rgba(15,23,42,0.25)] backdrop-blur-sm lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                  <Search className="h-4 w-4" />
+                  Filtro rápido
+                </div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Buscar por solicitud, área, cuenta, OT o solicitante"
+                    className="h-11 rounded-2xl border-slate-200 bg-white pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                <Button onClick={() => cargarSolicitudes(isSearchMode ? 'full' : 'paged')} disabled={cargando} className="rounded-2xl">
+                  <RefreshCw className={`mr-2 h-4 w-4 ${cargando ? 'animate-spin' : ''}`} />
+                  Actualizar bandeja
+                </Button>
+                {searchTerm.trim() && (
+                  <Button variant="outline" onClick={() => setSearchTerm('')} className="rounded-2xl">
+                    Limpiar búsqueda
+                  </Button>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-500 lg:col-span-2">
+                {pendientesView.totalItems + aprobadasView.totalItems + rechazadasView.totalItems} solicitudes visibles con el filtro actual.
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Pendientes</CardTitle>
-            <Clock className="w-4 h-4 text-muted-foreground" />
+            <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{pendientes.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Requieren revisión
-            </p>
+            <div className="text-2xl font-semibold">{pendientesCount}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Solicitudes listas para revisión</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Aprobadas Hoy</CardTitle>
-            <CheckCircle className="w-4 h-4 text-muted-foreground" />
+            <CardTitle className="text-sm">Monto pendiente</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{aprobadasHoy.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Total: ${aprobadasHoy.reduce((sum, s) => sum + s.total, 0).toLocaleString()}
+            <div className="text-2xl font-semibold">{formatCurrency(montoPendiente)}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Valor total de la bandeja pendiente</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm">Aprobadas hoy</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold">{aprobadasHoyCount}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {formatCurrency(aprobadasHoyMonto)} aprobados hoy
             </p>
           </CardContent>
         </Card>
@@ -856,461 +1584,288 @@ export default function AprobacionPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Rechazadas</CardTitle>
-            <XCircle className="w-4 h-4 text-muted-foreground" />
+            <XCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{rechazadas.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Esta semana
-            </p>
+            <div className="text-2xl font-semibold">{rechazadasCount}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Solicitudes detenidas por decisión</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs */}
-      <Card>
+      <Card className="border-slate-200/80 shadow-[0_24px_70px_-48px_rgba(15,23,42,0.45)]">
         <CardContent className="pt-6">
-          <Tabs defaultValue="pendientes">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="pendientes">
-                Pendientes ({pendientes.length})
+          <Tabs value={activeTab} onValueChange={(value: string) => setActiveTab(value as TabKey)}>
+            <TabsList className="grid w-full grid-cols-3 rounded-2xl bg-slate-100 p-1">
+              <TabsTrigger value="pendientes" className="rounded-xl">
+                Pendientes ({pendientesView.totalItems})
               </TabsTrigger>
-              <TabsTrigger value="aprobadas">
-                Aprobadas ({aprobadas.length})
+              <TabsTrigger value="aprobadas" className="rounded-xl">
+                Aprobadas ({aprobadasView.totalItems})
               </TabsTrigger>
-              <TabsTrigger value="rechazadas">
-                Rechazadas ({rechazadas.length})
+              <TabsTrigger value="rechazadas" className="rounded-xl">
+                Rechazadas ({rechazadasView.totalItems})
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="pendientes" className="mt-6">
-              {renderTable(pendientes, { showViewAction: true, showDecisionActions: puedeAprobar })}
+              {renderTable('pendientes', pendientesView, { showViewAction: true, showDecisionActions: puedeAprobar })}
             </TabsContent>
 
             <TabsContent value="aprobadas" className="mt-6">
-              {renderTable(aprobadas, { showViewAction: true })}
+              {renderTable('aprobadas', aprobadasView, { showViewAction: true })}
             </TabsContent>
 
             <TabsContent value="rechazadas" className="mt-6">
-              {renderTable(rechazadas, { showViewAction: true })}
+              {renderTable('rechazadas', rechazadasView, { showViewAction: true })}
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
 
-      {/* ── Modal de Acción ─────────────────────────────────────── */}
-      <Dialog
-        open={!!modalAction}
-        onOpenChange={() => {
-          setModalAction(null);
-          setSelectedSolicitud(null);
-          setComentario('');
-          setDetalleSolicitud([]);
-        }}
-      >
-        <DialogContent className="!block w-[min(760px,calc(100vw-2rem))] overflow-hidden rounded-2xl border-0 bg-white !p-0 shadow-[0_40px_80px_-20px_rgba(15,23,42,0.5),0_0_0_1px_rgba(15,23,42,0.07)] sm:max-w-[760px]">
-
-          {/* ── Header premium ─────────────────────────────── */}
-          <div
-            style={{
-              background:
-                modalAction === 'aprobar'
-                  ? 'linear-gradient(135deg, #16a34a 0%, #334155 100%)'
-                  : modalAction === 'rechazar'
-                    ? 'linear-gradient(135deg, #16a34a 0%, #334155 100%)'
-                    : 'linear-gradient(135deg, #16a34a 0%, #334155 100%)',
-            }}
-            className="relative overflow-hidden px-6 pt-5 pb-4"
-          >
-            {/* decorative glow orbs */}
-            <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/5 blur-2xl" />
-            <div className="pointer-events-none absolute bottom-0 left-1/3 h-20 w-20 rounded-full bg-white/5 blur-xl" />
-
-            <DialogHeader className="relative text-left">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="mb-1 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/70">
-                    {modalAction === 'ver' ? 'Revisión' : modalAction === 'aprobar' ? 'Aprobación' : 'Rechazo'}
-                  </div>
-                  <DialogTitle className="text-lg font-semibold leading-tight text-white">
-                    {modalAction === 'ver'
-                      ? 'Detalle de solicitud'
-                      : modalAction === 'aprobar'
-                        ? 'Aprobar solicitud'
-                        : 'Rechazar solicitud'}
-                  </DialogTitle>
-                  <DialogDescription className="mt-0.5 font-mono text-xs tracking-wider text-white/50">
-                    {selectedSolicitud?.numero}
-                  </DialogDescription>
-                </div>
+      <Dialog open={!!modalAction} onOpenChange={(open) => { if (!open) closeModal(); }}>
+        <DialogContent className="flex flex-col max-h-[90vh] max-w-5xl overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b bg-slate-50 px-6 pb-4 pt-6">
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <FileText className="h-5 w-5 text-primary" />
+              {modalAction === 'ver'
+                ? 'Detalle de Solicitud'
+                : modalAction === 'aprobar'
+                  ? 'Revisar y aprobar solicitud'
+                  : 'Revisar y rechazar solicitud'}
+            </DialogTitle>
+            {selectedSolicitud && (
+              <DialogDescription className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-slate-700">{detalleContext?.numero || selectedSolicitud.numero}</span>
+                <span className="text-slate-400">·</span>
+                <Badge className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs ${estadoSolicitudBadge.className}`}>
+                  <estadoSolicitudBadge.icon className="h-3 w-3" />
+                  {estadoSolicitudBadge.label}
+                </Badge>
                 {modalAction !== 'ver' && (
-                  <Badge
-                    variant="outline"
-                    className={`shrink-0 border text-[11px] font-semibold ${modalAction === 'aprobar'
-                      ? 'border-emerald-400/30 bg-emerald-400/15 text-emerald-300'
-                      : 'border-red-400/30 bg-red-400/15 text-red-300'
-                      }`}
-                  >
-                    {modalAction === 'aprobar' ? 'Confirmación' : 'Requiere motivo'}
+                  <Badge variant="outline" className={modalAction === 'aprobar'
+                    ? 'border-green-300 bg-green-50 text-green-700'
+                    : 'border-red-300 bg-red-50 text-red-700'}>
+                    {modalAction === 'aprobar' ? 'Pendiente de aprobación' : 'Pendiente de rechazo'}
                   </Badge>
                 )}
-              </div>
-            </DialogHeader>
-
-            {/* Info strip inside header */}
-            {selectedSolicitud && (
-              <div className="relative mt-4 grid grid-cols-4 divide-x divide-white/10 rounded-xl border border-white/10 bg-white/8 overflow-hidden">
-                {[
-                  { label: 'Área', value: selectedSolicitud.area },
-                  { label: 'Solicitante', value: selectedSolicitud.solicitante },
-                  { label: 'Fecha', value: formatDate(selectedSolicitud.fecha) },
-                  {
-                    label: 'Total',
-                    value: formatCurrency(selectedSolicitud.total),
-                    accent: selectedSolicitud.excedePresupuesto,
-                  },
-                ].map((field) => (
-                  <div key={field.label} className="px-3 py-2.5">
-                    <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-white/40">{field.label}</p>
-                    <p
-                      className={`mt-0.5 truncate text-sm font-semibold ${field.accent ? 'text-red-300' : 'text-white'
-                        }`}
-                      title={field.value}
-                    >
-                      {field.value}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              </DialogDescription>
             )}
-          </div>
+          </DialogHeader>
 
-          {/* ── Body ───────────────────────────────────────── */}
-          {selectedSolicitud && (
-            <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-              <div className="px-6 py-4 space-y-4">
+          {selectedSolicitud && detalleContext && (
+            <div className="flex-1 min-h-0 space-y-5 overflow-y-auto px-6 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <InfoField label="Fecha" value={formatDate(detalleContext.fecha)} />
+                <InfoField label="Solicitante" value={detalleContext.solicitante} />
+              </div>
 
-                {/* Alerta excede presupuesto */}
-                {selectedSolicitud.excedePresupuesto && (
-                  <div className="flex items-center gap-2.5 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5">
-                    <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
-                    <p className="text-sm font-medium text-red-700">
-                      Esta solicitud excede el presupuesto disponible del área
-                    </p>
+              <div className="flex flex-col gap-3 rounded-lg border bg-slate-50 p-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-8">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Total ítems: </span>
+                  <span className="font-semibold">{selectedSolicitud.items}</span>
+                </div>
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Total monto: </span>
+                  <span className="font-semibold text-base">{formatCurrency(selectedSolicitud.total)}</span>
+                </div>
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Disponible después: </span>
+                  <span className={`font-semibold ${shouldBlockBudgetApproval(selectedSolicitud) ? 'text-red-600' : 'text-slate-900'}`}>
+                    {presupuestoModal?.disponibleDespues == null
+                      ? 'N/D'
+                      : formatCurrency(presupuestoModal.disponibleDespues)}
+                  </span>
+                </div>
+                <div className="text-sm">
+                  <span className="text-muted-foreground">OT: </span>
+                  <span className="font-semibold">{detalleContext.ot || 'No informada'}</span>
+                </div>
+              </div>
+
+              {modalAction !== 'ver' && selectedSolicitud.presupuestoEstado !== 'CONTROLADO' && (
+                <Alert
+                  variant={shouldBlockBudgetApproval(selectedSolicitud) ? 'destructive' : 'default'}
+                  className={shouldBlockBudgetApproval(selectedSolicitud)
+                    ? 'border-red-200 bg-red-50/90'
+                    : 'border-amber-200 bg-amber-50/90 text-amber-900'}
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    {presupuestoModal?.mensaje || 'La solicitud requiere revisión presupuestaria.'}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {modalAction === 'ver' && resumenDecision && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-slate-50 px-4 py-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Última decisión registrada
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      {selectedSolicitud.nombreAprobador || 'Sin responsable'}
+                      {selectedSolicitud.fechaAprobacion ? ` · ${formatDateTime(selectedSolicitud.fechaAprobacion)}` : ''}
+                    </div>
                   </div>
-                )}
+                  <Badge variant="outline" className={resumenDecision.badgeClassName}>
+                    {resumenDecision.label}
+                  </Badge>
+                </div>
+              )}
 
-                {/* ── Tabla de materiales ─────────────────── */}
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-                      Materiales solicitados
-                    </p>
-                    {!cargandoDetalle && detalleSolicitud.length > 0 && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                        {detalleSolicitud.length} {detalleSolicitud.length === 1 ? 'línea' : 'líneas'}
-                      </span>
-                    )}
-                  </div>
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Detalle de Materiales
+                </h3>
+                {renderDetalleMateriales()}
+              </div>
 
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    {cargandoDetalle ? (
-                      /* Skeleton loading */
-                      <div className="divide-y divide-slate-100">
-                        <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3 bg-slate-50 px-4 py-2.5">
-                          {['#', 'Descripción', 'Cant.', 'Precio', 'Total', 'Stock'].map((h) => (
-                            <div key={h} className="h-3 w-12 rounded-full bg-slate-200" />
-                          ))}
-                        </div>
-                        {[1, 2, 3].map((i) => (
-                          <div key={i} className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3 px-4 py-3 animate-pulse">
-                            <div className="h-5 w-5 rounded bg-slate-100" />
-                            <div className="space-y-1.5">
-                              <div className="h-3 w-3/4 rounded-full bg-slate-100" />
-                              <div className="h-2.5 w-1/2 rounded-full bg-slate-100" />
-                            </div>
-                            <div className="h-3 w-10 rounded-full bg-slate-100" />
-                            <div className="h-3 w-14 rounded-full bg-slate-100" />
-                            <div className="h-3 w-14 rounded-full bg-slate-100" />
-                            <div className="h-5 w-20 rounded-full bg-slate-100" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : detalleSolicitud.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-10 text-center">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
-                          <Package className="h-5 w-5 text-slate-400" />
-                        </div>
-                        <p className="mt-3 text-sm font-medium text-slate-600">Sin materiales registrados</p>
-                        <p className="mt-0.5 text-xs text-slate-400">No se encontraron líneas de detalle para esta solicitud</p>
-                      </div>
-                    ) : (
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-slate-100 bg-slate-50">
-                            <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-8">#</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Artículo / Descripción</th>
-                            <th className="px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 whitespace-nowrap">Cant.</th>
-                            <th className="px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 whitespace-nowrap">Precio</th>
-                            <th className="px-3 py-2.5 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400">Total</th>
-                            <th className="px-4 py-2.5 text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Stock</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {detalleSolicitud.map((item, index) => {
-                            const stockStatus = getStockStatus(item);
-                            const lineTotal = getMaterialTotal(item);
-                            return (
-                              <tr
-                                key={`${item.NumeroArticulo ?? 'item'}-${index}`}
-                                className="group transition-colors hover:bg-slate-50/70"
-                              >
-                                {/* # */}
-                                <td className="px-4 py-3 text-center">
-                                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-bold text-slate-500 group-hover:bg-slate-200">
-                                    {index + 1}
-                                  </span>
-                                </td>
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Historial de Aprobaciones
+                </h3>
+                {renderApprovalHistory()}
+              </div>
 
-                                {/* Artículo + descripción */}
-                                <td className="px-3 py-3 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    {item.NumeroArticulo && (
-                                      <span className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500">
-                                        {item.NumeroArticulo}
-                                      </span>
-                                    )}
-                                    {item.GrupoArticulos && (
-                                      <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
-                                        {item.GrupoArticulos}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="mt-0.5 text-sm font-medium text-slate-800 leading-snug">
-                                    {item.DescripcionArticulo || 'Sin descripción'}
-                                  </p>
-                                  {item.ComentarioLinea && (
-                                    <p className="mt-0.5 text-xs text-slate-400 italic">{item.ComentarioLinea}</p>
-                                  )}
-                                </td>
-
-                                {/* Cantidad */}
-                                <td className="px-3 py-3 text-right tabular-nums">
-                                  <span className="text-sm font-semibold text-slate-800">
-                                    {formatQuantity(Number(item.CantidadSolicitada ?? 0))}
-                                  </span>
-                                  <p className="text-[10px] text-slate-400">{item.UnidadMedidaMaterial || '—'}</p>
-                                </td>
-
-                                {/* Precio unitario */}
-                                <td className="px-3 py-3 text-right tabular-nums">
-                                  <span className="text-sm font-medium text-slate-700">
-                                    {formatCurrency(Number(item.UltimoPrecioCompra ?? 0))}
-                                  </span>
-                                  {item.UltimaFechaCompra && (
-                                    <p className="text-[10px] text-slate-400">{formatOptionalDate(item.UltimaFechaCompra)}</p>
-                                  )}
-                                </td>
-
-                                {/* Total línea */}
-                                <td className="px-3 py-3 text-right tabular-nums">
-                                  <span className="text-sm font-semibold text-slate-900">
-                                    {formatCurrency(lineTotal)}
-                                  </span>
-                                </td>
-
-                                {/* Stock badge */}
-                                <td className="px-4 py-3 text-center">
-                                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stockStatus.className}`}>
-                                    {stockStatus.label}
-                                  </span>
-                                  <p className="mt-0.5 text-[10px] text-slate-400 tabular-nums">
-                                    {formatQuantity(Number(item.EnStock ?? 0))} uds
-                                  </p>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-
-                        {/* Footer totalizador */}
-                        {detalleSolicitud.length > 1 && (
-                          <tfoot>
-                            <tr className="border-t-2 border-slate-200 bg-slate-50">
-                              <td colSpan={4} className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500">
-                                Total estimado
-                              </td>
-                              <td className="px-3 py-2.5 text-right">
-                                <span className="text-sm font-bold text-slate-900 tabular-nums">
-                                  {formatCurrency(detalleSolicitud.reduce((s, i) => s + getMaterialTotal(i), 0))}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5" />
-                            </tr>
-                          </tfoot>
-                        )}
-                      </table>
-                    )}
+              {detalleContext.comentario?.trim() && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Observaciones
+                  </h3>
+                  <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+                    {detalleContext.comentario}
                   </div>
                 </div>
+              )}
 
-                {/* Estado de decisión (modo Ver) */}
-                {modalAction === 'ver' && resumenDecision && (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-slate-500">Última decisión</span>
-                      <Badge
-                        variant="outline"
-                        className={`text-[11px] font-semibold ${resumenDecision.badgeClassName}`}
-                      >
-                        {resumenDecision.label}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-500">
-                      {selectedSolicitud.nombreAprobador && (
-                        <span><strong className="text-slate-700">Responsable:</strong> {selectedSolicitud.nombreAprobador}</span>
-                      )}
-                      {selectedSolicitud.fechaAprobacion && (
-                        <span><strong className="text-slate-700">Fecha:</strong> {formatOptionalDate(selectedSolicitud.fechaAprobacion)}</span>
-                      )}
-                    </div>
-                    {selectedSolicitud.comentarioAprobacion?.trim() && (
-                      <p className="mt-2 border-t border-slate-200 pt-2 text-xs leading-5 text-slate-600 italic">
-                        "{selectedSolicitud.comentarioAprobacion}"
+              {modalAction !== 'ver' && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Decisión
+                  </h3>
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        {modalAction === 'aprobar'
+                          ? 'Puedes dejar un comentario opcional para trazabilidad de la aprobación.'
+                          : 'Debes explicar el motivo del rechazo antes de continuar.'}
                       </p>
-                    )}
-                  </div>
-                )}
+                      <Label htmlFor="comentario" className="sr-only">
+                        Comentario
+                      </Label>
+                      <Textarea
+                        id="comentario"
+                        placeholder={modalAction === 'aprobar'
+                          ? 'Comentario opcional...'
+                          : 'Explica el motivo del rechazo...'}
+                        value={comentario}
+                        onChange={(event) => setComentario(event.target.value)}
+                        rows={4}
+                        className="min-h-[110px] resize-none rounded-xl border-slate-200 bg-slate-50 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-3 rounded-lg border bg-slate-50 p-4 text-sm">
+                      <div className="font-semibold text-slate-900">Resumen presupuestario</div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Estado</span>
+                        <Badge variant="outline" className={getPresupuestoBadgeConfig(selectedSolicitud.presupuestoEstado).className}>
+                          {getPresupuestoBadgeConfig(selectedSolicitud.presupuestoEstado).label}
+                        </Badge>
+                      </div>
 
-                {/* Comentario (aprobar / rechazar) */}
-                {(modalAction === 'rechazar' || modalAction === 'aprobar') && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-slate-500">
-                      {modalAction === 'aprobar'
-                        ? 'Comentario opcional — queda registrado como trazabilidad.'
-                        : 'Motivo del rechazo — obligatorio para continuar.'}
-                    </p>
-                    <Label htmlFor="modal-comentario" className="sr-only">Comentario</Label>
-                    <Textarea
-                      id="modal-comentario"
-                      placeholder={
-                        modalAction === 'rechazar'
-                          ? 'Explica el motivo del rechazo...'
-                          : 'Comentario opcional...'
-                      }
-                      value={comentario}
-                      onChange={(e) => setComentario(e.target.value)}
-                      rows={modalAction === 'rechazar' ? 3 : 2}
-                      className="resize-none rounded-xl border-slate-200 bg-slate-50 text-sm placeholder:text-slate-400"
-                    />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Presupuesto</span>
+                        <span className="font-medium">
+                          {presupuestoModal?.presupuestoArea ? formatCurrency(presupuestoModal.presupuestoArea) : 'N/D'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Solicitud actual</span>
+                        <span className="font-medium">{formatCurrency(presupuestoModal?.solicitudActual ?? 0)}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Disponible después</span>
+                        <span
+                          className={`font-semibold ${
+                            shouldBlockBudgetApproval(selectedSolicitud) ? 'text-red-600' : 'text-green-700'
+                          }`}
+                        >
+                          {presupuestoModal?.disponibleDespues == null
+                            ? 'N/D'
+                            : formatCurrency(presupuestoModal.disponibleDespues)}
+                        </span>
+                      </div>
+
+                      {presupuestoModal?.mensaje?.trim() && (
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                          {presupuestoModal.mensaje}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* ── Footer ─────────────────────────────────────── */}
-          <div className="border-t border-slate-100 bg-white px-6 py-3.5">
-            <div className="flex w-full items-center justify-between gap-3">
-              {/* totalizador rápido */}
-              <div className="hidden sm:block">
-                {!cargandoDetalle && detalleSolicitud.length > 0 && (
-                  <p className="text-xs text-slate-400">
-                    <span className="font-semibold text-slate-700">{detalleSolicitud.length}</span> líneas ·{' '}
-                    <span className="font-semibold text-slate-700">
-                      {formatCurrency(detalleSolicitud.reduce((s, i) => s + getMaterialTotal(i), 0))}
-                    </span>{' '}
-                    estimado
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 ml-auto">
+          <DialogFooter className="shrink-0 border-t bg-slate-50 px-6 py-4 sm:justify-between">
+            <div className="hidden text-sm text-muted-foreground sm:block">
+              {!cargandoDetalle && detalleSolicitud.length > 0
+                ? `${detalleSolicitud.length} líneas · ${formatCurrency(resumenMateriales.valorTotal)} estimado`
+                : 'Sin líneas de detalle'}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={closeModal}>
+                {modalAction === 'ver' ? 'Cerrar' : 'Cancelar'}
+              </Button>
+              {modalAction !== 'ver' && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setModalAction(null);
-                    setSelectedSolicitud(null);
-                    setComentario('');
-                    setDetalleSolicitud([]);
-                  }}
+                  onClick={handleConfirmarAccion}
+                  disabled={
+                    procesandoAccion
+                    || (modalAction === 'aprobar' && Boolean(selectedSolicitud && shouldBlockBudgetApproval(selectedSolicitud)))
+                  }
+                  className="inline-flex h-8 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-all disabled:pointer-events-none"
                   style={{
-                    height: '36px',
-                    borderRadius: '12px',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 16px',
-                    transition: 'all 0.15s',
-                    background: '#dc2626',
+                    backgroundColor: modalAction === 'aprobar' ? '#16a34a' : '#dc2626',
                     color: '#ffffff',
-                    boxShadow: '0 1px 8px rgba(220,38,38,0.3)',
+                    opacity: procesandoAccion ? 0.85 : 1,
+                    boxShadow: modalAction === 'aprobar'
+                      ? '0 1px 2px rgba(22, 163, 74, 0.25)'
+                      : '0 1px 2px rgba(220, 38, 38, 0.25)',
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#b91c1c'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#dc2626'; }}
                 >
-                  {modalAction === 'ver' ? 'Cerrar' : 'Cancelar'}
+                  {modalAction === 'aprobar' ? (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  ) : (
+                    <XCircle className="mr-2 h-4 w-4" />
+                  )}
+                  {procesandoAccion
+                    ? 'Procesando...'
+                    : modalAction === 'aprobar'
+                      ? 'Confirmar aprobación'
+                      : 'Confirmar rechazo'}
                 </button>
-
-                {modalAction !== 'ver' && (
-                  <button
-                    type="button"
-                    onClick={handleConfirmarAccion}
-                    disabled={procesandoAccion}
-                    style={{
-                      height: '36px',
-                      minWidth: '160px',
-                      borderRadius: '12px',
-                      border: 'none',
-                      cursor: procesandoAccion ? 'not-allowed' : 'pointer',
-                      opacity: procesandoAccion ? 0.7 : 1,
-                      fontSize: '14px',
-                      fontWeight: 600,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      padding: '0 16px',
-                      transition: 'all 0.15s',
-                      background: modalAction === 'aprobar' ? '#16a34a' : '#dc2626',
-                      color: '#ffffff',
-                      boxShadow: modalAction === 'aprobar'
-                        ? '0 1px 8px rgba(22,163,74,0.35)'
-                        : '0 1px 8px rgba(220,38,38,0.35)',
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background =
-                        modalAction === 'aprobar' ? '#15803d' : '#b91c1c';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background =
-                        modalAction === 'aprobar' ? '#16a34a' : '#dc2626';
-                    }}
-                  >
-                    {modalAction === 'aprobar' ? (
-                      <>
-                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} />
-                        {procesandoAccion ? 'Procesando...' : 'Confirmar aprobación'}
-                      </>
-                    ) : (
-                      <>
-                        <XCircle style={{ width: 14, height: 14, flexShrink: 0 }} />
-                        {procesandoAccion ? 'Procesando...' : 'Confirmar rechazo'}
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
+              )}
             </div>
-          </div>
-
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
 
+function InfoField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="break-words text-sm font-medium text-slate-800">{value}</div>
     </div>
   );
 }

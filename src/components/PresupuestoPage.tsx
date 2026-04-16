@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { API_BASE_URL } from '../services/apiConfig';
+import { apiFetch } from '../services/apiClient';
+import { usePermisos } from '../contexts/PermisosContext';
+import { ImportadorExcelPresupuesto } from './ImportadorExcelPresupuesto';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -9,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Plus, Edit, AlertTriangle, Eye, Loader2 } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Plus, Edit, AlertTriangle, Eye, Loader2, Download, RotateCcw } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -22,7 +24,7 @@ import {
 interface PresupuestoPro {
   IdPresupuesto: number;
   Anio: number;
-  Mes: number;
+  Mes: number | null;
   Presupuesto: number;
   Moneda: string;
   IdArea: number;
@@ -59,6 +61,7 @@ interface Area {
 
 export default function PresupuestoPage() {
   const { token, user } = useAuth();
+  const { modulos, getPermisosModulo } = usePermisos();
   const [presupuestos, setPresupuestos] = useState<PresupuestoPro[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorData, setErrorData] = useState<string | null>(null);
@@ -70,6 +73,7 @@ export default function PresupuestoPage() {
   const [selectedPresupuesto, setSelectedPresupuesto] = useState<PresupuestoPro | null>(null);
   const [detalle, setDetalle] = useState<PresupuestoDetalle[]>([]);
   const [loadingDetalle, setLoadingDetalle] = useState(false);
+  const [detalleError, setDetalleError] = useState<string | null>(null);
   
   // Estado para el formulario de nuevo presupuesto
   const [formIdPresupuesto, setFormIdPresupuesto] = useState<number | null>(null);
@@ -81,20 +85,90 @@ export default function PresupuestoPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterAnio, setFilterAnio] = useState('todos');
+  const [filterMes, setFilterMes] = useState('todos');
+  const [filterArea, setFilterArea] = useState('todas');
+
+  const presupuestoModuleCode = useMemo(() => {
+    return modulos.find((modulo) => modulo.path === '/presupuesto')?.id ?? 'presupuesto';
+  }, [modulos]);
+
+  const modulePermissions = user ? getPermisosModulo(user.role, presupuestoModuleCode) : null;
+  const canEditPresupuesto = !!modulePermissions?.puedeCrear || !!modulePermissions?.puedeEditar;
+
+  const availableYears = useMemo(() => {
+    const years = Array.from(new Set(presupuestos.map((presupuesto) => presupuesto.Anio)));
+    return years.sort((left, right) => right - left);
+  }, [presupuestos]);
+
+  const availableAreas = useMemo(() => {
+    const areaMap = new Map<number, string>();
+    presupuestos.forEach((presupuesto) => {
+      if (!areaMap.has(presupuesto.IdArea)) {
+        areaMap.set(presupuesto.IdArea, presupuesto.AreaNombre);
+      }
+    });
+    return Array.from(areaMap.entries())
+      .map(([id, nombre]) => ({ id, nombre }))
+      .sort((left, right) => left.nombre.localeCompare(right.nombre, 'es'));
+  }, [presupuestos]);
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setFilterAnio('todos');
+    setFilterMes('todos');
+    setFilterArea('todas');
+  };
+
+  const exportarCsv = () => {
+    const headers = [
+      'Area',
+      'Periodo',
+      'Presupuesto',
+      'Consumo',
+      'Disponible',
+      'PorcentajeEjecucion',
+      'Estado',
+      'Comprometido',
+      'Ejecutado',
+    ];
+
+    const rows = filteredPresupuestos.map((presupuesto) => [
+      `"${presupuesto.AreaNombre.replace(/"/g, '""')}"`,
+      `"${presupuesto.Mes ? `${presupuesto.Anio} - Mes ${presupuesto.Mes}` : `${presupuesto.Anio} - Anual`}"`,
+      presupuesto.Presupuesto,
+      presupuesto.Consumo,
+      presupuesto.Disponible,
+      presupuesto.PorcentajeEjecucion.toFixed(2),
+      presupuesto.EstadoAlerta,
+      presupuesto.Comprometido,
+      presupuesto.Ejecutado,
+    ].join(','));
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `presupuestos_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const cargarPresupuestos = async () => {
     if (!token) return;
     setLoading(true);
     setErrorData(null);
     try {
-      const resp = await fetch(`${API_BASE_URL}/presupuestos`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const resp = await apiFetch('/presupuestos');
       if (resp.ok) {
         const data = await resp.json();
         setPresupuestos(data);
       } else {
-        setErrorData('Error al cargar la lista de presupuestos.');
+        const payload = await resp.json().catch(() => null);
+        setErrorData(payload?.message || 'Error al cargar la lista de presupuestos.');
       }
     } catch (error) {
       console.error('Error al cargar presupuestos', error);
@@ -107,9 +181,7 @@ export default function PresupuestoPage() {
   const cargarAreas = async () => {
     if (!token) return;
     try {
-      const resp = await fetch(`${API_BASE_URL}/areas`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const resp = await apiFetch('/areas');
       if (resp.ok) {
         const data = await resp.json();
         setAreas(data.map((a: any) => ({
@@ -129,11 +201,17 @@ export default function PresupuestoPage() {
   }, [token]);
 
   const openForm = (p?: PresupuestoPro) => {
+    if (!canEditPresupuesto) {
+      setFormError('Tu rol no tiene permisos para editar presupuestos.');
+      setDialogOpen(true);
+      return;
+    }
+
     setFormError(null);
     if (p) {
       setFormIdPresupuesto(p.IdPresupuesto);
       setFormAnio(p.Anio.toString());
-      setFormMes(p.Mes.toString());
+      setFormMes(p.Mes != null ? p.Mes.toString() : (new Date().getMonth() + 1).toString());
       setFormAreaId(p.IdArea.toString());
       setFormMonto(p.Presupuesto.toString());
     } else {
@@ -151,16 +229,19 @@ export default function PresupuestoPage() {
     setDialogDetailOpen(true);
     setLoadingDetalle(true);
     setDetalle([]);
+    setDetalleError(null);
     try {
-      const resp = await fetch(`${API_BASE_URL}/presupuestos/${p.IdPresupuesto}/detalle`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const resp = await apiFetch(`/presupuestos/${p.IdPresupuesto}/detalle`);
       if (resp.ok) {
         const data = await resp.json();
         setDetalle(data);
+      } else {
+        const payload = await resp.json().catch(() => null);
+        setDetalleError(payload?.message || 'Error al cargar detalle de presupuesto');
       }
     } catch (error) {
       console.error('Error al cargar detalle de presupuesto', error);
+      setDetalleError('Error de conexión al cargar el detalle');
     } finally {
       setLoadingDetalle(false);
     }
@@ -168,6 +249,11 @@ export default function PresupuestoPage() {
 
   const handleGuardarPresupuesto = async () => {
     if (!token) return;
+
+    if (!canEditPresupuesto) {
+      setFormError('Tu rol no tiene permisos para guardar presupuestos.');
+      return;
+    }
     
     setFormError(null);
     if (!formAnio || !formMes || !formAreaId || !formMonto) {
@@ -183,12 +269,8 @@ export default function PresupuestoPage() {
 
     setIsSubmitting(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/presupuestos/guardar`, {
+      const resp = await apiFetch('/presupuestos/guardar', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           idPresupuesto: formIdPresupuesto,
           anio: Number(formAnio),
@@ -203,8 +285,8 @@ export default function PresupuestoPage() {
         cargarPresupuestos();
         setFormMonto('');
       } else {
-        const err = await resp.json();
-        setFormError(err.message || 'Error al guardar presupuesto');
+        const err = await resp.json().catch(() => null);
+        setFormError(err?.message || 'Error al guardar presupuesto');
       }
     } catch (error) {
       console.error('Error al guardar presupuesto', error);
@@ -215,10 +297,17 @@ export default function PresupuestoPage() {
   };
 
   const filteredPresupuestos = useMemo(() => {
-    if (!searchTerm) return presupuestos;
-    const term = searchTerm.toLowerCase();
-    return presupuestos.filter(p => p.AreaNombre.toLowerCase().includes(term));
-  }, [presupuestos, searchTerm]);
+    const term = searchTerm.trim().toLowerCase();
+
+    return presupuestos.filter((presupuesto) => {
+      const matchesSearch = !term || presupuesto.AreaNombre.toLowerCase().includes(term);
+      const matchesYear = filterAnio === 'todos' || String(presupuesto.Anio) === filterAnio;
+      const matchesMonth = filterMes === 'todos' || String(presupuesto.Mes ?? '') === filterMes;
+      const matchesArea = filterArea === 'todas' || String(presupuesto.IdArea) === filterArea;
+
+      return matchesSearch && matchesYear && matchesMonth && matchesArea;
+    });
+  }, [presupuestos, searchTerm, filterAnio, filterMes, filterArea]);
 
   const stats = useMemo(() => {
     const totalP = filteredPresupuestos.reduce((sum, p) => sum + p.Presupuesto, 0);
@@ -248,8 +337,13 @@ export default function PresupuestoPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={exportarCsv} disabled={filteredPresupuestos.length === 0}>
+            <Download className="w-4 h-4 mr-2" />
+            Exportar CSV
+          </Button>
+          {canEditPresupuesto && <ImportadorExcelPresupuesto onSuccess={cargarPresupuestos} />}
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <Button className="bg-primary hover:bg-primary/90" onClick={() => openForm()}>
+            <Button className="bg-primary hover:bg-primary/90" onClick={() => openForm()} disabled={!canEditPresupuesto}>
               <Plus className="w-4 h-4 mr-2" />
               Definir Nuevo Presupuesto
             </Button>
@@ -317,7 +411,7 @@ export default function PresupuestoPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSubmitting}>Cancelar</Button>
-                <Button onClick={handleGuardarPresupuesto} disabled={isSubmitting}>
+                <Button onClick={handleGuardarPresupuesto} disabled={isSubmitting || !canEditPresupuesto}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {formIdPresupuesto ? 'Actualizar' : 'Confirmar'}
                 </Button>
@@ -449,14 +543,63 @@ export default function PresupuestoPage() {
 
           <Card>
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <CardTitle>Presupuestos por Área</CardTitle>
-              <div className="w-full sm:w-64">
+              <div className="space-y-1">
+                <CardTitle>Presupuestos por Área</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  {filteredPresupuestos.length} de {presupuestos.length} registros visibles
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:min-w-[640px]">
                 <Input
                   placeholder="Buscar por área..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full"
                 />
+                <div className="grid gap-2 md:grid-cols-4">
+                  <Select value={filterAnio} onValueChange={setFilterAnio}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Año" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos los años</SelectItem>
+                      {availableYears.map((year) => (
+                        <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterMes} onValueChange={setFilterMes}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Mes" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos los meses</SelectItem>
+                      {Array.from({ length: 12 }, (_, index) => {
+                        const month = index + 1;
+                        return (
+                          <SelectItem key={month} value={String(month)}>
+                            {new Date(0, index).toLocaleString('es', { month: 'long' })}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterArea} onValueChange={setFilterArea}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Área" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todas">Todas las áreas</SelectItem>
+                      {availableAreas.map((area) => (
+                        <SelectItem key={area.id} value={String(area.id)}>{area.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" onClick={resetFilters}>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Limpiar
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -478,7 +621,7 @@ export default function PresupuestoPage() {
                   {filteredPresupuestos.map((p) => (
                     <TableRow key={p.IdPresupuesto}>
                       <TableCell className="font-medium">{p.AreaNombre}</TableCell>
-                      <TableCell>{p.Anio} - Mes {p.Mes}</TableCell>
+                      <TableCell>{p.Mes ? `${p.Anio} - Mes ${p.Mes}` : `${p.Anio} - Anual`}</TableCell>
                       <TableCell className="text-right font-semibold">${p.Presupuesto.toLocaleString()}</TableCell>
                       <TableCell className="text-right font-medium text-primary">${p.Consumo.toLocaleString()}</TableCell>
                       <TableCell className={`text-right font-medium ${p.Disponible < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
@@ -507,7 +650,7 @@ export default function PresupuestoPage() {
                         <Button variant="ghost" size="icon" onClick={() => openDetail(p)}>
                            <Eye className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => openForm(p)}>
+                        <Button variant="ghost" size="icon" onClick={() => openForm(p)} disabled={!canEditPresupuesto} title={canEditPresupuesto ? 'Editar presupuesto' : 'Sin permiso para editar'}>
                            <Edit className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
                         </Button>
                       </TableCell>
@@ -542,7 +685,7 @@ export default function PresupuestoPage() {
                 )}
               </DialogTitle>
               <DialogDescription>
-                {selectedPresupuesto && `Período: ${selectedPresupuesto.Anio} - Mes ${selectedPresupuesto.Mes}`}
+                {selectedPresupuesto && (selectedPresupuesto.Mes ? `Período: ${selectedPresupuesto.Anio} - Mes ${selectedPresupuesto.Mes}` : `Período: ${selectedPresupuesto.Anio} - Anual`)}
               </DialogDescription>
             </DialogHeader>
           </div>
@@ -578,6 +721,11 @@ export default function PresupuestoPage() {
 
             <div>
               <h3 className="text-sm font-semibold mb-3">Distribución por Material o Concepto</h3>
+              {detalleError && (
+                <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {detalleError}
+                </div>
+              )}
               {loadingDetalle ? (
                 <div className="flex shrink-0 justify-center items-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />

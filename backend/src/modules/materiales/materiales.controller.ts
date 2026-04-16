@@ -8,6 +8,7 @@ import { env } from '../../config/env';
 import {
   listarMateriales,
   listarMaterialesConStock,
+  listarMaterialesPermitidosPorUsuarioArea,
   obtenerImagenMaterialPorNumeroArticulo,
   crearMaterial,
   actualizarMaterial,
@@ -17,6 +18,7 @@ import {
 } from './materiales.service';
 import { crearCorte as crearCorteStock } from '../cortes/cortes.service';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
+import { usuarioTieneAccesoArea } from '../areas/areas.service';
 import { parse as parseCsv } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 
@@ -393,6 +395,37 @@ export async function listarMaterialesConStockController(_req: Request, res: Res
         ? 'Timeout al listar materiales con stock (la consulta está tardando demasiado en SQL Server)'
         : 'Error al listar materiales con stock',
     });
+  }
+}
+
+export async function listarMaterialesPermitidosController(req: AuthRequest, res: Response) {
+  const idArea = Number(req.query?.areaId ?? req.query?.idArea);
+  const catalogoRaw = req.query?.catalogoId ?? req.query?.idCatalogoSolicitud;
+  const idCatalogoSolicitud = catalogoRaw == null || catalogoRaw === '' ? null : Number(catalogoRaw);
+
+  if (!Number.isInteger(idArea) || idArea <= 0) {
+    return res.status(400).json({ message: 'areaId es requerido' });
+  }
+
+  if (idCatalogoSolicitud != null && (!Number.isInteger(idCatalogoSolicitud) || idCatalogoSolicitud <= 0)) {
+    return res.status(400).json({ message: 'catalogoId es inválido' });
+  }
+
+  if (!req.userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado' });
+  }
+
+  try {
+    const autorizado = await usuarioTieneAccesoArea(req.userId, idArea);
+    if (!autorizado) {
+      return res.status(403).json({ message: 'No tienes autorización para operar en esta área.' });
+    }
+
+    const payload = await listarMaterialesPermitidosPorUsuarioArea(req.userId, idArea, idCatalogoSolicitud);
+    return res.json(payload);
+  } catch (error: any) {
+    console.error('Error en listarMaterialesPermitidosController', error);
+    return res.status(500).json({ message: 'Error al listar materiales permitidos' });
   }
 }
 

@@ -438,7 +438,7 @@ IF OBJECT_ID('dbo.SolicitudesMaterial', 'U') IS NULL
     IdSolicitante INT NOT NULL,
     FechaSolicitud DATETIME2 NOT NULL DEFAULT(SYSDATETIME()),
     Estado NVARCHAR(30) NOT NULL,
-    -- PENDIENTE, APROBADA, RECHAZADA, DESPACHADA
+    -- PENDIENTE, APROBADA, RECHAZADA, EN_DESPACHO, PARCIALMENTE_DESPACHADA, COMPLETADA
     Area NVARCHAR(100) NULL,
     -- texto libre histórico
     Comentario NVARCHAR(500) NULL,
@@ -2804,6 +2804,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_RegistrarAprobacionSolicitud
 AS
 BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
 
     IF @Estado NOT IN ('APROBADA', 'RECHAZADA')
     BEGIN
@@ -2811,8 +2812,40 @@ BEGIN
         RETURN;
     END
 
+    SET @Comentario = NULLIF(LTRIM(RTRIM(ISNULL(@Comentario, ''))), '');
+
+    IF @Estado = 'RECHAZADA' AND @Comentario IS NULL
+    BEGIN
+        RAISERROR('Debes ingresar un comentario al rechazar la solicitud.', 16, 1);
+        RETURN;
+    END
+
     BEGIN TRY
         BEGIN TRAN;
+
+        DECLARE @CodigoSolicitud NVARCHAR(50) = NULL;
+        DECLARE @EstadoActual NVARCHAR(30) = NULL;
+
+        SELECT
+            @CodigoSolicitud = s.CodigoSolicitud,
+            @EstadoActual = UPPER(LTRIM(RTRIM(ISNULL(s.Estado, ''))))
+        FROM dbo.SolicitudesMaterial s WITH (UPDLOCK, HOLDLOCK)
+        WHERE s.IdSolicitud = @IdSolicitud;
+
+        IF @CodigoSolicitud IS NULL
+        BEGIN
+            RAISERROR('Solicitud no encontrada', 16, 1);
+        END
+
+        IF @EstadoActual <> 'PENDIENTE'
+        BEGIN
+            DECLARE @ErrorEstado NVARCHAR(4000) = CONCAT(
+                'La solicitud ',
+                ISNULL(@CodigoSolicitud, CONCAT('#', @IdSolicitud)),
+                ' ya no está pendiente y no puede procesarse nuevamente.'
+            );
+            RAISERROR(@ErrorEstado, 16, 1);
+        END
 
         INSERT INTO dbo.Aprobaciones
         (
@@ -2834,6 +2867,11 @@ BEGIN
         UPDATE dbo.SolicitudesMaterial
         SET Estado = @Estado
         WHERE IdSolicitud = @IdSolicitud;
+
+        SELECT
+            @IdSolicitud AS IdSolicitud,
+            @CodigoSolicitud AS CodigoSolicitud,
+            @Estado AS Estado;
 
         COMMIT TRAN;
     END TRY
@@ -2899,8 +2937,8 @@ GO
 CREATE OR ALTER PROCEDURE dbo.sp_RegistrarDespachoSolicitud
     @IdSolicitud INT,
     @DetalleDesp dbo.TDespachoSolicitudDetalle READONLY,
-    @NuevoEstado NVARCHAR(30) = 'DESPACHADA'
--- EN_DESPACHO / DESPACHADA
+    @NuevoEstado NVARCHAR(30) = 'COMPLETADA'
+-- EN_DESPACHO / COMPLETADA
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -2966,11 +3004,26 @@ BEGIN
     CREATE TABLE dbo.DetalleDespachos (
         IdDetalleDespacho INT IDENTITY(1,1) PRIMARY KEY,
         IdDespacho INT NOT NULL,
+        IdDetalleSolicitud INT NULL,
         IdMaterial INT NOT NULL,
         CantidadDespachada DECIMAL(18,4) NOT NULL,
         CONSTRAINT FK_DetalleDespachos_Despachos FOREIGN KEY (IdDespacho) REFERENCES dbo.Despachos(IdDespacho),
+        CONSTRAINT FK_DetalleDespachos_DetalleSolicitudesMaterial FOREIGN KEY (IdDetalleSolicitud) REFERENCES dbo.DetalleSolicitudesMaterial(IdDetalleSolicitud),
         CONSTRAINT FK_DetalleDespachos_Materiales FOREIGN KEY (IdMaterial) REFERENCES dbo.Materiales(IdMaterial)
     );
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_DetalleDespachos_IdDespacho_DetalleSolicitud_Material'
+      AND object_id = OBJECT_ID('dbo.DetalleDespachos')
+)
+BEGIN
+    CREATE INDEX IX_DetalleDespachos_IdDespacho_DetalleSolicitud_Material
+        ON dbo.DetalleDespachos (IdDespacho, IdDetalleSolicitud, IdMaterial)
+        INCLUDE (CantidadDespachada);
 END
 GO
 
@@ -3007,8 +3060,8 @@ BEGIN
 
         -- 2. Insertar detalle de despacho
         -- Obtenemos IdMaterial desde DetalleSolicitudesMaterial para el registro
-        INSERT INTO dbo.DetalleDespachos (IdDespacho, IdMaterial, CantidadDespachada)
-        SELECT @IdDespacho, ds.IdMaterial, d.CantidadDespachada
+        INSERT INTO dbo.DetalleDespachos (IdDespacho, IdDetalleSolicitud, IdMaterial, CantidadDespachada)
+        SELECT @IdDespacho, d.IdDetalleSolicitud, ds.IdMaterial, d.CantidadDespachada
         FROM @Detalle d
         JOIN dbo.DetalleSolicitudesMaterial ds ON d.IdDetalleSolicitud = ds.IdDetalleSolicitud;
 
@@ -3034,7 +3087,7 @@ BEGIN
         SELECT @TotalSolicitado = SUM(CantidadSolicitada) FROM dbo.DetalleSolicitudesMaterial WHERE IdSolicitud = @IdSolicitud;
         SELECT @TotalDespachado = SUM(ISNULL(CantidadAprobada, 0)) FROM dbo.DetalleSolicitudesMaterial WHERE IdSolicitud = @IdSolicitud;
 
-        DECLARE @NuevoEstado NVARCHAR(30) = 'DESPACHADA';
+        DECLARE @NuevoEstado NVARCHAR(30) = 'COMPLETADA';
         IF @TotalDespachado < @TotalSolicitado
         BEGIN
             SET @NuevoEstado = 'PARCIALMENTE_DESPACHADA';

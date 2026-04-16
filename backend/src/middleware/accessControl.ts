@@ -5,7 +5,7 @@ import {
   type PermisoAccionesModulo,
 } from '../modules/permisos/permisos.service';
 
-type AccionPermiso = 'ver' | 'crear' | 'editar' | 'aprobar' | 'eliminar';
+export type AccionPermiso = 'ver' | 'crear' | 'editar' | 'aprobar' | 'eliminar';
 
 interface ModulePermissionRequirement {
   moduloCodigo: string;
@@ -20,21 +20,61 @@ const actionMap: Record<AccionPermiso, keyof PermisoAccionesModulo> = {
   eliminar: 'puedeEliminar',
 };
 
+function normalizeRoleKey(value: string | null | undefined): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
 function isSuperUserRole(roles: string[] | null | undefined): boolean {
   return (roles || []).some((rol) => {
-    const normalized = String(rol || '').trim().toLowerCase();
+    const normalized = normalizeRoleKey(rol);
     return normalized === 'administrador' || normalized === 'admin' || normalized === 'administrator';
   });
 }
 
-async function hasModulePermission(
+export async function userHasModulePermission(
   userRoles: string[] | null | undefined,
   moduloCodigo: string,
   accion: AccionPermiso,
 ): Promise<boolean> {
-  const permisos = await obtenerPermisosModuloPorRoles(userRoles ?? [], moduloCodigo);
+  if (isSuperUserRole(userRoles)) {
+    return true;
+  }
+
+  const normalizedModulo = String(moduloCodigo || '').trim().toLowerCase();
+  if (!normalizedModulo) {
+    return false;
+  }
+
+  const permisos = await obtenerPermisosModuloPorRoles(userRoles ?? [], normalizedModulo);
   const permissionKey = actionMap[accion];
   return !!permisos?.[permissionKey];
+}
+
+export async function hasRequestModulePermission(
+  req: AuthRequest,
+  moduloCodigo: string,
+  accion: AccionPermiso = 'ver',
+): Promise<boolean> {
+  if (!req.userId) {
+    return false;
+  }
+
+  if (isSuperUserRole(req.userRoles)) {
+    return true;
+  }
+
+  const normalizedModulo = String(moduloCodigo || '').trim().toLowerCase();
+  if (!normalizedModulo) {
+    return false;
+  }
+
+  return userHasModulePermission(req.userRoles, normalizedModulo, accion);
 }
 
 export function requireModulePermission(moduloCodigo: string, accion: AccionPermiso = 'ver') {
@@ -45,10 +85,6 @@ export function requireAnyModulePermission(requirements: ModulePermissionRequire
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.userId) {
       return res.status(401).json({ message: 'No autenticado' });
-    }
-
-    if (isSuperUserRole(req.userRoles)) {
-      return next();
     }
 
     const normalizedRequirements = requirements
@@ -66,7 +102,7 @@ export function requireAnyModulePermission(requirements: ModulePermissionRequire
     try {
       const results = await Promise.all(
         normalizedRequirements.map((requirement) =>
-          hasModulePermission(req.userRoles, requirement.moduloCodigo, requirement.accion),
+          userHasModulePermission(req.userRoles, requirement.moduloCodigo, requirement.accion),
         ),
       );
 

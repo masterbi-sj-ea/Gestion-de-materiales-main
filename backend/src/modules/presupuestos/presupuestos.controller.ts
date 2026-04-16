@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
+import { registrarAuditoria } from '../auditoria/auditoria.service';
 import { 
   listarPresupuestos, 
   guardarPresupuesto, 
   guardarPresupuestoDetalle, 
-  obtenerDetallePresupuesto 
+  obtenerDetallePresupuesto,
+  importarPresupuestoMasivo
 } from './presupuestos.service';
 
 export async function listarPresupuestosController(_req: Request, res: Response) {
@@ -25,7 +27,7 @@ export async function guardarPresupuestoController(req: AuthRequest, res: Respon
   }
 
   try {
-    await guardarPresupuesto({
+    const result = await guardarPresupuesto({
       IdPresupuesto: idPresupuesto ? Number(idPresupuesto) : undefined,
       Anio: Number(anio),
       Mes: Number(mes),
@@ -35,10 +37,29 @@ export async function guardarPresupuestoController(req: AuthRequest, res: Respon
       IdUsuarioAudit: req.userId || 0
     });
 
-    return res.status(200).json({ message: 'Presupuesto guardado correctamente' });
+    try {
+      await registrarAuditoria(req.userId ?? null, result.action === 'created' ? 'CREAR_PRESUPUESTO' : 'ACTUALIZAR_PRESUPUESTO', {
+        modulo: 'Presupuesto',
+        entidad: `Presupuesto #${result.idPresupuesto}`,
+        idPresupuesto: result.idPresupuesto,
+        anio: Number(anio),
+        mes: Number(mes),
+        idArea: Number(idArea),
+        montoTotal: Number(montoTotal),
+        accion: result.action,
+      });
+    } catch (auditError) {
+      console.error('Error al registrar auditoría de presupuesto', auditError);
+    }
+
+    return res.status(200).json({
+      message: 'Presupuesto guardado correctamente',
+      idPresupuesto: result.idPresupuesto,
+      action: result.action,
+    });
   } catch (error: any) {
     console.error('Error en guardarPresupuestoController', error);
-    return res.status(500).json({ message: 'Error al guardar presupuesto' });
+    return res.status(500).json({ message: error?.message || 'Error al guardar presupuesto' });
   }
 }
 
@@ -50,7 +71,7 @@ export async function guardarPresupuestoDetalleController(req: AuthRequest, res:
   }
 
   try {
-    await guardarPresupuestoDetalle({
+    const result = await guardarPresupuestoDetalle({
       IdPresupuesto: Number(idPresupuesto),
       IdMaterial: Number(idMaterial),
       GrupoArticulos: grupoArticulos || '',
@@ -60,10 +81,27 @@ export async function guardarPresupuestoDetalleController(req: AuthRequest, res:
       MontoAsignado: Number(montoAsignado) || 0
     });
 
-    return res.status(200).json({ message: 'Detalle de presupuesto guardado correctamente' });
+    try {
+      await registrarAuditoria(req.userId ?? null, result.action === 'created' ? 'CREAR_DETALLE_PRESUPUESTO' : 'ACTUALIZAR_DETALLE_PRESUPUESTO', {
+        modulo: 'Presupuesto',
+        entidad: `Presupuesto #${idPresupuesto}`,
+        idPresupuesto: Number(idPresupuesto),
+        idMaterial: Number(idMaterial),
+        montoPermitido: Number(montoPermitido),
+        accion: result.action,
+      });
+    } catch (auditError) {
+      console.error('Error al registrar auditoría de detalle de presupuesto', auditError);
+    }
+
+    return res.status(200).json({
+      message: 'Detalle de presupuesto guardado correctamente',
+      idPresupuestoDetalle: result.idPresupuestoDetalle,
+      action: result.action,
+    });
   } catch (error: any) {
     console.error('Error en guardarPresupuestoDetalleController', error);
-    return res.status(500).json({ message: 'Error al guardar detalle de presupuesto' });
+    return res.status(500).json({ message: error?.message || 'Error al guardar detalle de presupuesto' });
   }
 }
 
@@ -83,3 +121,44 @@ export async function obtenerDetallePresupuestoController(req: Request, res: Res
   }
 }
 
+
+export async function importarPresupuestosController(req: AuthRequest, res: Response) {
+  const { filas } = req.body || {};
+
+  if (!Array.isArray(filas) || filas.length === 0) {
+    return res.status(400).json({ message: "No se enviaron filas para importar." });
+  }
+
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(401).json({ message: "Usuario no autenticado" });
+  }
+
+  try {
+    const result = await importarPresupuestoMasivo(filas, userId);
+
+    if (result.errores.length > 0) {
+      return res.status(400).json({
+        message: 'No se pudo importar el archivo porque hay filas sin mapeo o con datos invalidos.',
+        ...result,
+      });
+    }
+
+    await registrarAuditoria(userId, 'IMPORTAR_PRESUPUESTO_EXCEL', {
+      filasLeidas: result.filasLeidas,
+      filasAplicadas: result.filasAplicadas,
+      procesados: result.procesados,
+      creados: result.creados,
+      actualizados: result.actualizados,
+      omitidos: result.omitidos,
+    });
+
+    return res.status(200).json({
+      message: 'Importacion exitosa',
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Error importando presupuestos masivos:", error);
+    return res.status(500).json({ message: "Error al importar presupuestos", error: error.message });
+  }
+}

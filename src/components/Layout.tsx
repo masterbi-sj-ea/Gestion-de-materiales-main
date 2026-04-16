@@ -461,23 +461,36 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       )}
 
       <div className="custom-main-padding flex flex-col min-h-dvh">
-        <header className="sticky top-0 z-40 border-b border-[#EAECF0] bg-white/80 backdrop-blur">
-          <div className="flex items-center justify-between px-4 py-3 lg:px-8">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="rounded-lg text-[#667085] hover:bg-[#F9FAFB] lg:hidden"
+        <header className="sticky top-0 z-40 border-b border-[#EAECF0] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 lg:px-8 lg:py-3">
+            {/* Botón hamburger — solo mobile */}
+            <button
               onClick={() => setSidebarOpen(true)}
+              className="lg:hidden flex items-center justify-center h-9 w-9 rounded-xl bg-[#F4EBFF] text-[#6941C6] hover:bg-[#E9D7FE] active:scale-95 transition-all shrink-0"
+              aria-label="Abrir menú"
             >
-              <Menu className="h-5 w-5" />
-            </Button>
+              <Menu className="h-5 w-5" strokeWidth={2.5} />
+            </button>
 
-            <div className="flex-1" />
+            {/* Branding centrado — solo mobile */}
+            <div className="lg:hidden flex items-center gap-2 flex-1 justify-center">
+              <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#53389E] text-white shadow-sm">
+                <Package className="h-4 w-4" strokeWidth={2.5} />
+              </div>
+              <span className="text-sm font-bold tracking-tight text-[#101828]">Gestión ERP</span>
+            </div>
 
+            {/* Avatar del usuario — solo mobile */}
+            <div className="lg:hidden flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F4EBFF] text-[#6941C6] text-sm font-bold border border-[#E9D7FE]">
+              {userInitial}
+            </div>
+
+            {/* Espacio para desktop (sidebar ya muestra el branding) */}
+            <div className="hidden lg:block flex-1" />
           </div>
         </header>
 
-        <main className="p-4 lg:p-8">{children}</main>
+        <main className="px-2 py-4 sm:p-4 lg:p-8">{children}</main>
       </div>
     </div>
   );

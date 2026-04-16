@@ -8,7 +8,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Search, Plus, Edit, Trash2, Users, Shield, UserCheck, Lock, Package, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Users, Shield, UserCheck, Lock, Package, AlertTriangle, RefreshCcw } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
 import {
   Table,
@@ -59,6 +59,8 @@ export default function UsuariosPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const { token } = useAuth();
 
@@ -118,12 +120,21 @@ export default function UsuariosPage() {
     }
   };
 
-  useEffect(() => {
+  const cargarDatosBase = async () => {
     if (!token) return;
-    cargarUsuarios();
-    cargarRoles();
-    cargarAreas();
-  }, [token, page, pageSize]);
+    setLoading(true);
+    try {
+      await Promise.all([cargarUsuarios(), cargarRoles(), cargarAreas()]);
+    } catch (error) {
+      console.error('Error al cargar datos base', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarDatosBase();
+  }, [token]);
 
   const filteredUsuarios = usuarios.filter(user => {
     const matchesSearch = user.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -151,58 +162,51 @@ export default function UsuariosPage() {
 
       if (!editingUsuario) {
         if (!formPassword) {
-          sileo.error('Contrasena requerida', { description: 'Debes ingresar una contrasena para crear el usuario.' });
+          sileo.error({ title: 'Contraseña requerida', description: 'Debes ingresar una contraseña para crear el usuario.' });
           return;
         }
 
         if (formPassword.length < 6) {
-          sileo.error('Contrasena muy corta', { description: 'La contrasena debe tener al menos 6 caracteres.' });
+          sileo.error({ title: 'Contraseña muy corta', description: 'La contraseña debe tener al menos 6 caracteres.' });
           return;
         }
 
         if (formPassword !== formPasswordConfirm) {
-          sileo.error('Contrasenas no coinciden', { description: 'Verifica que ambas contrasenas sean iguales.' });
+          sileo.error({ title: 'Contraseñas no coinciden', description: 'Verifica que ambas contraseñas sean iguales.' });
           return;
         }
       }
 
-      if (editingUsuario) {
-        await fetch(`${API_BASE_URL}/usuarios/${editingUsuario.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            nombreCompleto: formNombre,
-            email: formEmail,
-            activo: formEstado === 'activo',
-            idRolPrincipal: formRolId ? Number(formRolId) : null,
-            idArea: formAreaId ? Number(formAreaId) : null,
-          }),
-        });
-      } else {
-        await fetch(`${API_BASE_URL}/usuarios`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            nombreCompleto: formNombre,
-            email: formEmail,
-            hashPassword: formPassword,
-            activo: formEstado === 'activo',
-            idRolPrincipal: formRolId ? Number(formRolId) : null,
-            idArea: formAreaId ? Number(formAreaId) : null,
-          }),
-        });
+      setSubmitting(true);
+
+      const response = await fetch(`${API_BASE_URL}/usuarios${editingUsuario ? `/${editingUsuario.id}` : ''}`, {
+        method: editingUsuario ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          nombreCompleto: formNombre,
+          email: formEmail,
+          activo: formEstado === 'activo',
+          idRolPrincipal: formRolId ? Number(formRolId) : null,
+          idArea: formAreaId ? Number(formAreaId) : null,
+          ...(!editingUsuario && { hashPassword: formPassword }),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Error en la petición');
       }
 
       setDialogOpen(false);
+      sileo.success({ title: editingUsuario ? 'Usuario actualizado' : 'Usuario creado', description: 'Los cambios se guardaron correctamente.' });
       await cargarUsuarios();
     } catch (error) {
       console.error('Error al guardar usuario', error);
+      sileo.error({ title: 'Error', description: 'Ocurrió un error al guardar el usuario.' });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -212,24 +216,26 @@ export default function UsuariosPage() {
 
   const confirmEliminar = async () => {
     if (!confirmDelete.item) return;
+    setSubmitting(true);
     try {
       await fetch(`${API_BASE_URL}/usuarios/${confirmDelete.item}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       await cargarUsuarios();
-      sileo.success('Usuario eliminado', { description: 'El usuario fue eliminado correctamente.' });
+      sileo.success({ title: 'Usuario eliminado', description: 'El usuario fue eliminado correctamente.' });
     } catch (error) {
       console.error('Error al eliminar usuario', error);
-      sileo.error('Error', { description: 'Ocurrió un error al eliminar el usuario.' });
+      sileo.error({ title: 'Error', description: 'Ocurrió un error al eliminar el usuario.' });
     } finally {
+      setSubmitting(false);
       setConfirmDelete({ open: false, item: null });
     }
   };
 
   const handleResetPassword = (email: string) => {
     console.log('Enviando link de restablecimiento a:', email);
-    sileo.info('Link de restablecimiento enviado', { description: `Se envió un enlace de restablecimiento a ${email}` });
+    sileo.info({ title: 'Link de restablecimiento enviado', description: `Se envió un enlace de restablecimiento a ${email}` });
   };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -255,6 +261,7 @@ export default function UsuariosPage() {
             <Button
               variant="destructive"
               onClick={confirmEliminar}
+              disabled={submitting}
               className="w-full sm:w-2/3 rounded-xl h-11 font-bold shadow-md hover:shadow-lg transition-all"
             >
               Sí, eliminar
@@ -270,13 +277,18 @@ export default function UsuariosPage() {
             Administración de usuarios y roles del sistema
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => handleOpenDialog()}>
-              <Plus className="w-4 h-4 mr-2" />
-              Nuevo Usuario
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={cargarDatosBase} disabled={loading || submitting}>
+            <RefreshCcw className="w-4 h-4 mr-2" />
+            Recargar
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={() => handleOpenDialog()}>
+                <Plus className="w-4 h-4 mr-2" />
+                Nuevo Usuario
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>
@@ -383,15 +395,16 @@ export default function UsuariosPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
                 Cancelar
               </Button>
-              <Button onClick={handleGuardarUsuario}>
+              <Button onClick={handleGuardarUsuario} disabled={submitting}>
                 {editingUsuario ? 'Guardar Cambios' : 'Crear Usuario'}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -540,7 +553,13 @@ export default function UsuariosPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUsuarios.length === 0 ? (
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                      Cargando usuarios...
+                    </TableCell>
+                  </TableRow>
+                ) : filteredUsuarios.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                       No se encontraron usuarios

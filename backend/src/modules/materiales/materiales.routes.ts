@@ -3,6 +3,7 @@ import multer from 'multer';
 import {
   listarMaterialesController,
   listarMaterialesConStockController,
+  listarMaterialesPermitidosController,
   crearMaterialController,
   actualizarMaterialController,
   eliminarMaterialController,
@@ -24,6 +25,7 @@ const router = Router();
 
 router.get('/', requireModulePermission('materiales', 'ver'), listarMaterialesController);
 router.get('/con-stock', requireModulePermission('materiales', 'ver'), listarMaterialesConStockController);
+router.get('/permitidos', requireModulePermission('materiales', 'ver'), listarMaterialesPermitidosController);
 router.get('/imagen/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerImagenMaterialPorNumeroArticuloController);
 router.get('/archivo/por-numero/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerArchivoImagenMaterialPorNumeroArticuloController);
 router.get('/imagen-archivo/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerArchivoImagenMaterialPorNumeroArticuloController);

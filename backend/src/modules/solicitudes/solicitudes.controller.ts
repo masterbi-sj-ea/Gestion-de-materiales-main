@@ -3,7 +3,9 @@ import { AuthRequest } from '../../middleware/auth';
 import {
   crearSolicitud,
   listarSolicitudes,
+  listarSolicitudesPaginadas,
   obtenerSolicitud,
+  obtenerPreviewPresupuestoSolicitud,
   obtenerSolicitudMeta,
   actualizarSolicitud,
   registrarAprobacionSolicitud,
@@ -21,18 +23,36 @@ const ESTADOS_SOLICITUD_VALIDOS = new Set([
   'RECHAZADA',
   'EN_DESPACHO',
   'PARCIALMENTE_DESPACHADA',
-  'DESPACHADA',
+  'COMPLETADA',
+  'CERRADA_PARCIAL',
 ]);
 
 const TRANSICIONES_SOLICITUD_PERMITIDAS: Record<string, string[]> = {
   PENDIENTE: ['APROBADA', 'RECHAZADA'],
-  APROBADA: ['EN_DESPACHO', 'PARCIALMENTE_DESPACHADA', 'DESPACHADA'],
-  EN_DESPACHO: ['PARCIALMENTE_DESPACHADA', 'DESPACHADA'],
-  PARCIALMENTE_DESPACHADA: ['EN_DESPACHO', 'DESPACHADA'],
+  APROBADA: ['EN_DESPACHO', 'PARCIALMENTE_DESPACHADA', 'COMPLETADA', 'CERRADA_PARCIAL'],
+  EN_DESPACHO: ['PARCIALMENTE_DESPACHADA', 'COMPLETADA', 'CERRADA_PARCIAL'],
+  PARCIALMENTE_DESPACHADA: ['EN_DESPACHO', 'COMPLETADA', 'CERRADA_PARCIAL'],
 };
 
 function normalizarEstadoSolicitud(value: unknown): string {
-  return String(value ?? '').trim().toUpperCase();
+  const normalized = String(value ?? '').trim().toUpperCase();
+
+  switch (normalized) {
+    case 'DESPACHADA':
+    case 'DESPACHADA_TOTAL':
+    case 'DESPACHADA TOTAL':
+      return 'COMPLETADA';
+    case 'DESPACHADA_PARCIAL':
+    case 'DESPACHADA PARCIAL':
+      return 'PARCIALMENTE_DESPACHADA';
+    case 'CERRADA PARCIAL':
+      return 'CERRADA_PARCIAL';
+    case 'EN DESPACHO':
+    case 'ENDESPACHO':
+      return 'EN_DESPACHO';
+    default:
+      return normalized;
+  }
 }
 
 function puedeTransicionarSolicitud(estadoActual: string, nuevoEstado: string): boolean {
@@ -115,10 +135,17 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
     idCorteStock,
     idArea,
     idRecurso,
+    idCatalogoSolicitud: idCatalogoSolicitudBody,
     idCentroCosto,
     ot,
     detalle,
   } = req.body || {};
+
+  const idCatalogoSolicitud = normalizarIdEnteroPositivo(idCatalogoSolicitudBody);
+
+  if (idCatalogoSolicitud == null) {
+    return res.status(400).json({ message: 'idCatalogoSolicitud es requerido y debe ser un entero positivo.' });
+  }
 
   if (!Array.isArray(detalle) || !detalle.length) {
     return res.status(400).json({ message: 'La solicitud debe tener al menos una línea de detalle' });
@@ -142,6 +169,7 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
       idCorteStock: idCorteStock ?? null,
       idArea: idArea ?? null,
       idRecurso: idRecurso ?? null,
+      idCatalogoSolicitud,
       idCentroCosto: idCentroCosto ?? null,
       ot: ot ?? null,
       detalle: detalle.map((d: any) => ({
@@ -203,6 +231,8 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
       return res.status(error.statusCode).json({
         code: error?.code,
         idsArea: Array.isArray(error?.idsArea) ? error.idsArea : undefined,
+        detallePresupuesto: Array.isArray(error?.detallePresupuesto) ? error.detallePresupuesto : undefined,
+        materiales: Array.isArray(error?.materiales) ? error.materiales : undefined,
         message: error?.message || 'No fue posible crear la solicitud',
       });
     }
@@ -211,15 +241,88 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
   }
 }
 
+export async function previewPresupuestoSolicitudController(req: AuthRequest, res: Response) {
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado' });
+  }
+
+  const { fechaSolicitud, estado, idArea, detalle, idSolicitud } = req.body || {};
+
+  if (!Array.isArray(detalle) || !detalle.length) {
+    return res.status(400).json({ message: 'La solicitud debe tener al menos una línea de detalle' });
+  }
+
+  if (detalle.some((d: any) => d?.idArea == null && idArea == null)) {
+    return res.status(400).json({ message: 'Cada línea debe tener un Área destino (idArea).' });
+  }
+
+  try {
+    await validarAccesoAreasSolicitud(userId, idArea, detalle);
+
+    const preview = await obtenerPreviewPresupuestoSolicitud({
+      idSolicitud: normalizarIdEnteroPositivo(idSolicitud) ?? undefined,
+      fechaSolicitud: fechaSolicitud ?? null,
+      estado: estado ?? 'PENDIENTE',
+      idAreaCabecera: normalizarIdEnteroPositivo(idArea),
+      detalle: detalle.map((d: any) => ({
+        idMaterial: Number(d.idMaterial),
+        cantidadSolicitada: Number(d.cantidadSolicitada),
+        unidadMedida: d.unidadMedida ?? null,
+        comentarioLinea: d.comentarioLinea ?? null,
+        idArea: normalizarIdEnteroPositivo(d.idArea),
+        idRecurso: normalizarIdEnteroPositivo(d.idRecurso),
+      })),
+    });
+
+    return res.status(200).json(preview);
+  } catch (error: any) {
+    console.error('Error en previewPresupuestoSolicitudController', error);
+
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({
+        code: error?.code,
+        idsArea: Array.isArray(error?.idsArea) ? error.idsArea : undefined,
+        message: error?.message || 'No se pudo calcular el preview presupuestario',
+      });
+    }
+
+    return res.status(500).json({ message: error?.message || 'Error al calcular preview presupuestario' });
+  }
+}
+
 export async function listarSolicitudesController(req: AuthRequest, res: Response) {
   try {
-    const { estado, idArea, fechaDesde, fechaHasta, soloMias } = req.query as Record<string, string | undefined>;
+    const {
+      estado,
+      idArea,
+      fechaDesde,
+      fechaHasta,
+      soloMias,
+      page,
+      pageSize,
+    } = req.query as Record<string, string | undefined>;
 
     const idSolicitante = soloMias === 'true' ? req.userId ?? undefined : undefined;
+    const estadoNormalizado = estado ? normalizarEstadoSolicitud(estado) : undefined;
+
+    if (page || pageSize) {
+      const solicitudesPaginadas = await listarSolicitudesPaginadas({
+        idSolicitante,
+        estado: estadoNormalizado,
+        idArea: idArea ? Number(idArea) : undefined,
+        fechaDesde: fechaDesde || undefined,
+        fechaHasta: fechaHasta || undefined,
+        page: page ? Number(page) : 1,
+        pageSize: pageSize ? Math.min(Number(pageSize), 100) : 10,
+      });
+
+      return res.json(solicitudesPaginadas);
+    }
 
     const solicitudes = await listarSolicitudes({
       idSolicitante,
-      estado: estado || undefined,
+      estado: estadoNormalizado,
       idArea: idArea ? Number(idArea) : undefined,
       fechaDesde: fechaDesde || undefined,
       fechaHasta: fechaHasta || undefined,
@@ -263,11 +366,18 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
     comentario,
     idArea,
     idRecurso,
+    idCatalogoSolicitud: idCatalogoSolicitudBody,
     idCentroCosto,
     detalle,
     nuevoEstado,
     ot,
   } = req.body || {};
+
+  const idCatalogoSolicitud = normalizarIdEnteroPositivo(idCatalogoSolicitudBody);
+
+  if (idCatalogoSolicitud == null) {
+    return res.status(400).json({ message: 'idCatalogoSolicitud es requerido y debe ser un entero positivo.' });
+  }
 
   if (!Array.isArray(detalle) || !detalle.length) {
     return res.status(400).json({ message: 'La solicitud debe tener al menos una línea de detalle' });
@@ -292,6 +402,7 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
       comentario: comentario ?? null,
       idArea: idArea ?? null,
       idRecurso: idRecurso ?? null,
+      idCatalogoSolicitud,
       idCentroCosto: idCentroCosto ?? null,
       ot: ot ?? null,
       area: null,
@@ -322,6 +433,8 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
       return res.status(error.statusCode).json({
         code: error?.code,
         idsArea: Array.isArray(error?.idsArea) ? error.idsArea : undefined,
+        detallePresupuesto: Array.isArray(error?.detallePresupuesto) ? error.detallePresupuesto : undefined,
+        materiales: Array.isArray(error?.materiales) ? error.materiales : undefined,
         message: error?.message || 'Error al actualizar solicitud',
       });
     }
@@ -356,17 +469,6 @@ export async function registrarAprobacionSolicitudController(req: AuthRequest, r
   }
 
   try {
-    const solicitudMeta = await obtenerSolicitudMeta(idSolicitud);
-    if (!solicitudMeta) {
-      return res.status(404).json({ message: 'Solicitud no encontrada' });
-    }
-
-    if (normalizarEstadoSolicitud(solicitudMeta.Estado) !== 'PENDIENTE') {
-      return res.status(409).json({
-        message: `La solicitud ${solicitudMeta.CodigoSolicitud} ya no está pendiente y no puede volver a aprobarse o rechazarse.`,
-      });
-    }
-
     await registrarAprobacionSolicitud({
       idSolicitud,
       idAprobador: userId,
@@ -519,6 +621,7 @@ export async function registrarDespachoSolicitudController(req: AuthRequest, res
   const { id } = req.params;
   const { nuevoEstado, detalle } = req.body || {};
   const idSolicitud = Number(id);
+  const nuevoEstadoNormalizado = nuevoEstado ? normalizarEstadoSolicitud(nuevoEstado) : undefined;
 
   if (!idSolicitud || Number.isNaN(idSolicitud)) {
     return res.status(400).json({ message: 'Id de solicitud inválido' });
@@ -547,7 +650,7 @@ export async function registrarDespachoSolicitudController(req: AuthRequest, res
     await registrarDespachoSolicitud({
       idSolicitud,
       idUsuarioDespacho: userId,
-      nuevoEstado: nuevoEstado || undefined,
+      nuevoEstado: nuevoEstadoNormalizado,
       detalle: detalle.map((d: any) => ({
         idMaterial: d.idMaterial,
         cantidadAprobada: d.cantidadAprobada,
@@ -559,7 +662,7 @@ export async function registrarDespachoSolicitudController(req: AuthRequest, res
       await registrarAuditoria(req.userId ?? null, 'REGISTRAR_DESPACHO_SOLICITUD', {
         modulo: 'Solicitudes',
         idSolicitud,
-        nuevoEstado: nuevoEstado || 'DESPACHADA',
+        nuevoEstado: nuevoEstadoNormalizado || 'COMPLETADA',
         lineas: detalle?.length ?? 0,
       });
     } catch (auditError) {

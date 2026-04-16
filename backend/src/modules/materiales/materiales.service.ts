@@ -2,6 +2,8 @@ import sql from 'mssql';
 import { callSpMany, callSpOne } from '../../infra/spCaller';
 import { getPool } from '../../config/db';
 import { env } from '../../config/env';
+import { usuarioTieneCoberturaActivaEnArea } from '../areaRecursoCuenta/areaRecursoCuenta.service';
+import { listarCatalogosPermitidosPorUsuarioArea } from '../coberturasAcceso/coberturasAcceso.service';
 
 export interface Material {
   IdMaterial: number;
@@ -21,6 +23,13 @@ export interface MaterialConStock extends Material {
   TieneImagen?: number | boolean | null;
   FuenteImagen?: string | null;
 }
+
+export interface MaterialesPermitidosResult {
+  materiales: MaterialConStock[];
+  applied: boolean;
+}
+
+type TableColumnsMap = Map<string, Set<string>>;
 
 export interface MaterialImportRow {
   NumeroArticulo: string;
@@ -56,6 +65,347 @@ export async function listarMateriales(): Promise<Material[]> {
 
 export async function listarMaterialesConStock(): Promise<MaterialConStock[]> {
   return callSpMany<MaterialConStock>('sp_ListarMaterialesConStock');
+}
+
+function hasColumn(columns: TableColumnsMap, tableName: string, columnName: string): boolean {
+  return columns.get(tableName)?.has(columnName.toLowerCase()) ?? false;
+}
+
+function pickFirstColumn(columns: TableColumnsMap, tableName: string, candidates: string[]): string | null {
+  for (const candidate of candidates) {
+    if (hasColumn(columns, tableName, candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function activeCondition(alias: string, columns: TableColumnsMap, tableName: string): string {
+  return hasColumn(columns, tableName, 'Activo') ? ` AND ISNULL(${alias}.Activo, 1) = 1` : '';
+}
+
+function buildCatalogColumnPreference(preferredCatalogColumn: string | null): string[] {
+  const base = ['IdCatalogoSolicitud', 'IdCatalogo'];
+  if (!preferredCatalogColumn || !base.includes(preferredCatalogColumn)) {
+    return base;
+  }
+
+  return [preferredCatalogColumn, ...base.filter((column) => column !== preferredCatalogColumn)];
+}
+
+function normalizeLabel(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function isMaintenanceCategory(value: unknown): boolean {
+  const normalized = normalizeLabel(value);
+  return normalized.includes('mantenimiento') || normalized.includes('mtto');
+}
+
+function isFixedAssetsCategory(value: unknown): boolean {
+  const normalized = normalizeLabel(value);
+  return normalized.includes('activo fijo') || (normalized.includes('activos') && normalized.includes('fijos'));
+}
+
+function isStandardMaterialsCategory(value: unknown): boolean {
+  const normalized = normalizeLabel(value);
+  return normalized.includes('materiales') && normalized.includes('repuestos') && !isMaintenanceCategory(normalized) && !isFixedAssetsCategory(normalized);
+}
+
+function isAnyMaterialsGroup(value: unknown): boolean {
+  const normalized = normalizeLabel(value);
+  if (!normalized) {
+    return true;
+  }
+
+  return normalized.includes('material') || normalized.includes('repuesto');
+}
+
+function catalogMatchesMaterialGroup(catalogName: string, materialGroup: string | null | undefined): boolean {
+  const normalizedCatalog = normalizeLabel(catalogName);
+  const normalizedGroup = normalizeLabel(materialGroup);
+
+  if (isFixedAssetsCategory(normalizedCatalog)) {
+    return isFixedAssetsCategory(normalizedGroup);
+  }
+
+  if (isMaintenanceCategory(normalizedCatalog)) {
+    return isMaintenanceCategory(normalizedGroup)
+      || (
+        normalizedGroup.includes('materiales')
+        && normalizedGroup.includes('repuestos')
+        && isMaintenanceCategory(normalizedGroup)
+      );
+  }
+
+  if (isStandardMaterialsCategory(normalizedCatalog)) {
+    if (!normalizedGroup) {
+      return true;
+    }
+
+    return !isMaintenanceCategory(normalizedGroup)
+      && !isFixedAssetsCategory(normalizedGroup)
+      && (normalizedGroup.includes('material') || normalizedGroup.includes('repuesto'));
+  }
+
+  if (!normalizedCatalog || !normalizedGroup) {
+    return false;
+  }
+
+  return normalizedCatalog === normalizedGroup
+    || normalizedCatalog.includes(normalizedGroup)
+    || normalizedGroup.includes(normalizedCatalog);
+}
+
+function filtrarMaterialesPorCatalogosHeuristico(
+  materiales: MaterialConStock[],
+  catalogNames: string[],
+): MaterialConStock[] {
+  const normalizedCatalogs = catalogNames
+    .map((catalogName) => String(catalogName || '').trim())
+    .filter(Boolean);
+
+  if (normalizedCatalogs.length === 0) {
+    return [];
+  }
+
+  const directMatches = materiales.filter((material) =>
+    normalizedCatalogs.some((catalogName) => catalogMatchesMaterialGroup(catalogName, material.GrupoArticulos ?? null)),
+  );
+
+  if (directMatches.length > 0) {
+    return directMatches;
+  }
+
+  const allowsMaintenanceMaterials = normalizedCatalogs.some((catalogName) => isMaintenanceCategory(catalogName));
+  if (allowsMaintenanceMaterials) {
+    const maintenanceFallback = materiales.filter((material) => {
+      const normalizedGroup = normalizeLabel(material.GrupoArticulos ?? null);
+      if (!normalizedGroup) {
+        return true;
+      }
+
+      return !isFixedAssetsCategory(normalizedGroup) && isAnyMaterialsGroup(normalizedGroup);
+    });
+
+    if (maintenanceFallback.length > 0) {
+      return maintenanceFallback;
+    }
+  }
+
+  const allowsStandardMaterials = normalizedCatalogs.some((catalogName) => isStandardMaterialsCategory(catalogName));
+  if (!allowsStandardMaterials) {
+    return [];
+  }
+
+  return materiales.filter((material) => {
+    const normalizedGroup = normalizeLabel(material.GrupoArticulos ?? null);
+    if (!normalizedGroup) {
+      return true;
+    }
+
+    return !isMaintenanceCategory(normalizedGroup) && !isFixedAssetsCategory(normalizedGroup);
+  });
+}
+
+async function loadCoverageTableColumns(): Promise<TableColumnsMap> {
+  const pool = await getPool();
+  const result = await pool.request().query(`
+    SELECT TABLE_NAME, COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'dbo'
+      AND TABLE_NAME IN (
+        'Materiales',
+        'MaterialCatalogo',
+        'CatalogoMateriales',
+        'MaterialesCatalogos',
+        'MaterialCatalogos'
+      )
+  `);
+
+  const columns: TableColumnsMap = new Map();
+  for (const row of result.recordset ?? []) {
+    const tableName = String(row.TABLE_NAME ?? '');
+    const columnName = String(row.COLUMN_NAME ?? '').toLowerCase();
+    if (!tableName || !columnName) {
+      continue;
+    }
+
+    const current = columns.get(tableName) ?? new Set<string>();
+    current.add(columnName);
+    columns.set(tableName, current);
+  }
+
+  return columns;
+}
+
+async function cargarIdsMaterialPermitidosPorCatalogo(
+  catalogIds: number[],
+  preferredCatalogColumn: string | null = null,
+): Promise<Set<number>> {
+  if (catalogIds.length === 0) {
+    return new Set<number>();
+  }
+
+  const columns = await loadCoverageTableColumns();
+  const catalogColumnCandidates = buildCatalogColumnPreference(preferredCatalogColumn);
+  const pool = await getPool();
+  const request = pool.request();
+  const placeholders = catalogIds.map((catalogId, index) => {
+    const paramName = `Catalogo${index}`;
+    request.input(paramName, sql.Int, catalogId);
+    return `@${paramName}`;
+  }).join(', ');
+
+  const queries: string[] = [];
+  const catalogBridgeTables = ['MaterialCatalogo', 'CatalogoMateriales', 'MaterialesCatalogos', 'MaterialCatalogos'];
+  const bridgeQueries: string[] = [];
+
+  for (const tableName of catalogBridgeTables) {
+    const catalogColumn = pickFirstColumn(columns, tableName, catalogColumnCandidates);
+    if (hasColumn(columns, tableName, 'IdMaterial') && catalogColumn) {
+      bridgeQueries.push(`
+        SELECT DISTINCT mc.IdMaterial
+        FROM dbo.${tableName} mc
+        WHERE mc.${catalogColumn} IN (${placeholders})${activeCondition('mc', columns, tableName)}
+      `);
+    }
+  }
+
+  if (bridgeQueries.length > 0) {
+    queries.push(...bridgeQueries);
+  } else {
+    const materialCatalogColumn = pickFirstColumn(columns, 'Materiales', catalogColumnCandidates);
+    if (hasColumn(columns, 'Materiales', 'IdMaterial') && materialCatalogColumn) {
+      queries.push(`
+        SELECT DISTINCT m.IdMaterial
+        FROM dbo.Materiales m
+        WHERE m.${materialCatalogColumn} IN (${placeholders})${activeCondition('m', columns, 'Materiales')}
+      `);
+    }
+  }
+
+  if (queries.length === 0) {
+    return new Set<number>();
+  }
+
+  const result = await request.query(queries.join('\nUNION\n'));
+  return new Set(
+    (result.recordset ?? [])
+      .map((row: any) => Number(row.IdMaterial ?? 0))
+      .filter((idMaterial: number) => Number.isInteger(idMaterial) && idMaterial > 0),
+  );
+}
+
+export async function listarMaterialesPermitidosPorUsuarioArea(
+  idUsuario: number,
+  idArea: number,
+  idCatalogoSolicitud: number | null = null,
+): Promise<MaterialesPermitidosResult> {
+  const coberturaActiva = await usuarioTieneCoberturaActivaEnArea(idUsuario, idArea);
+  const materiales = await listarMaterialesConStock();
+
+  if (!coberturaActiva) {
+    return {
+      materiales,
+      applied: false,
+    };
+  }
+
+  const catalogos = await listarCatalogosPermitidosPorUsuarioArea(idUsuario, idArea);
+  const catalogosSeleccionados = idCatalogoSolicitud && Number.isInteger(idCatalogoSolicitud) && idCatalogoSolicitud > 0
+    ? (catalogos ?? []).filter((catalogo) => Number(catalogo.id ?? 0) === idCatalogoSolicitud)
+    : (catalogos ?? []);
+  const preferredCatalogColumn = catalogosSeleccionados.find((catalogo) => typeof catalogo.idSource === 'string' && catalogo.idSource.length > 0)?.idSource ?? null;
+  const catalogIds = Array.from(
+    new Set(
+      catalogosSeleccionados
+        .map((catalogo) => Number(catalogo.id ?? 0))
+        .filter((catalogoId) => Number.isInteger(catalogoId) && catalogoId > 0),
+    ),
+  );
+
+  if (catalogIds.length === 0) {
+    return {
+      materiales: [],
+      applied: true,
+    };
+  }
+
+  try {
+    const materialIds = await cargarIdsMaterialPermitidosPorCatalogo(catalogIds, preferredCatalogColumn);
+    if (materialIds.size === 0) {
+      const materialesHeuristicos = filtrarMaterialesPorCatalogosHeuristico(
+        materiales,
+        catalogosSeleccionados.map((catalogo) => catalogo.nombre ?? ''),
+      );
+
+      if (materialesHeuristicos.length > 0) {
+        const usesMaintenanceFallback = catalogosSeleccionados.some((catalogo) => isMaintenanceCategory(catalogo.nombre ?? ''));
+        console.warn('[CoberturasAcceso] Se aplicó fallback heurístico catálogo->GrupoArticulos para materiales permitidos.', {
+          idUsuario,
+          idArea,
+          catalogos: catalogosSeleccionados.map((catalogo) => catalogo.nombre ?? ''),
+          preferredCatalogColumn,
+          usesMaintenanceFallback,
+          totalMateriales: materialesHeuristicos.length,
+        });
+
+        return {
+          materiales: materialesHeuristicos,
+          applied: true,
+        };
+      }
+
+      console.warn('[CoberturasAcceso] No se detectaron materiales para los catálogos permitidos del usuario.', {
+        idUsuario,
+        idArea,
+        idCatalogoSolicitud,
+        preferredCatalogColumn,
+        catalogos: catalogosSeleccionados.map((catalogo) => ({
+          id: catalogo.id,
+          nombre: catalogo.nombre,
+          idSource: catalogo.idSource ?? null,
+          idCatalogoSolicitud: catalogo.idCatalogoSolicitud ?? null,
+          idCatalogo: catalogo.idCatalogo ?? null,
+        })),
+      });
+
+      return {
+        materiales: [],
+        applied: true,
+      };
+    }
+
+    return {
+      materiales: materiales.filter((material) => materialIds.has(Number(material.IdMaterial))),
+      applied: true,
+    };
+  } catch (error) {
+    console.error('Error filtrando materiales permitidos por cobertura', error);
+    const materialesHeuristicos = filtrarMaterialesPorCatalogosHeuristico(
+      materiales,
+      catalogosSeleccionados.map((catalogo) => catalogo.nombre ?? ''),
+    );
+
+    if (materialesHeuristicos.length > 0) {
+      return {
+        materiales: materialesHeuristicos,
+        applied: true,
+      };
+    }
+
+    return {
+      materiales: [],
+      applied: true,
+    };
+  }
 }
 
 export async function obtenerImagenMaterialPorNumeroArticulo(

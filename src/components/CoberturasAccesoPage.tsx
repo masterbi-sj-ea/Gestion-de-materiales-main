@@ -342,6 +342,11 @@ export default function CoberturasAccesoPage() {
   const handleActualizarCobertura = async () => {
     if (!selectedId) return;
 
+    if (!editNombre.trim()) {
+      sileo.error({ title: 'Nombre requerido', description: 'Debes ingresar un nombre para la cobertura.' });
+      return;
+    }
+
     // Validación de rango de fechas: vigenteDesde debe ser <= vigenteHasta
     if (editVigenteDesde && editVigenteHasta) {
       const desde = new Date(editVigenteDesde);

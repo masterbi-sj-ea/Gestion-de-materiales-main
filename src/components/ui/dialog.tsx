@@ -62,7 +62,7 @@ const DialogContent = React.forwardRef<
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-start overflow-y-auto py-4 sm:py-8 pointer-events-none justify-center">
         <Draggable handle=".dialog-header" bounds="parent" nodeRef={contentRef}>
           <DialogPrimitive.Content
             ref={contentRef}

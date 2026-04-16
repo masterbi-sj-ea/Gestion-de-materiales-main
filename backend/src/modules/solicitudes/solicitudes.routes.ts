@@ -3,6 +3,7 @@ import {
   crearSolicitudController,
   listarSolicitudesController,
   obtenerSolicitudController,
+  previewPresupuestoSolicitudController,
   actualizarSolicitudController,
   registrarAprobacionSolicitudController,
   listarAprobacionesPorSolicitudController,
@@ -21,6 +22,14 @@ router.get(
     { moduloCodigo: 'aprobaciones', accion: 'ver' },
   ]),
   listarSolicitudesController,
+);
+router.post(
+  '/presupuesto-preview',
+  requireAnyModulePermission([
+    { moduloCodigo: 'solicitudes', accion: 'crear' },
+    { moduloCodigo: 'solicitudes', accion: 'editar' },
+  ]),
+  previewPresupuestoSolicitudController,
 );
 router.post('/', requireModulePermission('solicitudes', 'crear'), crearSolicitudController);
 router.put('/:id', requireModulePermission('solicitudes', 'editar'), actualizarSolicitudController);

@@ -1,12 +1,23 @@
 import sql from 'mssql';
 import { callSpMany, callSpOne } from '../../infra/spCaller';
 import { getPool } from '../../config/db';
+import {
+  buildDespachosPreviosOuterApply,
+  buildDevolucionesPresupuestoOuterApply,
+  resolveDetalleDespachosSchema,
+} from '../../infra/detalleDespachos';
 import { io } from '../../server';
 import PDFDocument from 'pdfkit';
 import { PassThrough } from 'stream';
 import fs from 'fs';
 import path from 'path';
 import { listarPresupuestos, type Presupuesto } from '../presupuestos/presupuestos.service';
+import {
+  ESTADOS_COMPROMETEN_PRESUPUESTO,
+  agruparCostoSolicitudPorArea,
+  seleccionarPresupuestoAreaVigente,
+  validarCostoSolicitudPorArea,
+} from '../presupuestos/presupuestoValidation';
 
 export interface SolicitudResumen {
   IdSolicitud: number;
@@ -19,6 +30,11 @@ export interface SolicitudResumen {
   IdArea: number | null;
   AreaNombre: string | null;
   AreaCodigoCuenta: string | null;
+  AreaResumen?: string;
+  AreasDetalle?: string[];
+  CodigoCuentaResumen?: string;
+  CodigosCuentaDetalle?: string[];
+  OT?: string | null;
   IdCentroCosto: number | null;
   CentroCostoCodigo: string | null;
   CentroCostoNombre: string | null;
@@ -31,6 +47,12 @@ export interface SolicitudResumen {
   NombreAprobador?: string | null;
   PresupuestoArea?: number | null;
   ConsumoAcumulado?: number | null;
+
+  PresupuestoEstado?: 'CONTROLADO' | 'SIN_PRESUPUESTO' | 'EXCEDE_PRESUPUESTO';
+  PresupuestoBloqueada?: boolean;
+  PresupuestoMensaje?: string | null;
+  PresupuestoSolicitudActual?: number | null;
+  PresupuestoDisponibleDespues?: number | null;
 }
 
 export interface SolicitudCabecera {
@@ -47,17 +69,30 @@ export interface SolicitudCabecera {
   IdCorteStock: number | null;
   IdArea: number | null;
   AreaNombre: string | null;
+  AreaResumen?: string;
+  AreasDetalle?: string[];
+  CodigoCuenta?: string | null;
+  CodigoCuentaResumen?: string;
+  CodigosCuentaDetalle?: string[];
   IdCentroCosto: number | null;
   CentroCostoCodigo: string | null;
   CentroCostoNombre: string | null;
+  OT?: string | null;
+  IdCatalogoSolicitud?: number | null;
+  CatalogoNombre?: string | null;
 }
 
 export interface SolicitudDetalle {
   IdDetalleSolicitud: number;
   IdSolicitud: number;
   IdMaterial: number;
+  IdArea?: number | null;
+  AreaNombre?: string | null;
+  IdRecurso?: number | null;
+  RecursoNombre?: string | null;
   NumeroArticulo: string;
   DescripcionArticulo: string;
+  CodigoCuenta?: string | null;
   UnidadMedidaMaterial: string;
   GrupoArticulos: string | null;
   CantidadSolicitada: number;
@@ -94,47 +129,48 @@ interface SolicitudAprobacionReciente {
   NombreAprobador: string | null;
 }
 
-function seleccionarPresupuestoArea(presupuestos: Presupuesto[], idArea: number | null): Presupuesto | null {
-  if (!idArea) {
-    return null;
-  }
-
-  const year = new Date().getFullYear();
-  const month = new Date().getMonth() + 1;
-
-  const candidatos = presupuestos.filter((presupuesto) => presupuesto.IdArea === idArea);
-  if (candidatos.length === 0) {
-    return null;
-  }
-
-  const rankPresupuesto = (presupuesto: Presupuesto) => {
-    const isCurrentMonth = presupuesto.Anio === year && presupuesto.Mes === month;
-    const isCurrentAnnual = presupuesto.Anio === year && presupuesto.Mes == null;
-    const isCurrentYear = presupuesto.Anio === year;
-
-    return [
-      isCurrentMonth ? 1 : 0,
-      isCurrentAnnual ? 1 : 0,
-      isCurrentYear ? 1 : 0,
-      presupuesto.Anio,
-      presupuesto.Mes ?? 0,
-      presupuesto.IdPresupuesto,
-    ];
-  };
-
-  return candidatos.sort((left, right) => {
-    const rankLeft = rankPresupuesto(left);
-    const rankRight = rankPresupuesto(right);
-
-    for (let index = 0; index < rankLeft.length; index += 1) {
-      if (rankLeft[index] !== rankRight[index]) {
-        return rankRight[index] - rankLeft[index];
-      }
-    }
-
-    return 0;
-  })[0];
+export interface SolicitudesPaginadasSummary {
+  totalMonto: number;
+  aprobadasHoyCount: number;
+  aprobadasHoyMonto: number;
 }
+
+export interface SolicitudesPaginadasResult {
+  data: SolicitudResumen[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: SolicitudesPaginadasSummary;
+}
+
+interface SolicitudResumenPaginadoRow extends SolicitudResumen {
+  TotalRegistros: number;
+  TotalMontoRegistros: number;
+  TotalAprobadasHoy: number;
+  TotalMontoAprobadasHoy: number;
+}
+
+type SolicitudResumenData = {
+  areas: string[];
+  codigosCuenta: string[];
+  ot: string | null;
+};
+
+type SolicitudCabeceraExtra = {
+  CodigoCuenta: string | null;
+  OT: string | null;
+  IdCatalogoSolicitud: number | null;
+  CatalogoNombre: string | null;
+};
+
+type SolicitudDetalleExtra = {
+  IdDetalleSolicitud: number;
+  IdArea: number | null;
+  AreaNombre: string | null;
+  IdRecurso: number | null;
+  RecursoNombre: string | null;
+  CodigoCuenta: string | null;
+};
 
 async function obtenerAprobacionesRecientes(idsSolicitud: number[]): Promise<Map<number, SolicitudAprobacionReciente>> {
   if (idsSolicitud.length === 0) {
@@ -179,25 +215,420 @@ async function obtenerAprobacionesRecientes(idsSolicitud: number[]): Promise<Map
   return new Map(result.recordset.map((row) => [row.IdSolicitud, row]));
 }
 
+function compactText(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text ? text : null;
+}
+
+function uniqueTexts(values: Array<unknown>): string[] {
+  return Array.from(
+    new Set(values.map(compactText).filter((value): value is string => value !== null)),
+  );
+}
+
+function formatCompactSummary(
+  values: string[],
+  options?: { separator?: string; maxVisible?: number },
+): string {
+  const { separator = ' · ', maxVisible = 2 } = options ?? {};
+
+  if (values.length === 0) {
+    return '';
+  }
+
+  if (values.length <= maxVisible) {
+    return values.join(separator);
+  }
+
+  return `${values.slice(0, maxVisible).join(separator)} +${values.length - maxVisible}`;
+}
+
+async function cargarResumenSolicitudes(
+  idsSolicitud: number[],
+  pool?: sql.ConnectionPool,
+): Promise<Map<number, SolicitudResumenData>> {
+  const ids = Array.from(
+    new Set(
+      idsSolicitud
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  );
+
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const activePool = pool ?? await getPool();
+  const request = activePool.request();
+  const placeholders = ids.map((idSolicitud, index) => {
+    const paramName = `IdSolicitudResumen${index}`;
+    request.input(paramName, sql.Int, idSolicitud);
+    return `@${paramName}`;
+  });
+
+  const result = await request.query(`
+    SELECT
+      d.IdSolicitud,
+      COALESCE(a_det.Nombre, a_cab.Nombre, NULLIF(LTRIM(RTRIM(s.Area)), '')) AS AreaNombre,
+      NULLIF(LTRIM(RTRIM(COALESCE(cuenta.CodigoCuenta, cc.Codigo))), '') AS CodigoCuenta,
+      NULLIF(LTRIM(RTRIM(s.OT)), '') AS OT
+    FROM dbo.DetalleSolicitudesMaterial d
+    JOIN dbo.SolicitudesMaterial s
+      ON s.IdSolicitud = d.IdSolicitud
+    LEFT JOIN dbo.Areas a_det
+      ON a_det.IdArea = d.IdArea
+    LEFT JOIN dbo.Areas a_cab
+      ON a_cab.IdArea = s.IdArea
+    LEFT JOIN dbo.CentrosCosto cc
+      ON cc.IdCentroCosto = COALESCE(s.IdCentroCosto, a_cab.IdCentroCosto)
+    OUTER APPLY (
+      SELECT TOP 1 mr.IdRecurso
+      FROM dbo.MaterialRecurso mr
+      WHERE mr.IdMaterial = d.IdMaterial
+        AND ISNULL(mr.Activo, 1) = 1
+      ORDER BY
+        CASE
+          WHEN d.IdRecurso IS NOT NULL AND mr.IdRecurso = d.IdRecurso THEN 0
+          WHEN mr.IdRecurso = 1 THEN 1
+          ELSE 2
+        END,
+        mr.IdRecurso
+    ) recurso
+    OUTER APPLY (
+      SELECT TOP 1 arc.CodigoCuenta
+      FROM dbo.AreaRecursoCuenta arc
+      WHERE arc.IdArea = COALESCE(d.IdArea, s.IdArea)
+        AND arc.IdRecurso = COALESCE(d.IdRecurso, recurso.IdRecurso, 1)
+        AND ISNULL(arc.Activo, 1) = 1
+        AND LTRIM(RTRIM(ISNULL(arc.CodigoCuenta, ''))) <> ''
+      ORDER BY
+        CASE
+          WHEN d.IdRecurso IS NOT NULL AND arc.IdRecurso = d.IdRecurso THEN 0
+          WHEN arc.IdRecurso = 1 THEN 1
+          ELSE 2
+        END,
+        arc.IdAreaRecursoCuenta DESC
+    ) cuenta
+    WHERE d.IdSolicitud IN (${placeholders.join(', ')})
+  `);
+
+  const summaryMap = new Map<number, SolicitudResumenData>();
+
+  for (const row of result.recordset ?? []) {
+    const idSolicitud = Number(row.IdSolicitud ?? 0);
+    if (idSolicitud <= 0) {
+      continue;
+    }
+
+    const entry = summaryMap.get(idSolicitud) ?? { areas: [], codigosCuenta: [], ot: null };
+    const areaNombre = compactText(row.AreaNombre);
+    const codigoCuenta = compactText(row.CodigoCuenta);
+    const ot = compactText(row.OT);
+
+    if (areaNombre && !entry.areas.includes(areaNombre)) {
+      entry.areas.push(areaNombre);
+    }
+
+    if (codigoCuenta && !entry.codigosCuenta.includes(codigoCuenta)) {
+      entry.codigosCuenta.push(codigoCuenta);
+    }
+
+    if (!entry.ot && ot) {
+      entry.ot = ot;
+    }
+
+    summaryMap.set(idSolicitud, entry);
+  }
+
+  return summaryMap;
+}
+
+function enriquecerResumenSolicitud<TRow extends {
+  IdSolicitud: number;
+  AreaNombre?: string | null;
+  AreaCodigoCuenta?: string | null;
+  CodigoCuenta?: string | null;
+  OT?: string | null;
+}>(
+  row: TRow,
+  resumen: SolicitudResumenData | undefined,
+): TRow & {
+  AreaResumen: string;
+  AreasDetalle: string[];
+  CodigoCuentaResumen: string;
+  CodigosCuentaDetalle: string[];
+  OT: string | null;
+} {
+  const areas = uniqueTexts([...(resumen?.areas ?? []), row.AreaNombre]);
+  const codigosCuenta = uniqueTexts([
+    ...(resumen?.codigosCuenta ?? []),
+    row.CodigoCuenta,
+    row.AreaCodigoCuenta,
+  ]);
+
+  return {
+    ...row,
+    AreaResumen: formatCompactSummary(areas),
+    AreasDetalle: areas,
+    CodigoCuentaResumen: formatCompactSummary(codigosCuenta),
+    CodigosCuentaDetalle: codigosCuenta,
+    OT: compactText(row.OT) ?? resumen?.ot ?? null,
+  };
+}
+
+function construirResumenSolicitud(args: {
+  areaNombre?: string | null;
+  codigoCuenta?: string | null;
+  ot?: string | null;
+  detalle: Array<Pick<SolicitudDetalle, 'AreaNombre' | 'CodigoCuenta'>>;
+}) {
+  const areas = uniqueTexts([args.areaNombre, ...args.detalle.map((item) => item.AreaNombre)]);
+  const codigosCuenta = uniqueTexts([args.codigoCuenta, ...args.detalle.map((item) => item.CodigoCuenta)]);
+
+  return {
+    AreaResumen: formatCompactSummary(areas),
+    AreasDetalle: areas,
+    CodigoCuentaResumen: formatCompactSummary(codigosCuenta),
+    CodigosCuentaDetalle: codigosCuenta,
+    OT: compactText(args.ot) ?? null,
+  };
+}
+
+async function cargarCabeceraSolicitudExtra(
+  pool: sql.ConnectionPool,
+  idSolicitud: number,
+): Promise<SolicitudCabeceraExtra | null> {
+  const result = await pool.request()
+    .input('IdSolicitud', sql.Int, idSolicitud)
+    .query<SolicitudCabeceraExtra>(`
+      SELECT
+        NULLIF(LTRIM(RTRIM(COALESCE(cc.Codigo, cuentaCabecera.CodigoCuenta))), '') AS CodigoCuenta,
+        NULLIF(LTRIM(RTRIM(s.OT)), '') AS OT,
+        s.IdCatalogoSolicitud,
+        cat.NombreCatalogo AS CatalogoNombre
+      FROM dbo.SolicitudesMaterial s
+      LEFT JOIN dbo.Areas a
+        ON a.IdArea = s.IdArea
+      LEFT JOIN dbo.CentrosCosto cc
+        ON cc.IdCentroCosto = COALESCE(s.IdCentroCosto, a.IdCentroCosto)
+      LEFT JOIN dbo.CatalogosSolicitud cat
+        ON cat.IdCatalogoSolicitud = s.IdCatalogoSolicitud
+      OUTER APPLY (
+        SELECT TOP 1 arc.CodigoCuenta
+        FROM dbo.AreaRecursoCuenta arc
+        WHERE arc.IdArea = s.IdArea
+          AND ISNULL(arc.Activo, 1) = 1
+          AND LTRIM(RTRIM(ISNULL(arc.CodigoCuenta, ''))) <> ''
+        ORDER BY
+          CASE WHEN arc.IdRecurso = 1 THEN 0 ELSE 1 END,
+          arc.IdAreaRecursoCuenta DESC
+      ) cuentaCabecera
+      WHERE s.IdSolicitud = @IdSolicitud
+    `);
+
+  return result.recordset[0] ?? null;
+}
+
+async function cargarDetalleSolicitudExtra(
+  pool: sql.ConnectionPool,
+  idSolicitud: number,
+): Promise<Map<number, SolicitudDetalleExtra>> {
+  const result = await pool.request()
+    .input('IdSolicitud', sql.Int, idSolicitud)
+    .query<SolicitudDetalleExtra>(`
+      SELECT
+        d.IdDetalleSolicitud,
+        d.IdArea,
+        COALESCE(a_det.Nombre, a_cab.Nombre, NULLIF(LTRIM(RTRIM(s.Area)), '')) AS AreaNombre,
+        COALESCE(d.IdRecurso, recurso.IdRecurso) AS IdRecurso,
+        recurso.RecursoNombre,
+        NULLIF(LTRIM(RTRIM(COALESCE(cuenta.CodigoCuenta, cc.Codigo))), '') AS CodigoCuenta
+      FROM dbo.DetalleSolicitudesMaterial d
+      JOIN dbo.SolicitudesMaterial s
+        ON s.IdSolicitud = d.IdSolicitud
+      LEFT JOIN dbo.Areas a_det
+        ON a_det.IdArea = d.IdArea
+      LEFT JOIN dbo.Areas a_cab
+        ON a_cab.IdArea = s.IdArea
+      LEFT JOIN dbo.CentrosCosto cc
+        ON cc.IdCentroCosto = COALESCE(s.IdCentroCosto, a_cab.IdCentroCosto)
+      OUTER APPLY (
+        SELECT TOP 1
+          mr.IdRecurso,
+          r.Nombre AS RecursoNombre
+        FROM dbo.MaterialRecurso mr
+        LEFT JOIN dbo.Recursos r
+          ON r.IdRecurso = mr.IdRecurso
+        WHERE mr.IdMaterial = d.IdMaterial
+          AND ISNULL(mr.Activo, 1) = 1
+        ORDER BY
+          CASE
+            WHEN d.IdRecurso IS NOT NULL AND mr.IdRecurso = d.IdRecurso THEN 0
+            WHEN mr.IdRecurso = 1 THEN 1
+            ELSE 2
+          END,
+          mr.IdRecurso
+      ) recurso
+      OUTER APPLY (
+        SELECT TOP 1 arc.CodigoCuenta
+        FROM dbo.AreaRecursoCuenta arc
+        WHERE arc.IdArea = COALESCE(d.IdArea, s.IdArea)
+          AND arc.IdRecurso = COALESCE(d.IdRecurso, recurso.IdRecurso, 1)
+          AND ISNULL(arc.Activo, 1) = 1
+          AND LTRIM(RTRIM(ISNULL(arc.CodigoCuenta, ''))) <> ''
+        ORDER BY
+          CASE
+            WHEN d.IdRecurso IS NOT NULL AND arc.IdRecurso = d.IdRecurso THEN 0
+            WHEN arc.IdRecurso = 1 THEN 1
+            ELSE 2
+          END,
+          arc.IdAreaRecursoCuenta DESC
+      ) cuenta
+      WHERE d.IdSolicitud = @IdSolicitud
+    `);
+
+  return new Map(
+    (result.recordset ?? []).map((row) => [Number(row.IdDetalleSolicitud), row]),
+  );
+}
+
+function resolverEstadoPresupuestarioSolicitud(
+  preview: SolicitudPresupuestoPreview | undefined,
+): 'CONTROLADO' | 'SIN_PRESUPUESTO' | 'EXCEDE_PRESUPUESTO' {
+  if (!preview || preview.areas.length === 0) {
+    return 'SIN_PRESUPUESTO';
+  }
+
+  if (preview.areas.some((area) => area.estado === 'sin-presupuesto')) {
+    return 'SIN_PRESUPUESTO';
+  }
+
+  if (preview.areas.some((area) => area.estado === 'excedido')) {
+    return 'EXCEDE_PRESUPUESTO';
+  }
+
+  return 'CONTROLADO';
+}
+
+function resumirPreviewPresupuesto(preview: SolicitudPresupuestoPreview | undefined) {
+  if (!preview) {
+    return {
+      estado: 'SIN_PRESUPUESTO' as const,
+      bloqueada: true,
+      mensaje: 'Sin evaluacion presupuestaria.',
+      solicitado: null,
+      disponibleDespues: null,
+    };
+  }
+
+  return {
+    estado: resolverEstadoPresupuestarioSolicitud(preview),
+    bloqueada: preview.bloqueada,
+    mensaje: preview.mensaje,
+    solicitado: preview.areas.reduce((acc, area) => acc + Number(area.solicitadoNuevo ?? 0), 0),
+    disponibleDespues: preview.areas.reduce((acc, area) => acc + Number(area.disponibleDespues ?? 0), 0),
+  };
+}
+
+type SolicitudPreviewRow = {
+  IdSolicitud: number;
+  FechaSolicitud: string | null;
+  Estado: string | null;
+  IdAreaCabecera: number | null;
+  IdMaterial: number;
+  CantidadSolicitada: number;
+  IdAreaDetalle: number | null;
+  IdRecurso: number | null;
+};
+
+async function cargarPreviewPresupuestoSolicitudes(
+  idsSolicitud: number[],
+): Promise<Map<number, SolicitudPresupuestoPreview>> {
+  const ids = Array.from(
+    new Set(idsSolicitud.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)),
+  );
+
+  if (ids.length === 0) {
+    return new Map();
+  }
+
+  const pool = await getPool();
+  const request = pool.request();
+  const placeholders = buildAreaPlaceholders(request, ids, 'SolicitudPreview');
+
+  const result = await request.query<SolicitudPreviewRow>(`
+    SELECT
+      s.IdSolicitud,
+      CONVERT(VARCHAR(33), s.FechaSolicitud, 126) AS FechaSolicitud,
+      s.Estado,
+      s.IdArea AS IdAreaCabecera,
+      d.IdMaterial,
+      d.CantidadSolicitada,
+      d.IdArea AS IdAreaDetalle,
+      d.IdRecurso
+    FROM dbo.SolicitudesMaterial s
+    INNER JOIN dbo.DetalleSolicitudesMaterial d
+      ON d.IdSolicitud = s.IdSolicitud
+    WHERE s.IdSolicitud IN (${placeholders})
+    ORDER BY s.IdSolicitud, d.IdDetalleSolicitud;
+  `);
+
+  const grouped = new Map<number, SolicitudPreviewRow[]>();
+  for (const row of result.recordset ?? []) {
+    const idSolicitud = Number(row.IdSolicitud ?? 0);
+    if (idSolicitud <= 0) continue;
+    const bucket = grouped.get(idSolicitud) ?? [];
+    bucket.push(row);
+    grouped.set(idSolicitud, bucket);
+  }
+
+  const previewEntries = await Promise.all(
+    Array.from(grouped.entries()).map(async ([idSolicitud, rows]) => {
+      const first = rows[0];
+      const preview = await obtenerPreviewPresupuestoSolicitud({
+        idSolicitud,
+        fechaSolicitud: first?.FechaSolicitud ?? null,
+        estado: first?.Estado ?? 'PENDIENTE',
+        idAreaCabecera: Number(first?.IdAreaCabecera ?? 0) || null,
+        detalle: rows.map((row) => ({
+          idMaterial: Number(row.IdMaterial),
+          cantidadSolicitada: Number(row.CantidadSolicitada ?? 0),
+          idArea: Number(row.IdAreaDetalle ?? 0) || null,
+          idRecurso: Number(row.IdRecurso ?? 0) || null,
+        })),
+      });
+
+      return [idSolicitud, preview] as const;
+    }),
+  );
+
+  return new Map(previewEntries);
+}
+
 async function enriquecerSolicitudes(solicitudes: SolicitudResumen[]): Promise<SolicitudResumen[]> {
   if (solicitudes.length === 0) {
     return solicitudes;
   }
 
   const idsSolicitud = solicitudes.map((solicitud) => solicitud.IdSolicitud);
-  const [aprobacionesRecientes, presupuestos] = await Promise.all([
+  const [aprobacionesRecientes, presupuestos, resumenes, previews] = await Promise.all([
     obtenerAprobacionesRecientes(idsSolicitud),
     listarPresupuestos().catch((error) => {
       console.error('No se pudo obtener el presupuesto para enriquecer solicitudes', error);
       return [] as Presupuesto[];
     }),
+    cargarResumenSolicitudes(idsSolicitud),
+    cargarPreviewPresupuestoSolicitudes(idsSolicitud),
   ]);
 
   return solicitudes.map((solicitud) => {
     const aprobacion = aprobacionesRecientes.get(solicitud.IdSolicitud);
-    const presupuesto = seleccionarPresupuestoArea(presupuestos, solicitud.IdArea ?? null);
+    const presupuesto = seleccionarPresupuestoAreaVigente(presupuestos, solicitud.IdArea ?? null);
+    const preview = previews.get(solicitud.IdSolicitud);
+    const resumenPresupuesto = resumirPreviewPresupuesto(preview);
 
-    return {
+    return enriquecerResumenSolicitud({
       ...solicitud,
       FechaAprobacion: aprobacion?.FechaAprobacion ?? null,
       EstadoAprobacion: aprobacion?.EstadoAprobacion ?? null,
@@ -205,8 +636,342 @@ async function enriquecerSolicitudes(solicitudes: SolicitudResumen[]): Promise<S
       NombreAprobador: aprobacion?.NombreAprobador ?? null,
       PresupuestoArea: presupuesto ? Number(presupuesto.Presupuesto ?? 0) : null,
       ConsumoAcumulado: presupuesto ? Number(presupuesto.Consumo ?? 0) : null,
-    };
+      PresupuestoEstado: resumenPresupuesto.estado,
+      PresupuestoBloqueada: resumenPresupuesto.bloqueada,
+      PresupuestoMensaje: resumenPresupuesto.mensaje,
+      PresupuestoSolicitudActual: resumenPresupuesto.solicitado,
+      PresupuestoDisponibleDespues: resumenPresupuesto.disponibleDespues,
+    }, resumenes.get(solicitud.IdSolicitud));
   });
+}
+
+function buildAreaPlaceholders(request: sql.Request, ids: number[], paramPrefix: string): string {
+  return ids.map((id, index) => {
+    const paramName = `${paramPrefix}${index}`;
+    request.input(paramName, sql.Int, id);
+    return `@${paramName}`;
+  }).join(', ');
+}
+
+function buildStateList(values: Iterable<string>): string {
+  return Array.from(values).map((value) => `'${value}'`).join(', ');
+}
+
+async function loadPrecioMaterialMap(pool: sql.ConnectionPool, idsMateriales: number[]): Promise<Map<number, number>> {
+  const precios = new Map<number, number>();
+  if (idsMateriales.length === 0) {
+    return precios;
+  }
+
+  const request = pool.request();
+  const placeholders = buildAreaPlaceholders(request, idsMateriales, 'IdMaterial');
+  const result = await request.query(`
+    SELECT IdMaterial, ISNULL(UltimoPrecioCompra, 0) AS Precio
+    FROM dbo.StockActual
+    WHERE IdMaterial IN (${placeholders});
+  `);
+
+  for (const row of result.recordset ?? []) {
+    precios.set(Number(row.IdMaterial), Number(row.Precio ?? 0));
+  }
+
+  return precios;
+}
+
+async function loadCostoActualSolicitudPorArea(idSolicitud: number): Promise<Map<number, number>> {
+  const costos = new Map<number, number>();
+  if (!Number.isInteger(idSolicitud) || idSolicitud <= 0) {
+    return costos;
+  }
+
+  const pool = await getPool();
+  const detalleDespachosSchema = await resolveDetalleDespachosSchema();
+  const result = await pool.request()
+    .input('IdSolicitud', sql.Int, idSolicitud)
+    .query(`
+      SELECT
+        COALESCE(d.IdArea, s.IdArea) AS IdArea,
+        SUM(
+          CASE
+            WHEN s.Estado IN (${buildStateList(ESTADOS_COMPROMETEN_PRESUPUESTO)})
+              THEN CASE
+                WHEN (
+                  ISNULL(d.CantidadAprobada, d.CantidadSolicitada)
+                  - ISNULL(despachosPrevios.CantidadYaDespachada, 0)
+                ) > 0
+                  THEN (
+                    ISNULL(d.CantidadAprobada, d.CantidadSolicitada)
+                    - ISNULL(despachosPrevios.CantidadYaDespachada, 0)
+                  ) * ISNULL(sa.UltimoPrecioCompra, 0)
+                ELSE 0
+              END
+            ELSE 0
+          END
+          + CASE
+            WHEN (
+              ISNULL(despachosPrevios.CantidadYaDespachada, 0)
+              - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+            ) > 0
+              THEN (
+                ISNULL(despachosPrevios.CantidadYaDespachada, 0)
+                - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+              ) * ISNULL(sa.UltimoPrecioCompra, 0)
+            ELSE 0
+          END
+        ) AS CostoActual
+      FROM dbo.SolicitudesMaterial s
+      INNER JOIN dbo.DetalleSolicitudesMaterial d ON d.IdSolicitud = s.IdSolicitud
+      LEFT JOIN dbo.StockActual sa ON sa.IdMaterial = d.IdMaterial
+      ${buildDespachosPreviosOuterApply(detalleDespachosSchema, {
+        solicitudIdExpression: 's.IdSolicitud',
+        detalleSolicitudAlias: 'd',
+        detalleDespachoAlias: 'dd',
+        despachoAlias: 'desp',
+      })}
+      ${buildDevolucionesPresupuestoOuterApply(detalleDespachosSchema, {
+        solicitudIdExpression: 's.IdSolicitud',
+        detalleSolicitudAlias: 'd',
+        detalleDespachoAlias: 'dd_dev',
+        despachoAlias: 'desp_dev',
+        detalleDevolucionAlias: 'ddv',
+        devolucionAlias: 'dev',
+      })}
+      WHERE s.IdSolicitud = @IdSolicitud
+        AND COALESCE(d.IdArea, s.IdArea) IS NOT NULL
+      GROUP BY COALESCE(d.IdArea, s.IdArea);
+    `);
+
+  for (const row of result.recordset ?? []) {
+    const idArea = Number(row.IdArea ?? 0);
+    if (idArea > 0) {
+      costos.set(idArea, Number(row.CostoActual ?? 0));
+    }
+  }
+
+  return costos;
+}
+
+async function loadAreaNamesMap(idsArea: number[]): Promise<Map<number, string>> {
+  const areaNames = new Map<number, string>();
+  if (idsArea.length === 0) {
+    return areaNames;
+  }
+
+  const pool = await getPool();
+  const request = pool.request();
+  const placeholders = buildAreaPlaceholders(request, idsArea, 'PreviewArea');
+  const result = await request.query(`
+    SELECT IdArea, Nombre
+    FROM dbo.Areas
+    WHERE IdArea IN (${placeholders});
+  `);
+
+  for (const row of result.recordset ?? []) {
+    const idArea = Number(row.IdArea ?? 0);
+    if (idArea > 0) {
+      areaNames.set(idArea, String(row.Nombre ?? `Area #${idArea}`));
+    }
+  }
+
+  return areaNames;
+}
+
+function buildPresupuestoErrorMessage(errors: Array<{
+  idArea: number;
+  costoSolicitado: number;
+  disponible: number;
+  reason: 'missing-budget' | 'exceeded-budget';
+}>): string {
+  if (errors.length === 1) {
+    const [error] = errors;
+    if (error.reason === 'missing-budget') {
+      return `PRESUPUESTO_NO_CONFIGURADO: El area ${error.idArea} no tiene presupuesto vigente para el periodo de la solicitud.`;
+    }
+
+    return `PRESUPUESTO_EXCEDIDO: El area ${error.idArea} solicita $${error.costoSolicitado.toFixed(2)} pero solo tiene $${error.disponible.toFixed(2)} disponibles.`;
+  }
+
+  const detalle = errors.map((error) => {
+    if (error.reason === 'missing-budget') {
+      return `area ${error.idArea} sin presupuesto vigente`;
+    }
+    return `area ${error.idArea} solicita $${error.costoSolicitado.toFixed(2)} y dispone de $${error.disponible.toFixed(2)}`;
+  }).join('; ');
+
+  return `PRESUPUESTO_EXCEDIDO: La solicitud no cumple validacion presupuestaria: ${detalle}.`;
+}
+
+function calcularPorcentajeUso(valorBase: number | null, disponible: number | null): number | null {
+  if (!valorBase || valorBase <= 0 || disponible == null) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, ((valorBase - disponible) / valorBase) * 100));
+}
+
+function resolverEstadoPreview(args: {
+  presupuesto: Presupuesto | null;
+  disponibleDespues: number | null;
+  solicitadoNuevo: number;
+}): SolicitudPresupuestoPreviewArea['estado'] {
+  const { presupuesto, disponibleDespues, solicitadoNuevo } = args;
+  if (!presupuesto) {
+    return 'sin-presupuesto';
+  }
+
+  if (disponibleDespues == null) {
+    return 'sin-presupuesto';
+  }
+
+  if (solicitadoNuevo > presupuesto.Presupuesto) {
+    return 'excedido';
+  }
+
+  const porcentaje = calcularPorcentajeUso(presupuesto.Presupuesto, disponibleDespues) ?? 0;
+  if (disponibleDespues < 0) {
+    return 'excedido';
+  }
+
+  if (porcentaje >= 90) {
+    return 'critico';
+  }
+
+  if (porcentaje >= 70) {
+    return 'alerta';
+  }
+
+  return 'ok';
+}
+
+export async function obtenerPreviewPresupuestoSolicitud(args: {
+  idSolicitud?: number;
+  fechaSolicitud?: string | null;
+  estado?: string | null;
+  idAreaCabecera?: number | null;
+  detalle: CrearSolicitudDetalleInput[];
+}): Promise<SolicitudPresupuestoPreview> {
+  const estadoNormalizado = String(args.estado ?? 'PENDIENTE').trim().toUpperCase();
+  const idsMateriales = Array.from(new Set(
+    args.detalle
+      .map((linea) => Number(linea.idMaterial))
+      .filter((idMaterial) => Number.isInteger(idMaterial) && idMaterial > 0),
+  ));
+
+  if (idsMateriales.length === 0 || !ESTADOS_COMPROMETEN_PRESUPUESTO.has(estadoNormalizado)) {
+    return {
+      bloqueada: false,
+      mensaje: null,
+      materialesSinPrecio: [],
+      areas: [],
+    };
+  }
+
+  const pool = await getPool();
+  const preciosPorMaterial = await loadPrecioMaterialMap(pool, idsMateriales);
+  const materialesSinPrecio = idsMateriales.filter((idMaterial) => !(preciosPorMaterial.get(idMaterial) && Number(preciosPorMaterial.get(idMaterial)) > 0));
+  const detalleNormalizado = args.detalle
+    .map((linea) => ({
+      idMaterial: Number(linea.idMaterial),
+      cantidadSolicitada: Number(linea.cantidadSolicitada ?? 0),
+      idArea: Number(linea.idArea ?? args.idAreaCabecera ?? 0) || null,
+      idRecurso: Number(linea.idRecurso ?? 0) || null,
+    }))
+    .filter((linea) => Number.isInteger(linea.idMaterial) && linea.idMaterial > 0);
+
+  const referenceDate = args.fechaSolicitud ? new Date(args.fechaSolicitud) : new Date();
+  const safeReferenceDate = Number.isNaN(referenceDate.getTime()) ? new Date() : referenceDate;
+  const costosPorArea = agruparCostoSolicitudPorArea(args.detalle, preciosPorMaterial, args.idAreaCabecera ?? null);
+  const idsArea = Array.from(new Set(
+    detalleNormalizado
+      .map((linea) => linea.idArea)
+      .filter((idArea): idArea is number => idArea != null && Number.isInteger(idArea) && idArea > 0),
+  ));
+
+  const [presupuestos, costosActualesPorArea, areaNames] = await Promise.all([
+    listarPresupuestos(),
+    args.idSolicitud ? loadCostoActualSolicitudPorArea(args.idSolicitud) : Promise.resolve(new Map<number, number>()),
+    loadAreaNamesMap(idsArea),
+  ]);
+
+  const validationErrors = validarCostoSolicitudPorArea({
+    presupuestos,
+    costosPorArea,
+    costosActualesPorArea,
+    referenceDate: safeReferenceDate,
+  });
+
+  const validationByArea = new Map(validationErrors.map((item) => [item.idArea, item]));
+
+  const areas = idsArea
+    .map((idArea): SolicitudPresupuestoPreviewArea => {
+      const presupuesto = seleccionarPresupuestoAreaVigente(presupuestos, idArea, safeReferenceDate);
+      const solicitadoNuevo = costosPorArea.get(idArea) ?? 0;
+      const comprometidoActual = Math.max((presupuesto?.Comprometido ?? 0) - (costosActualesPorArea.get(idArea) ?? 0), 0);
+      const disponibleAntes = presupuesto ? Math.max(presupuesto.Presupuesto - comprometidoActual, 0) : null;
+      const disponibleDespues = presupuesto ? disponibleAntes! - solicitadoNuevo : null;
+      const validationError = validationByArea.get(idArea);
+
+      return {
+        idArea,
+        areaNombre: presupuesto?.AreaNombre ?? areaNames.get(idArea) ?? `Area #${idArea}`,
+        presupuestoId: presupuesto?.IdPresupuesto ?? null,
+        presupuesto: presupuesto?.Presupuesto ?? null,
+        comprometidoActual,
+        solicitadoNuevo,
+        disponibleAntes,
+        disponibleDespues,
+        porcentajeUsoAntes: calcularPorcentajeUso(presupuesto?.Presupuesto ?? null, disponibleAntes),
+        porcentajeUsoDespues: calcularPorcentajeUso(presupuesto?.Presupuesto ?? null, disponibleDespues),
+        estado: validationError?.reason === 'exceeded-budget'
+          ? 'excedido'
+          : resolverEstadoPreview({ presupuesto: presupuesto ?? null, disponibleDespues, solicitadoNuevo }),
+        materialesSinPresupuesto: [],
+      };
+    })
+    .sort((left, right) => left.areaNombre.localeCompare(right.areaNombre, 'es'));
+
+  const budgetMessage = validationErrors.length > 0 ? buildPresupuestoErrorMessage(validationErrors) : null;
+  const priceMessage = materialesSinPrecio.length > 0
+    ? `PRESUPUESTO_SIN_PRECIO_REFERENCIA: Los materiales ${materialesSinPrecio.join(', ')} no tienen UltimoPrecioCompra configurado en StockActual.`
+    : null;
+
+  return {
+    bloqueada: materialesSinPrecio.length > 0 || validationErrors.length > 0,
+    mensaje: priceMessage || budgetMessage,
+    materialesSinPrecio,
+    areas,
+  };
+}
+
+async function validarPresupuestoSolicitud(args: {
+  idSolicitud?: number;
+  fechaSolicitud?: string | null;
+  estado?: string | null;
+  idAreaCabecera?: number | null;
+  detalle: CrearSolicitudDetalleInput[];
+}): Promise<void> {
+  const preview = await obtenerPreviewPresupuestoSolicitud(args);
+  if (!preview.bloqueada) {
+    return;
+  }
+
+  const error: any = new Error(preview.mensaje || 'La solicitud no cumple con la validacion presupuestaria.');
+  error.statusCode = 409;
+  error.code = preview.materialesSinPrecio.length > 0
+    ? 'PRESUPUESTO_SIN_PRECIO_REFERENCIA'
+    : preview.areas.some((area) => area.estado === 'sin-presupuesto')
+      ? 'PRESUPUESTO_NO_CONFIGURADO'
+      : 'PRESUPUESTO_EXCEDIDO';
+  error.materiales = preview.materialesSinPrecio;
+  error.detallePresupuesto = preview.areas
+    .filter((area) => area.estado === 'excedido' || area.estado === 'sin-presupuesto')
+    .map((area) => ({
+      idArea: area.idArea,
+      costoSolicitado: area.solicitadoNuevo,
+      disponible: area.disponibleAntes ?? 0,
+      reason: area.estado === 'sin-presupuesto' ? 'missing-budget' : 'exceeded-budget',
+    }));
+  throw error;
 }
 
 export interface CrearSolicitudDetalleInput {
@@ -227,6 +992,7 @@ export interface CrearSolicitudInput {
   idCorteStock?: number | null;
   idArea?: number | null;
   idRecurso?: number | null;
+   idCatalogoSolicitud?: number | null;
   idCentroCosto?: number | null;
   ot?: string | null;
   detalle: CrearSolicitudDetalleInput[];
@@ -240,9 +1006,32 @@ export interface ActualizarSolicitudInput {
   comentario?: string | null;
   idArea?: number | null;
   idRecurso?: number | null;
+   idCatalogoSolicitud?: number | null;
   idCentroCosto?: number | null;
   ot?: string | null;
   detalle: CrearSolicitudDetalleInput[];
+}
+
+export interface SolicitudPresupuestoPreviewArea {
+  idArea: number;
+  areaNombre: string;
+  presupuestoId: number | null;
+  presupuesto: number | null;
+  comprometidoActual: number;
+  solicitadoNuevo: number;
+  disponibleAntes: number | null;
+  disponibleDespues: number | null;
+  porcentajeUsoAntes: number | null;
+  porcentajeUsoDespues: number | null;
+  estado: 'ok' | 'alerta' | 'critico' | 'excedido' | 'sin-presupuesto';
+  materialesSinPresupuesto: number[];
+}
+
+export interface SolicitudPresupuestoPreview {
+  bloqueada: boolean;
+  mensaje: string | null;
+  materialesSinPrecio: number[];
+  areas: SolicitudPresupuestoPreviewArea[];
 }
 
 export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSolicitud: number; CodigoSolicitud: string }> {
@@ -253,6 +1042,13 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   if (input.detalle.length > 9) {
     throw new Error('Solo se permiten un máximo de 9 materiales por solicitud para ajustarse al formato de impresión.');
   }
+
+  await validarPresupuestoSolicitud({
+    fechaSolicitud: input.fechaSolicitud ?? null,
+    estado: input.estado ?? 'PENDIENTE',
+    idAreaCabecera: input.idArea ?? null,
+    detalle: input.detalle,
+  });
 
   const pool = await getPool();
 
@@ -285,6 +1081,7 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
   request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
   request.input('IdCorteStock', sql.Int, input.idCorteStock ?? null);
   request.input('IdArea', sql.Int, input.idArea ?? null);
+  request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
   request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
   request.input('OT', sql.NVarChar(100), input.ot ?? null);
   request.input('Detalle', tvp as any);
@@ -296,6 +1093,7 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
       area: input.area,
       comentario: input.comentario,
       idArea: input.idArea,
+      idCatalogoSolicitud: input.idCatalogoSolicitud,
       idCentroCosto: input.idCentroCosto,
       ot: input.ot,
     });
@@ -333,6 +1131,14 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
     throw new Error('Solo se permiten un máximo de 9 materiales por solicitud para ajustarse al formato de impresión.');
   }
 
+  await validarPresupuestoSolicitud({
+    idSolicitud: input.idSolicitud,
+    fechaSolicitud: input.fechaSolicitud ?? null,
+    estado: input.nuevoEstado ?? 'PENDIENTE',
+    idAreaCabecera: input.idArea ?? null,
+    detalle: input.detalle,
+  });
+
   const pool = await getPool();
 
   const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
@@ -361,6 +1167,7 @@ request.input('NuevoEstado', sql.NVarChar(30), input.nuevoEstado ?? null);
 request.input('Area', sql.NVarChar(100), input.area ?? null);
 request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
 request.input('IdArea', sql.Int, input.idArea ?? null);
+request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
 request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
 request.input('OT', sql.NVarChar(100), input.ot ?? null);
 request.input('Detalle', tvp as any);
@@ -386,6 +1193,159 @@ export async function listarSolicitudes(params: {
   return enriquecerSolicitudes(solicitudes);
 }
 
+export async function listarSolicitudesPaginadas(params: {
+  idSolicitante?: number;
+  estado?: string;
+  idArea?: number;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<SolicitudesPaginadasResult> {
+  const pool = await getPool();
+  const page = Math.max(1, Number(params.page ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Number(params.pageSize ?? 10)));
+  const offset = (page - 1) * pageSize;
+
+  const request = pool.request();
+  request.input('IdSolicitante', sql.Int, params.idSolicitante ?? null);
+  request.input('Estado', sql.NVarChar(30), params.estado ?? null);
+  request.input('IdArea', sql.Int, params.idArea ?? null);
+  request.input('FechaDesde', sql.Date, params.fechaDesde ?? null);
+  request.input('FechaHasta', sql.Date, params.fechaHasta ?? null);
+  request.input('Offset', sql.Int, offset);
+  request.input('PageSize', sql.Int, pageSize);
+
+  const result = await request.query<SolicitudResumenPaginadoRow>(`
+    WITH SolicitudesBase AS (
+      SELECT
+        s.IdSolicitud,
+        s.CodigoSolicitud,
+        s.FechaSolicitud,
+        s.Estado,
+        s.IdSolicitante,
+        u.NombreCompleto AS NombreSolicitante,
+        (
+          SELECT TOP 1 r.Nombre
+          FROM dbo.UsuariosRoles ur
+          JOIN dbo.Roles r
+            ON r.IdRol = ur.IdRol
+          WHERE ur.IdUsuario = s.IdSolicitante
+          ORDER BY r.Nombre
+        ) AS RolSolicitante,
+        s.IdArea,
+        a.Nombre AS AreaNombre,
+        NULLIF(LTRIM(RTRIM(cc.Codigo)), '') AS AreaCodigoCuenta,
+        s.IdCentroCosto,
+        cc.Codigo AS CentroCostoCodigo,
+        cc.Nombre AS CentroCostoNombre,
+        s.Comentario,
+        ISNULL(SUM(d.CantidadSolicitada), 0) AS TotalItems,
+        ISNULL(SUM(d.CantidadSolicitada * ISNULL(sa.UltimoPrecioCompra, 0)), 0.0) AS TotalMonto,
+        ultimaAprobacion.FechaAprobacion AS UltimaFechaAprobacion
+      FROM dbo.SolicitudesMaterial s
+      JOIN dbo.Usuarios u
+        ON u.IdUsuario = s.IdSolicitante
+      LEFT JOIN dbo.Areas a
+        ON a.IdArea = s.IdArea
+      LEFT JOIN dbo.CentrosCosto cc
+        ON cc.IdCentroCosto = s.IdCentroCosto
+      LEFT JOIN dbo.DetalleSolicitudesMaterial d
+        ON d.IdSolicitud = s.IdSolicitud
+      LEFT JOIN dbo.StockActual sa
+        ON sa.IdMaterial = d.IdMaterial
+      OUTER APPLY (
+        SELECT TOP 1 a2.FechaAprobacion
+        FROM dbo.Aprobaciones a2
+        WHERE a2.IdSolicitud = s.IdSolicitud
+        ORDER BY a2.FechaAprobacion DESC, a2.IdAprobacion DESC
+      ) ultimaAprobacion
+      WHERE
+        (@IdSolicitante IS NULL OR s.IdSolicitante = @IdSolicitante)
+        AND (@Estado IS NULL OR s.Estado = @Estado)
+        AND (@IdArea IS NULL OR s.IdArea = @IdArea)
+        AND (@FechaDesde IS NULL OR CONVERT(DATE, s.FechaSolicitud) >= @FechaDesde)
+        AND (@FechaHasta IS NULL OR CONVERT(DATE, s.FechaSolicitud) <= @FechaHasta)
+      GROUP BY
+        s.IdSolicitud,
+        s.CodigoSolicitud,
+        s.FechaSolicitud,
+        s.Estado,
+        s.IdSolicitante,
+        u.NombreCompleto,
+        s.IdArea,
+        a.Nombre,
+        s.IdCentroCosto,
+        cc.Codigo,
+        cc.Nombre,
+        s.Comentario,
+        ultimaAprobacion.FechaAprobacion
+    ),
+    SolicitudesPaginadas AS (
+      SELECT
+        *,
+        COUNT(*) OVER() AS TotalRegistros,
+        SUM(TotalMonto) OVER() AS TotalMontoRegistros,
+        SUM(
+          CASE
+            WHEN Estado = 'APROBADA'
+              AND UltimaFechaAprobacion IS NOT NULL
+              AND CONVERT(DATE, UltimaFechaAprobacion) = CONVERT(DATE, GETDATE())
+            THEN 1
+            ELSE 0
+          END
+        ) OVER() AS TotalAprobadasHoy,
+        SUM(
+          CASE
+            WHEN Estado = 'APROBADA'
+              AND UltimaFechaAprobacion IS NOT NULL
+              AND CONVERT(DATE, UltimaFechaAprobacion) = CONVERT(DATE, GETDATE())
+            THEN TotalMonto
+            ELSE 0
+          END
+        ) OVER() AS TotalMontoAprobadasHoy
+      FROM SolicitudesBase
+    )
+    SELECT *
+    FROM SolicitudesPaginadas
+    ORDER BY FechaSolicitud DESC, IdSolicitud DESC
+    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+  `);
+
+  const rows = result.recordset ?? [];
+  const total = Number(rows[0]?.TotalRegistros ?? 0);
+  const summary: SolicitudesPaginadasSummary = {
+    totalMonto: Number(rows[0]?.TotalMontoRegistros ?? 0),
+    aprobadasHoyCount: Number(rows[0]?.TotalAprobadasHoy ?? 0),
+    aprobadasHoyMonto: Number(rows[0]?.TotalMontoAprobadasHoy ?? 0),
+  };
+
+  const data = await enriquecerSolicitudes(
+    rows.map((row) => {
+      const {
+        TotalRegistros,
+        TotalMontoRegistros,
+        TotalAprobadasHoy,
+        TotalMontoAprobadasHoy,
+        ...baseRow
+      } = row;
+      void TotalRegistros;
+      void TotalMontoRegistros;
+      void TotalAprobadasHoy;
+      void TotalMontoAprobadasHoy;
+      return baseRow;
+    }),
+  );
+
+  return {
+    data,
+    total,
+    page,
+    pageSize,
+    summary,
+  };
+}
+
 export async function obtenerSolicitud(idSolicitud: number): Promise<SolicitudCompleta> {
   const pool = await getPool();
   const request = pool.request();
@@ -396,10 +1356,32 @@ export async function obtenerSolicitud(idSolicitud: number): Promise<SolicitudCo
   const recordsets = (result as any).recordsets as any[] | undefined;
   const cabecera = (recordsets?.[0]?.[0] as SolicitudCabecera) ?? null;
   const detalle = (recordsets?.[1] as SolicitudDetalle[]) ?? [];
+  const [cabeceraExtra, detalleExtraMap] = await Promise.all([
+    cargarCabeceraSolicitudExtra(pool, idSolicitud),
+    cargarDetalleSolicitudExtra(pool, idSolicitud),
+  ]);
+
+  const detalleEnriquecido = detalle.map((item) => ({
+    ...item,
+    ...(detalleExtraMap.get(Number(item.IdDetalleSolicitud)) ?? {}),
+  }));
+
+  const resumen = construirResumenSolicitud({
+    areaNombre: cabecera?.AreaNombre ?? cabecera?.Area ?? null,
+    codigoCuenta: cabeceraExtra?.CodigoCuenta ?? cabecera?.CentroCostoCodigo ?? null,
+    ot: cabeceraExtra?.OT ?? null,
+    detalle: detalleEnriquecido,
+  });
 
   return {
-    cabecera,
-    detalle,
+    cabecera: cabecera
+      ? {
+        ...cabecera,
+        ...cabeceraExtra,
+        ...resumen,
+      }
+      : null,
+    detalle: detalleEnriquecido,
   };
 }
 
@@ -445,81 +1427,22 @@ export async function registrarAprobacionSolicitud(input: {
 }): Promise<void> {
   const comentarioNormalizado = typeof input.comentario === 'string' ? input.comentario.trim() : '';
   const comentarioFinal = comentarioNormalizado.length > 0 ? comentarioNormalizado : null;
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-  let transactionOpen = false;
-  let solicitudBloqueada: Pick<SolicitudMeta, 'CodigoSolicitud' | 'Estado' | 'IdSolicitante'> | null = null;
+  await callSpOne('sp_RegistrarAprobacionSolicitud', {
+    IdSolicitud: input.idSolicitud,
+    IdAprobador: input.idAprobador,
+    Estado: input.estado,
+    Comentario: comentarioFinal,
+  });
 
-  try {
-    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
-    transactionOpen = true;
-
-    const lockRequest = new sql.Request(transaction);
-    lockRequest.input('IdSolicitud', sql.Int, input.idSolicitud);
-    const lockResult = await lockRequest.query<Pick<SolicitudMeta, 'CodigoSolicitud' | 'Estado' | 'IdSolicitante'>>(`
-      SELECT
-        s.CodigoSolicitud,
-        s.Estado,
-        s.IdSolicitante
-      FROM dbo.SolicitudesMaterial s WITH (UPDLOCK, HOLDLOCK)
-      WHERE s.IdSolicitud = @IdSolicitud;
-    `);
-
-    solicitudBloqueada = lockResult.recordset[0] ?? null;
-
-    if (!solicitudBloqueada) {
-      throw new Error('Solicitud no encontrada');
-    }
-
-    if (String(solicitudBloqueada.Estado || '').trim().toUpperCase() !== 'PENDIENTE') {
-      throw new Error(`La solicitud ${solicitudBloqueada.CodigoSolicitud} ya no está pendiente y no puede procesarse nuevamente.`);
-    }
-
-    const writeRequest = new sql.Request(transaction);
-    writeRequest.input('IdSolicitud', sql.Int, input.idSolicitud);
-    writeRequest.input('IdAprobador', sql.Int, input.idAprobador);
-    writeRequest.input('Estado', sql.NVarChar(30), input.estado);
-    writeRequest.input('Comentario', sql.NVarChar(500), comentarioFinal);
-    await writeRequest.query(`
-      INSERT INTO dbo.Aprobaciones (
-        IdSolicitud,
-        IdAprobador,
-        FechaAprobacion,
-        Estado,
-        Comentario
-      )
-      VALUES (
-        @IdSolicitud,
-        @IdAprobador,
-        SYSDATETIME(),
-        @Estado,
-        @Comentario
-      );
-
-      UPDATE dbo.SolicitudesMaterial
-      SET Estado = @Estado
-      WHERE IdSolicitud = @IdSolicitud;
-    `);
-
-    await transaction.commit();
-    transactionOpen = false;
-  } catch (error) {
-    if (transactionOpen) {
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        console.error('Error al revertir transacción de aprobación', rollbackError);
-      }
-    }
-    throw error;
-  }
-
-  if (input.estado === 'APROBADA' && solicitudBloqueada?.IdSolicitante) {
+  if (input.estado === 'APROBADA') {
     try {
-      io.to(`user:${solicitudBloqueada.IdSolicitante}`).emit('solicitud_aprobada', {
-        id: input.idSolicitud,
-        codigo: solicitudBloqueada.CodigoSolicitud || `#${input.idSolicitud}`,
-      });
+      const solicitud = await obtenerSolicitudMeta(input.idSolicitud);
+      if (solicitud?.IdSolicitante) {
+        io.to(`user:${solicitud.IdSolicitante}`).emit('solicitud_aprobada', {
+          id: input.idSolicitud,
+          codigo: solicitud.CodigoSolicitud || `#${input.idSolicitud}`,
+        });
+      }
     } catch (err) {
       console.error('Error emitiendo socket solicitud_aprobada:', err);
     }
@@ -557,7 +1480,7 @@ export async function registrarDespachoSolicitud(input: {
   await callSpOne('sp_RegistrarDespachoSolicitud', {
     IdSolicitud: input.idSolicitud,
     IdUsuarioDespacho: input.idUsuarioDespacho,
-    NuevoEstado: input.nuevoEstado ?? 'DESPACHADA',
+    NuevoEstado: input.nuevoEstado ?? 'COMPLETADA',
     DetalleDesp: {
       type: 'TDespachoSolicitudDetalle',
       value: input.detalle.map((d) => ({

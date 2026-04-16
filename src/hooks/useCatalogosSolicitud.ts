@@ -22,22 +22,50 @@ export interface AreaListado {
   centroCostoNombre: string | null;
 }
 
+export interface CatalogoListado {
+  id: number;
+  nombre: string;
+  descripcion: string | null;
+}
+
 export interface RecursoListado {
   id: number;
   nombre: string;
   catalogoId?: number | null;
+  codigoCuenta?: string | null;
+  nombreCuenta?: string | null;
 }
 
-interface RecursosVisiblesResponse {
-  recursos: RecursoListado[];
+interface MaterialesPermitidosResponse {
+  materiales: MaterialDisponible[];
   applied: boolean;
 }
 
-function mapRecurso(raw: any): RecursoListado {
+interface CatalogosPermitidosResponse {
+  catalogos: CatalogoListado[];
+  applied: boolean;
+}
+
+function mapMaterial(raw: any): MaterialDisponible {
   return {
-    id: Number(raw?.IdRecurso ?? raw?.id ?? 0),
-    nombre: String(raw?.Nombre ?? raw?.nombre ?? ''),
-    catalogoId: raw?.IdCatalogoSolicitud ?? raw?.IdCatalogo ?? raw?.catalogoId ?? null,
+    idMaterial: raw.IdMaterial,
+    numeroArticulo: raw.NumeroArticulo,
+    descripcionArticulo: raw.DescripcionArticulo,
+    unidadMedida: raw.UnidadMedida,
+    grupoArticulos: raw.GrupoArticulos ?? null,
+    enStock: raw.EnStock ?? null,
+    ultimoPrecioCompra: raw.UltimoPrecioCompra ?? null,
+    ultimaMonedaCompra: raw.UltimaMonedaCompra ?? null,
+    rutaImagenFinal: raw.RutaImagenFinal ?? null,
+    tieneImagen: raw.TieneImagen ?? null,
+  };
+}
+
+function mapCatalogo(raw: any): CatalogoListado {
+  return {
+    id: Number(raw?.IdCatalogoSolicitud ?? raw?.idCatalogoSolicitud ?? raw?.IdCatalogo ?? raw?.id ?? 0),
+    nombre: String(raw?.NombreCatalogo ?? raw?.nombre ?? raw?.Nombre ?? ''),
+    descripcion: raw?.Descripcion ?? raw?.descripcion ?? null,
   };
 }
 
@@ -53,9 +81,9 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
 export function useCatalogosSolicitud(
   token: string | null,
   idAreaDestino: string,
-  idRecurso: string
+  idCatalogoSolicitud: string,
 ) {
-  // 1. Cargar materiales y áreas inicialmente (se hace en paralelo y se cachea)
+  // 1. Cargar áreas inicialmente
   const { 
     data: datosBase, 
     error: errorBase,
@@ -63,29 +91,10 @@ export function useCatalogosSolicitud(
   } = useQuery({
     queryKey: ['catalogosBase', token],
     queryFn: async () => {
-      const [matResp, areasResp] = await Promise.all([
-        apiFetch('/materiales/con-stock'),
-        apiFetch('/areas/mis-areas-permitidas'),
-      ]);
-
-      if (!matResp.ok) throw new Error('No se pudieron cargar los materiales');
+      const areasResp = await apiFetch('/areas/mis-areas-permitidas');
       if (!areasResp.ok) throw new Error('No se pudieron cargar las áreas');
 
-      const materialesJson = await matResp.json();
       const areasJson = await areasResp.json();
-
-      const materiales: MaterialDisponible[] = (materialesJson || []).map((m: any) => ({
-        idMaterial: m.IdMaterial,
-        numeroArticulo: m.NumeroArticulo,
-        descripcionArticulo: m.DescripcionArticulo,
-        unidadMedida: m.UnidadMedida,
-        grupoArticulos: m.GrupoArticulos ?? null,
-        enStock: m.EnStock ?? null,
-        ultimoPrecioCompra: m.UltimoPrecioCompra ?? null,
-        ultimaMonedaCompra: m.UltimaMonedaCompra ?? null,
-        rutaImagenFinal: m.RutaImagenFinal ?? null,
-        tieneImagen: m.TieneImagen ?? null,
-      }));
 
       const mappedAreas: AreaListado[] = (areasJson || [])
         .filter((a: any) => (a.Activo ?? a.activo) !== false)
@@ -101,77 +110,109 @@ export function useCatalogosSolicitud(
         new Map<number, AreaListado>(mappedAreas.map((a) => [a.id, a])).values()
       );
 
-      return { materiales, areas: uniqueAreas };
+      return { areas: uniqueAreas };
     },
     enabled: !!token,
     staleTime: 5 * 60 * 1000, // 5 minutos de caché (evita recargas innecesarias)
   });
 
-  // 2. Cargar recursos visibles para el usuario cuando cambia el área.
-  const { data: recursosData, error: errorRecursos, isLoading: isLoadingRecursos } = useQuery({
-    queryKey: ['recursosVisiblesPorArea', token, idAreaDestino],
+  const {
+    data: catalogosData,
+    error: errorCatalogosPermitidos,
+    isLoading: isLoadingCatalogosPermitidos,
+  } = useQuery({
+    queryKey: ['catalogosPermitidosPorArea', token, idAreaDestino],
     queryFn: async () => {
       if (!idAreaDestino) {
-        return { recursos: [], applied: false } as RecursosVisiblesResponse;
+        return { catalogos: [], applied: false } as CatalogosPermitidosResponse;
       }
 
-      const resp = await apiFetch(`/area-recursos/permitidos?areaId=${idAreaDestino}`);
+      const resp = await apiFetch(`/coberturas-acceso/permitidos?areaId=${idAreaDestino}`);
       if (!resp.ok) {
-        throw new Error(await readErrorMessage(resp, 'No se pudieron cargar los recursos permitidos'));
+        throw new Error(await readErrorMessage(resp, 'No se pudieron cargar los catálogos permitidos'));
       }
 
       const json = await resp.json();
       if (Array.isArray(json)) {
         return {
-          recursos: json.map(mapRecurso),
-          applied: true,
-        } as RecursosVisiblesResponse;
+          catalogos: json.map(mapCatalogo),
+          applied: false,
+        } as CatalogosPermitidosResponse;
       }
 
       return {
-        recursos: Array.isArray(json?.recursos) ? json.recursos.map(mapRecurso) : [],
+        catalogos: Array.isArray(json?.catalogos) ? json.catalogos.map(mapCatalogo) : [],
         applied: Boolean(json?.applied),
-      } as RecursosVisiblesResponse;
+      } as CatalogosPermitidosResponse;
     },
-    enabled: !!token && !!idAreaDestino, // Sólo dispara si hay token y área seleccionada
+    enabled: !!token && !!idAreaDestino,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const catalogosIdsKey = (catalogosData?.catalogos || [])
+    .map((catalogo) => String(catalogo.id))
+    .sort()
+    .join(',');
+
+  // 2. Cargar materiales visibles para el usuario cuando cambia el área.
+  const {
+    data: materialesData,
+    error: errorMateriales,
+    isLoading: isLoadingMateriales,
+  } = useQuery({
+    queryKey: ['materialesPermitidosPorArea', token, idAreaDestino, idCatalogoSolicitud, Boolean(catalogosData?.applied), catalogosIdsKey],
+    queryFn: async () => {
+      if (!idAreaDestino) {
+        return { materiales: [], applied: false } as MaterialesPermitidosResponse;
+      }
+
+      const catalogosPermitidos = catalogosData?.catalogos || [];
+      const requiereSeleccionCatalogo = Boolean(catalogosData?.applied) && catalogosPermitidos.length > 1 && !idCatalogoSolicitud;
+      if (requiereSeleccionCatalogo) {
+        return { materiales: [], applied: true } as MaterialesPermitidosResponse;
+      }
+
+      const query = new URLSearchParams({ areaId: idAreaDestino });
+      if (idCatalogoSolicitud) {
+        query.set('catalogoId', idCatalogoSolicitud);
+      }
+
+      const resp = await apiFetch(`/materiales/permitidos?${query.toString()}`);
+      if (!resp.ok) {
+        throw new Error(await readErrorMessage(resp, 'No se pudieron cargar los materiales permitidos'));
+      }
+
+      const json = await resp.json();
+      if (Array.isArray(json)) {
+        return {
+          materiales: json.map(mapMaterial),
+          applied: false,
+        } as MaterialesPermitidosResponse;
+      }
+
+      return {
+        materiales: Array.isArray(json?.materiales) ? json.materiales.map(mapMaterial) : [],
+        applied: Boolean(json?.applied),
+      } as MaterialesPermitidosResponse;
+    },
+    enabled: !!token && !!idAreaDestino && !isLoadingCatalogosPermitidos,
     staleTime: 10 * 60 * 1000, // 10 minutos
   });
 
-  // 3. Cargar Código de Cuenta cuando tengamos Área Y Recurso
-  const { data: dataCuenta, error: errorCuenta, isLoading: isLoadingCuenta } = useQuery({
-    queryKey: ['codigoCuenta', idAreaDestino, idRecurso],
-    queryFn: async () => {
-      const resp = await apiFetch(`/area-recursos/codigo-cuenta?idArea=${idAreaDestino}&idRecurso=${idRecurso}`);
-      if (!resp.ok) {
-        throw new Error(await readErrorMessage(resp, 'No se pudo obtener el código de cuenta'));
-      }
-
-      const data = await resp.json();
-      return {
-        codigoCuenta: data?.codigoCuenta ?? '',
-        idCentroCosto: data?.idCentroCosto ?? null,
-      };
-    },
-    enabled: !!token && !!idAreaDestino && !!idRecurso,
-    staleTime: 30 * 60 * 1000, // 30 minutos (los códigos de cuenta cambian raramente en el día)
-  });
-
   // Derivamos los errores combinados si alguno falla
-  const errorCatalogos = errorBase || errorRecursos || errorCuenta 
-    ? (errorBase?.message || errorRecursos?.message || errorCuenta?.message || 'Error al cargar los catálogos o recursos requeridos') 
+  const errorCatalogos = errorBase || errorCatalogosPermitidos || errorMateriales 
+    ? (errorBase?.message || errorCatalogosPermitidos?.message || errorMateriales?.message || 'Error al cargar los catálogos o recursos requeridos') 
     : null;
 
   return {
-    materiales: datosBase?.materiales || [],
+    materiales: idAreaDestino ? (materialesData?.materiales || []) : [],
     areas: datosBase?.areas || [],
-    // Si no hay área seleccionada, garantizamos enviar arreglo vacío
-    recursos: idAreaDestino ? (recursosData?.recursos || []) : [],
-    // Si falta alguno de los 2 no deberíamos tener un código de cuenta devuelto
-    codigoCuenta: (idAreaDestino && idRecurso) ? (dataCuenta?.codigoCuenta || '') : '',
-    idCentroCostoCalculado: (idAreaDestino && idRecurso) ? (dataCuenta?.idCentroCosto || null) : null,
+    catalogos: idAreaDestino ? (catalogosData?.catalogos || []) : [],
+    catalogosApplied: Boolean(catalogosData?.applied),
+    materialesApplied: Boolean(materialesData?.applied),
     errorCatalogos,
     isLoadingBase,
-    isLoadingRecursos,
-    isLoadingCuenta
+    isLoadingCatalogosPermitidos,
+    isLoadingMateriales,
   };
 }

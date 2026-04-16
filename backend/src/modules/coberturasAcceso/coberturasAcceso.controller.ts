@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middleware/auth';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
 import { env } from '../../config/env';
 import { listarAreas } from '../areas/areas.service';
+import { usuarioTieneCoberturaActivaEnArea } from '../areaRecursoCuenta/areaRecursoCuenta.service';
 import { listarUsuarios } from '../usuarios/usuarios.service';
 import {
   agregarAreaCobertura,
@@ -32,7 +33,8 @@ function parsePositiveInt(value: unknown): number | null {
 
 function isDuplicateError(error: any): boolean {
   const sqlNumber = error?.number ?? error?.originalError?.info?.number;
-  return sqlNumber === 2627 || sqlNumber === 2601;
+  const message = String(error?.originalError?.info?.message || error?.message || '').toLowerCase();
+  return sqlNumber === 2627 || sqlNumber === 2601 || message.includes('ya está asignado');
 }
 
 export async function listarCoberturasAccesoController(_req: Request, res: Response) {
@@ -179,6 +181,10 @@ export async function actualizarCoberturaAccesoController(req: AuthRequest, res:
     vigenteHasta: req.body?.vigenteHasta ?? undefined,
     activo: typeof req.body?.activo === 'boolean' ? req.body.activo : undefined,
   };
+
+  if (payload.nombre !== undefined && !payload.nombre) {
+    return res.status(400).json({ message: 'El nombre de la cobertura es requerido' });
+  }
 
   // Validación de rango de fechas en servidor: vigenteDesde debe ser <= vigenteHasta
   if (payload.vigenteDesde && payload.vigenteHasta) {
@@ -419,6 +425,7 @@ export async function listarCatalogosPermitidosController(req: AuthRequest, res:
   }
 
   try {
+    const applied = await usuarioTieneCoberturaActivaEnArea(req.userId ?? 0, idArea);
     const raw = await listarCatalogosPermitidosPorUsuarioArea(req.userId ?? 0, idArea);
 
     const catalogos = (raw || []).map((row: any) => ({
@@ -427,8 +434,7 @@ export async function listarCatalogosPermitidosController(req: AuthRequest, res:
       descripcion: row.Descripcion ?? row.descripcion ?? null,
     }));
 
-    // Indicamos si se aplicó filtro (true cuando hay al menos una cobertura encontrada)
-    return res.json({ catalogos, applied: Array.isArray(catalogos) && catalogos.length > 0 });
+    return res.json({ catalogos, applied });
   } catch (error: any) {
     console.error('Error en listarCatalogosPermitidosController', error);
     return res.status(500).json({ message: 'Error al listar catálogos permitidos' });
