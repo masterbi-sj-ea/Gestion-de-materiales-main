@@ -1,0 +1,24 @@
+services:
+  gestion-materiales:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gestion-materiales:latest
+    container_name: gestion-materiales
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "4000:4000"
+    volumes:
+      - backend_cache:/app/cache
+      - backend_imports:/app/imports
+      - backend_logs:/app/logs
+      # Si necesitas imágenes de materiales dentro del contenedor,
+      # monta aquí la ruta del host y define MATERIALES_IMG_ROOT=/materiales en backend/.env
+      # - ./materiales:/materiales:ro
+
+volumes:
+  backend_cache:
+  backend_imports:
+  backend_logs:

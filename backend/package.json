@@ -7,6 +7,9 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:pm2": "pm2 start ecosystem.config.cjs --env production",
+    "restart:pm2": "pm2 restart ecosystem.config.cjs --env production",
+    "stop:pm2": "pm2 delete gestion-materiales-backend",
     "generate:vapid": "node tools/generate_vapid_keys.js",
     "test:budget-guard": "npm run build && node tests/presupuestoValidation.test.cjs"
   },

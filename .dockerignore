@@ -1,0 +1,14 @@
+node_modules
+backend/node_modules
+build
+backend/dist
+backend/public
+release
+.git
+.gitignore
+.vscode
+coverage
+backend/cache
+backend/logs
+backend/.env
+*.log

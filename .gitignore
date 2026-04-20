@@ -2,6 +2,7 @@ node_modules/
 .tmp-*
 dist/
 build/
+release/
 .env
 backend/.env
 

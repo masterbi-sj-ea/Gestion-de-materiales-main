@@ -6,6 +6,7 @@ import { Card, CardContent } from "../../ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select";
 import { AlertTriangle, ImageIcon, Plus } from "lucide-react";
 import { cn } from "../../ui/utils";
+import { VisorImagenMaterial } from './VisorImagenMaterial';
 import { MaterialDisponible, RecursoListado } from "../../../hooks/useCatalogosSolicitud";
 
 interface FormularioAgregarMaterialProps {
@@ -270,14 +271,27 @@ export const FormularioAgregarMaterial = memo(function FormularioAgregarMaterial
                       </div>
                     )}
                   </div>
-                </div>
-
-                {imagenMaterialError && (
-                  <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-xs text-amber-700">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                    <span>{imagenMaterialError}</span>
                   </div>
-                )}
+
+                  {imagenMaterialError && (
+                    <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-xs text-amber-700">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                      <span>{imagenMaterialError}</span>
+                    </div>
+                  )}
+
+                  {/* Botón para ver la imagen en tamaño completo (modal) */}
+                  {materialSeleccionado && (
+                    <div className="mt-3 flex justify-center">
+                      <VisorImagenMaterial
+                        tieneImagen={materialSeleccionado.tieneImagen ?? null}
+                        rutaImagenFinal={materialSeleccionado.rutaImagenFinal ?? null}
+                        descripcionArticulo={materialSeleccionado.descripcionArticulo ?? ''}
+                        numeroArticulo={materialSeleccionado.numeroArticulo ?? ''}
+                        showThumbnail={false}
+                      />
+                    </div>
+                  )}
               </div>
             </div>
           )}

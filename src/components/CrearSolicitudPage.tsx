@@ -31,20 +31,126 @@ import { sileo as toast } from 'sileo';
 /**
  * Obtiene la URL de la imagen del material desde el backend de forma segura.
  */
+// Cache local de objectURLs para evitar refetchs repetidos durante la sesión
+const imageCache: Map<string, { url: string; ts: number }> = new Map();
+const pendingImageFetches: Map<string, Promise<string | null>> = new Map();
+
+function isUrlCached(url: string | null): boolean {
+  if (!url) return false;
+  for (const v of imageCache.values()) {
+    if (v.url === url) return true;
+  }
+  return false;
+}
+
+/**
+ * Obtiene (y cachea) una objectURL para la imagen del material.
+ * Estrategia:
+ *  - Intentar endpoint de thumbnail (más pequeño y rápido) con timeout corto.
+ *  - Si falla o se agota, intentar endpoint fallback con timeout mayor.
+ *  - Mantener objectURLs en memoria para mejorar rapidez y evitar re-descargas.
+ */
 async function obtenerBlobUrlImagenMaterial(numeroArticulo: string): Promise<string | null> {
   if (!numeroArticulo) return null;
-  
-  try {
-    const response = await apiFetch(`/materiales/imagen-archivo/${encodeURIComponent(numeroArticulo)}`);
-    if (response.status === 204 || response.status === 404) return null;
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    
-    const blob = await response.blob();
-    return blob && blob.size > 0 ? URL.createObjectURL(blob) : null;
-  } catch (error) {
-    console.error('Error al cargar imagen:', error);
-    return null; // Resolvemos silenciosamente para no interrumpir el flujo principal
+  const key = String(numeroArticulo);
+
+  const cached = imageCache.get(key);
+  if (cached) return cached.url;
+
+  const pending = pendingImageFetches.get(key);
+  if (pending) return pending;
+
+  const fetcher = (async (): Promise<string | null> => {
+    const thumbEndpoint = `/materiales/archivo/por-numero/${encodeURIComponent(key)}?w=470&format=webp&q=70`;
+    const fallbackEndpoint = `/materiales/imagen-archivo/${encodeURIComponent(key)}`;
+
+    async function tryFetch(endpoint: string, timeoutMs: number): Promise<string | null> {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const resp = await apiFetch(endpoint, { signal: controller.signal });
+        clearTimeout(id);
+        if (resp.status === 204 || resp.status === 404) return null;
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        if (!blob || blob.size === 0) return null;
+        const objectUrl = URL.createObjectURL(blob);
+        imageCache.set(key, { url: objectUrl, ts: Date.now() });
+        return objectUrl;
+      } catch (err) {
+        clearTimeout(id);
+        throw err;
+      }
+    }
+
+    try {
+      // intento rápido thumbnail
+      return await tryFetch(thumbEndpoint, 2500);
+    } catch (e) {
+      // si falla o timeout, intento fallback con tolerancia mayor
+      try {
+        return await tryFetch(fallbackEndpoint, 10000);
+      } catch (e2) {
+        console.error('Error al cargar imagen (thumb y fallback):', e2);
+        return null;
+      }
+    } finally {
+      pendingImageFetches.delete(key);
+    }
+  })();
+
+  pendingImageFetches.set(key, fetcher);
+  return fetcher;
+}
+
+/**
+ * Hacer una comprobación diagnóstica rápida contra los endpoints de imagen
+ * para devolver un mensaje legible con el fallo (status / timeout / conexión).
+ */
+async function diagnosticarImagen(numeroArticulo: string): Promise<string | null> {
+  if (!numeroArticulo) return 'Número de artículo inválido';
+  const key = String(numeroArticulo);
+  const thumbEndpoint = `/materiales/archivo/por-numero/${encodeURIComponent(key)}?w=240&format=webp&q=70`;
+  const fallbackEndpoint = `/materiales/imagen-archivo/${encodeURIComponent(key)}`;
+
+  async function probe(endpoint: string, timeoutMs: number): Promise<string | null> {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await apiFetch(endpoint, { signal: controller.signal });
+      clearTimeout(id);
+      if (resp.status === 204 || resp.status === 404) return `Sin imagen disponible (HTTP ${resp.status})`;
+      if (!resp.ok) return `Error al solicitar imagen (HTTP ${resp.status})`;
+      return null; // OK
+    } catch (err: any) {
+      clearTimeout(id);
+      if (err?.name === 'AbortError') return 'Tiempo de espera agotado al solicitar la imagen';
+      return `Error de conexión: ${String(err?.message || err || 'desconocido')}`;
+    }
   }
+
+  // Intentar primero thumbnail rápido
+  const thumb = await probe(thumbEndpoint, 2500);
+  if (thumb === null) return null;
+
+  // Si thumb indica problema, probar el endpoint completo
+  const full = await probe(fallbackEndpoint, 5000);
+  if (full === null) return null;
+  // Si ambos probes fallaron, intentar obtener metadata del material para más contexto
+  try {
+    const resp = await apiFetch(`/materiales/imagen/${encodeURIComponent(key)}`);
+    if (resp.ok) {
+      const json = await resp.json();
+      const ruta = json?.RutaImagenFinal ?? json?.rutaImagenFinal ?? json?.Ruta ?? null;
+      const tiene = json?.TieneImagen ?? json?.tieneImagen ?? null;
+      return `Sin imagen disponible. Metadata: tieneImagen=${String(tiene)}, ruta=${String(ruta)}`;
+    }
+  } catch (e) {
+    // noop
+  }
+
+  // Devolver el mensaje diagnóstico más específico
+  return full || thumb || 'No se pudo diagnosticar la imagen';
 }
 
 function mapRecursoListado(raw: any): RecursoListado {
@@ -479,7 +585,7 @@ export default function CrearSolicitudPage() {
         setImagenMaterialLoading(false);
         setImagenMaterialError(null);
         setImagenMaterialUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
+          if (prev && !isUrlCached(prev)) URL.revokeObjectURL(prev);
           return null;
         });
         return;
@@ -497,32 +603,36 @@ export default function CrearSolicitudPage() {
         objectUrl = url;
 
         if (cancelled) {
-          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          if (objectUrl && !isUrlCached(objectUrl)) URL.revokeObjectURL(objectUrl);
           return;
         }
 
         if (!objectUrl) {
           setImagenMaterialUrl((prev) => {
-            if (prev) URL.revokeObjectURL(prev);
+            if (prev && !isUrlCached(prev)) URL.revokeObjectURL(prev);
             return null;
           });
-          setImagenMaterialError(
-            tieneImagenRegistrada
-              ? 'La imagen está registrada, pero el archivo no está disponible en el servidor.'
-              : null
-          );
+
+          try {
+            const diag = await diagnosticarImagen(materialSeleccionado.numeroArticulo);
+            setImagenMaterialError(
+              diag || (tieneImagenRegistrada ? 'La imagen está registrada, pero el archivo no está disponible en el servidor.' : 'Sin imagen disponible')
+            );
+          } catch (diagErr) {
+            setImagenMaterialError(tieneImagenRegistrada ? 'La imagen está registrada, pero el archivo no está disponible en el servidor.' : 'Sin imagen disponible');
+          }
           return;
         }
 
         setImagenMaterialUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
+          if (prev && !isUrlCached(prev)) URL.revokeObjectURL(prev);
           return objectUrl;
         });
       } catch (error: any) {
         if (cancelled) return;
 
         setImagenMaterialUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
+          if (prev && !isUrlCached(prev)) URL.revokeObjectURL(prev);
           return null;
         });
 
@@ -536,7 +646,7 @@ export default function CrearSolicitudPage() {
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl && !isUrlCached(objectUrl)) URL.revokeObjectURL(objectUrl);
     };
   }, [
     materialSeleccionado?.numeroArticulo,

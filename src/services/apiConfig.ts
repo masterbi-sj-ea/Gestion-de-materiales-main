@@ -40,9 +40,14 @@ function normalizeSocketTransportMode(
 }
 
 function buildDefaultApiOrigin(): string {
-  // En runtime del navegador, usamos el mismo hostname/IP que el frontend.
-  if (typeof window !== 'undefined' && window.location?.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:4000`;
+  // En desarrollo con Vite seguimos apuntando al backend en :4000.
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    if ((import.meta as any)?.env?.DEV) {
+      return `${window.location.protocol}//${window.location.hostname}:4000`;
+    }
+
+    // En producción, el comportamiento por defecto debe ser mismo-origin.
+    return window.location.origin;
   }
 
   // Fallback seguro para entornos sin window (tests/SSR).

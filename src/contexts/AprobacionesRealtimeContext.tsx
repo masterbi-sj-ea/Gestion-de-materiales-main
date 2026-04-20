@@ -112,6 +112,28 @@ function browserSupportsPushNotifications(): boolean {
     && 'PushManager' in window;
 }
 
+function getAppBaseUrl(): URL {
+  if (typeof window === 'undefined') {
+    return new URL('http://localhost/');
+  }
+
+  const basePath = ((import.meta as any)?.env?.BASE_URL as string | undefined) || '/';
+  return new URL(basePath, window.location.origin);
+}
+
+function getNotificationAssetUrl(fileName: string): string {
+  return new URL(fileName, getAppBaseUrl()).toString();
+}
+
+function getPushServiceWorkerUrl(): string {
+  return getNotificationAssetUrl('push-sw.js');
+}
+
+function getPushServiceWorkerScope(): string {
+  const { pathname } = getAppBaseUrl();
+  return pathname.endsWith('/') ? pathname : `${pathname}/`;
+}
+
 function getPushUnavailableReason(): string {
   if (typeof window === 'undefined') {
     return 'Las notificaciones externas no están disponibles en este entorno.';
@@ -273,6 +295,8 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
   const pushNotificationsEnabledRef = useRef(pushNotificationsEnabled);
   const pushConfigRef = useRef<PushConfigPayload | null>(null);
   const serviceWorkerRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const notificationIconUrlRef = useRef(getNotificationAssetUrl('app-icon.svg'));
+  const notificationBadgeUrlRef = useRef(getNotificationAssetUrl('notification-badge.svg'));
   const canAccessAprobaciones = !!user && !cargandoPermisos && puedeAcceder(user.role, 'aprobaciones');
   const canApproveAprobaciones = !!user && !cargandoPermisos && !!getPermisosModulo(user.role, 'aprobaciones')?.puedeAprobar;
 
@@ -368,7 +392,11 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
       return serviceWorkerRegistrationRef.current;
     }
 
-    const registration = await navigator.serviceWorker.register('/push-sw.js');
+    const registration = await navigator.serviceWorker.register(getPushServiceWorkerUrl(), {
+      scope: getPushServiceWorkerScope(),
+      updateViaCache: 'none',
+    });
+    await registration.update().catch(() => undefined);
     serviceWorkerRegistrationRef.current = await navigator.serviceWorker.ready;
     return serviceWorkerRegistrationRef.current ?? registration;
   }, []);
@@ -644,6 +672,8 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
         const notification = new Notification('Nueva solicitud por aprobar', {
           body: `${payload.solicitante} envió ${payload.codigo} para ${payload.area}.`,
           tag: `aprobacion-pendiente-${payload.id}`,
+          icon: notificationIconUrlRef.current,
+          badge: notificationBadgeUrlRef.current,
         });
         window.setTimeout(() => notification.close(), 7000);
       } catch (error) {

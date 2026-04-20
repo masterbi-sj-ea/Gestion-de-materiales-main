@@ -67,6 +67,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:backend": "npm --prefix backend run build",
+    "package:prod": "node deploy.js",
     "deploy": "node deploy.js"
   }
 }

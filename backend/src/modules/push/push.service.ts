@@ -31,6 +31,7 @@ interface PushNotificationPayload {
   tag?: string;
   icon?: string;
   badge?: string;
+  requireInteraction?: boolean;
   data?: Record<string, unknown>;
 }
 
@@ -364,8 +365,9 @@ export async function sendPushNotificationsToUserIds(
     body: payload.body,
     url: payload.url,
     tag: payload.tag,
-    icon: payload.icon ?? '/favicon.svg',
-    badge: payload.badge ?? '/favicon.svg',
+    icon: payload.icon ?? null,
+    badge: payload.badge ?? null,
+    requireInteraction: payload.requireInteraction ?? false,
     data: payload.data ?? null,
   });
 
@@ -424,6 +426,7 @@ export async function sendPendingApprovalPushNotification(args: {
     body: `${args.solicitante} envió ${args.codigo} para ${args.area}.`,
     url: `/aprobaciones?solicitud=${args.id}`,
     tag: `aprobacion-pendiente-${args.id}`,
+    requireInteraction: true,
     data: {
       kind: 'solicitud_pendiente_aprobacion',
       solicitudId: args.id,
