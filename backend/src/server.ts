@@ -9,7 +9,8 @@ import app from './app';
 import { env } from './config/env';
 import { describeOriginPolicy, isOriginAllowed, normalizeOriginList } from './infra/originSecurity';
 
-const PORT = env.PORT || 4000;
+const PORT = env.PORT || 4009;
+const HOST = env.HOST;
 const normalizedAllowedOrigins = normalizeOriginList(env.CORS_ALLOWED_ORIGINS);
 
 function buildServer() {
@@ -101,8 +102,8 @@ function shutdown(signal: string) {
 // Solo escuchar puerto cuando este archivo se ejecuta como entrypoint.
 // Esto permite importar servicios en scripts/tests sin chocar con EADDRINUSE.
 if (require.main === module) {
-  server.listen(PORT, () => {
-    console.log(`API Gestión Materiales con WebSockets escuchando en ${serverConfig.protocol.toUpperCase()} puerto ${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`API Gestión Materiales con WebSockets escuchando en ${serverConfig.protocol.toUpperCase()} ${HOST}:${PORT}`);
     console.log(`[server] Política de orígenes: ${describeOriginPolicy(normalizedAllowedOrigins, env.NODE_ENV)}`);
   });
 

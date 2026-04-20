@@ -40,10 +40,10 @@ function normalizeSocketTransportMode(
 }
 
 function buildDefaultApiOrigin(): string {
-  // En desarrollo con Vite seguimos apuntando al backend en :4000.
+  // En desarrollo con Vite seguimos apuntando al backend en :4009.
   if (typeof window !== 'undefined' && window.location?.origin) {
     if ((import.meta as any)?.env?.DEV) {
-      return `${window.location.protocol}//${window.location.hostname}:4000`;
+      return `${window.location.protocol}//${window.location.hostname}:4009`;
     }
 
     // En producción, el comportamiento por defecto debe ser mismo-origin.
@@ -51,7 +51,7 @@ function buildDefaultApiOrigin(): string {
   }
 
   // Fallback seguro para entornos sin window (tests/SSR).
-  return 'http://localhost:4000';
+  return 'http://localhost:4009';
 }
 
 function normalizeApiUrls() {
@@ -61,8 +61,8 @@ function normalizeApiUrls() {
   const envValue = raw ? stripTrailingSlashes(raw.trim()) : '';
 
   // VITE_API_URL puede venir como:
-  // - http://host:4000/api
-  // - http://host:4000
+  // - http://host:4009/api
+  // - http://host:4009
   // Normalizamos para tener ambos: origin (sin /api) y base (con /api)
   if (envValue) {
     if (envValue.endsWith('/api')) {
@@ -97,10 +97,10 @@ function normalizeApiUrls() {
 
 const { apiBaseUrl, apiOrigin, socketOrigin, socketTransportMode } = normalizeApiUrls();
 
-// Base con /api (ej: http://192.168.10.200:4000/api)
+// Base con /api (ej: http://192.168.10.200:4009/api)
 export const API_BASE_URL = apiBaseUrl;
 
-// Origin sin /api (ej: http://192.168.10.200:4000)
+// Origin sin /api (ej: http://192.168.10.200:4009)
 export const API_ORIGIN = apiOrigin;
 
 // Origin del socket (puede separarse del API si el despliegue lo requiere)

@@ -16,6 +16,8 @@ const app = express();
 const FRONTEND_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const FRONTEND_DEFAULT_CACHE_CONTROL = 'public, max-age=3600';
 const FRONTEND_NO_CACHE_CONTROL = 'no-cache, no-store, must-revalidate';
+const enableSecureTransportPolicies = env.NODE_ENV === 'production'
+  && Boolean(env.TRUST_PROXY || (env.HTTPS_KEY_PATH && env.HTTPS_CERT_PATH));
 
 function setFrontendStaticHeaders(res: Response, filePath: string) {
   const normalizedPath = filePath.toLowerCase();
@@ -54,7 +56,15 @@ function shouldServeSpaIndex(req: Request): boolean {
 app.disable('x-powered-by');
 app.set('trust proxy', env.TRUST_PROXY);
 app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'upgrade-insecure-requests': enableSecureTransportPolicies ? [] : null,
+    },
+  },
+  crossOriginOpenerPolicy: enableSecureTransportPolicies ? { policy: 'same-origin' } : false,
   crossOriginResourcePolicy: { policy: 'same-origin' },
+  originAgentCluster: enableSecureTransportPolicies,
   referrerPolicy: { policy: 'no-referrer' },
 }));
 app.use(cors(createCorsOptionsDelegate(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV)));

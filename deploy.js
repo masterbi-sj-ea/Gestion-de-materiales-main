@@ -7,6 +7,7 @@ const BACKEND_DIR = path.join(ROOT_DIR, 'backend');
 const FRONTEND_BUILD_DIR = path.join(ROOT_DIR, 'build');
 const BACKEND_PUBLIC_DIR = path.join(BACKEND_DIR, 'public');
 const BACKEND_DIST_DIR = path.join(BACKEND_DIR, 'dist');
+const BACKEND_DEPLOY_DIR = path.join(BACKEND_DIR, 'deploy');
 const RELEASE_DIR = path.join(ROOT_DIR, 'release');
 const RELEASE_BACKEND_DIR = path.join(RELEASE_DIR, 'backend');
 
@@ -84,6 +85,9 @@ try {
   ensureDir(RELEASE_BACKEND_DIR);
   copyRecursive(BACKEND_DIST_DIR, path.join(RELEASE_BACKEND_DIR, 'dist'));
   copyRecursive(BACKEND_PUBLIC_DIR, path.join(RELEASE_BACKEND_DIR, 'public'));
+  if (fs.existsSync(BACKEND_DEPLOY_DIR)) {
+    copyRecursive(BACKEND_DEPLOY_DIR, path.join(RELEASE_BACKEND_DIR, 'deploy'));
+  }
   copyFileSafe(path.join(BACKEND_DIR, 'package.json'), path.join(RELEASE_BACKEND_DIR, 'package.json'));
   copyFileSafe(path.join(BACKEND_DIR, 'package-lock.json'), path.join(RELEASE_BACKEND_DIR, 'package-lock.json'));
   copyFileSafe(path.join(BACKEND_DIR, '.env.example'), path.join(RELEASE_BACKEND_DIR, '.env.example'));
@@ -100,7 +104,8 @@ try {
   console.log('  1. Copiar la carpeta release/backend');
   console.log('  2. Crear .env a partir de .env.example');
   console.log('  3. Ejecutar npm ci --omit=dev');
-  console.log('  4. Ejecutar pm2 start ecosystem.config.cjs --env production');
+  console.log('  4. En Windows Server + IIS, revisar release/backend/deploy/README.md y publicar con servicio Windows + reverse proxy');
+  console.log('  5. En Linux, alternativamente puedes usar pm2 start ecosystem.config.cjs --env production');
 } catch (error) {
   console.error('❌ Error durante la construcción/despliegue:', error.message || error);
   process.exit(1);

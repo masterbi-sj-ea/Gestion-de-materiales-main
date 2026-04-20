@@ -9,7 +9,7 @@ services:
     env_file:
       - ./backend/.env
     ports:
-      - "4000:4000"
+      - "4009:4009"
     volumes:
       - backend_cache:/app/cache
       - backend_imports:/app/imports

@@ -15,10 +15,10 @@
 
   ```env
   # URL del backend
-  VITE_API_URL=http://localhost:4000
+  VITE_API_URL=http://localhost:4009
 
   # Opcional: origin específico para Socket.IO si no coincide con el API.
-  # VITE_SOCKET_URL=http://localhost:4000
+  # VITE_SOCKET_URL=http://localhost:4009
 
   # Opcional: polling | websocket | auto
   # Si no se define, la app usa auto cuando el origin del socket es HTTPS real
@@ -96,7 +96,7 @@
   docker compose up -d
   ```
 
-  El contenedor expone el backend en el puerto `4000` y usa el healthcheck `GET /health`.
+  El contenedor expone el backend en el puerto `4009` y usa el healthcheck `GET /health`.
 
   Si la app necesita leer imágenes de materiales desde el host, monta una carpeta en `/materiales`
   dentro de `docker-compose.yml` y configura `MATERIALES_IMG_ROOT=/materiales` en `backend/.env`.

@@ -16,7 +16,7 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=4000
+ENV PORT=4009
 
 COPY --from=builder /workspace/release/backend/package.json ./package.json
 COPY --from=builder /workspace/release/backend/package-lock.json ./package-lock.json
@@ -33,8 +33,8 @@ RUN mkdir -p /app/cache /app/imports /app/logs \
 
 USER node
 
-EXPOSE 4000
+EXPOSE 4009
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["node", "-e", "fetch(`http://127.0.0.1:${process.env.PORT || 4000}/health`).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["node", "-e", "fetch(`http://127.0.0.1:${process.env.PORT || 4009}/health`).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
 CMD ["node", "dist/server.js"]

@@ -26,6 +26,7 @@ Backend en Node.js + TypeScript pensado como capa fina sobre procedimientos alma
    DB_PASSWORD=tu-password
    DB_DATABASE=GestionMateriales
    JWT_SECRET=change-me-in-production
+   HOST=0.0.0.0
    TRUST_PROXY=false
    CORS_ALLOWED_ORIGINS=
 
@@ -42,7 +43,7 @@ Backend en Node.js + TypeScript pensado como capa fina sobre procedimientos alma
 
 5. Probar el healthcheck:
 
-   - `GET http://localhost:4000/health`
+   - `GET http://localhost:4009/health`
 
 Más adelante se conectará con los SP de SQL Server para toda la lógica de negocio.
 
@@ -80,8 +81,8 @@ Si no defines estas variables, el servidor arrancará en HTTP como hasta ahora.
 Si además el frontend va a consumir el socket en modo websocket/auto, apunta sus variables de Vite al origin HTTPS del backend, por ejemplo:
 
 ```env
-VITE_API_URL=https://tu-dominio-o-host:4000
-VITE_SOCKET_URL=https://tu-dominio-o-host:4000
+VITE_API_URL=https://tu-dominio-o-host:4009
+VITE_SOCKET_URL=https://tu-dominio-o-host:4009
 VITE_SOCKET_TRANSPORT=auto
 ```
 
@@ -136,7 +137,25 @@ Notas operativas:
 - El fallback del SPA no intercepta `/api`, `/health` ni `/socket.io`.
 - En producción, si `CORS_ALLOWED_ORIGINS` queda vacío, solo se aceptan mismo origen y requests sin cabecera `Origin`.
 - Si despliegas detrás de Nginx, IIS o un balanceador, activa `TRUST_PROXY=true`.
+- Si despliegas detrás de IIS como reverse proxy, usa `HOST=127.0.0.1` para que Node solo escuche internamente.
 - El paquete incluye `ecosystem.config.cjs` para que PM2 reinicie el proceso, rote logs y maneje señales de apagado.
+
+## Windows Server + IIS recomendado
+
+Para el servidor Windows que muestras, la topología más profesional es:
+
+- Node como servicio interno en `127.0.0.1:4009`
+- IIS al frente publicando `http://servidor` o `https://tu-dominio`
+- IIS reenviando todo a Node: frontend, `/api`, `/health` y `/socket.io`
+
+Qué falta fuera del código para considerarlo productivo al 100%:
+
+- Instalar URL Rewrite + ARR + WebSocket Protocol en IIS
+- Registrar Node como servicio Windows estable (WinSW o NSSM)
+- Configurar el sitio IIS con reverse proxy
+- Configurar HTTPS/certificado en IIS si habrá Web Push real
+
+En este repositorio ya queda incluido material para esa opción en `backend/deploy/` y también en el paquete `release/backend/deploy/` después de ejecutar `npm run package:prod`.
 
 ## PM2 recomendado
 
