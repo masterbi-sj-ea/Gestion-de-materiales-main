@@ -29,7 +29,9 @@ import {
   RefreshCw,
   AlertCircle,
   Copy,
+  Download,
 } from 'lucide-react';
+import { sileo as toast } from 'sileo';
 import {
   Table,
   TableBody,
@@ -178,6 +180,31 @@ function formatCurrency(amount: number): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
 }
 
+function normalizeRoleKey(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function isGlobalOperationalRole(role: string | null | undefined): boolean {
+  const normalized = normalizeRoleKey(role);
+  return (
+    normalized === 'administrador'
+    || normalized === 'admin'
+    || normalized === 'administrator'
+    || normalized === 'bodeguero'
+    || normalized === 'encargado de bodega'
+    || normalized === 'bodega'
+    || normalized === 'jefe'
+    || normalized.startsWith('jefe ')
+    || normalized.startsWith('jefe de ')
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Estado config (badges + icons)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,6 +261,7 @@ export default function VerSolicitudesPage() {
   const permisosSolicitudes = user ? getPermisosModulo(user.role, 'solicitudes') : null;
   const canCreateSolicitudes = (!!user && puedeAcceder(user.role, 'crear-solicitud')) || !!permisosSolicitudes?.puedeCrear;
   const canEditSolicitudes = !!permisosSolicitudes?.puedeEditar;
+  const canViewAllSolicitudes = isGlobalOperationalRole(user?.role);
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
@@ -243,6 +271,7 @@ export default function VerSolicitudesPage() {
   // ── Filter & pagination state ────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEstado, setSelectedEstado] = useState('todas');
+  const [scopeFilter, setScopeFilter] = useState<'todas' | 'mias'>(canViewAllSolicitudes ? 'todas' : 'mias');
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 10;
 
@@ -271,7 +300,11 @@ export default function VerSolicitudesPage() {
     setError(null);
 
     try {
-      const params = new URLSearchParams({ soloMias: 'true' });
+      const params = new URLSearchParams();
+      if (!canViewAllSolicitudes || scopeFilter === 'mias') {
+        params.set('soloMias', 'true');
+      }
+
       if (selectedEstado !== 'todas') {
         params.set('estado', estadoFrontendToBackend(selectedEstado));
       }
@@ -310,17 +343,21 @@ export default function VerSolicitudesPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedEstado]);
+  }, [token, selectedEstado, canViewAllSolicitudes, scopeFilter]);
 
   useEffect(() => {
     fetchSolicitudes();
     return () => listAbortRef.current?.abort();
   }, [fetchSolicitudes]);
 
+  useEffect(() => {
+    setScopeFilter(canViewAllSolicitudes ? 'todas' : 'mias');
+  }, [canViewAllSolicitudes]);
+
   // Reset página cuando cambian los filtros
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedEstado, searchTerm]);
+  }, [selectedEstado, searchTerm, scopeFilter]);
 
   // ── Client-side search filter (solo búsqueda de texto, NOT duplicate de estado) ──
   const filteredSolicitudes = solicitudes.filter((sol) => {
@@ -405,15 +442,60 @@ export default function VerSolicitudesPage() {
   const handleEditar = (id: string) => navigate(`/solicitudes/crear?id=${id}`);
   const handleClonar = (id: string) => navigate(`/solicitudes/crear?clone=${id}`);
 
+  const handleVerPdf = async (id: string) => {
+    if (!token) {
+      toast.error({ title: 'No autenticado', description: 'Debes iniciar sesión para descargar el PDF.' });
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/solicitudes/${id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        if (resp.status === 409) {
+          toast.info({ title: 'PDF no disponible', description: body?.message || 'El PDF estará disponible después de la aprobación.' });
+          return;
+        }
+
+        if (resp.status === 403) {
+          toast.error({ title: 'Acceso denegado', description: body?.message || 'No tienes permiso para ver este PDF.' });
+          return;
+        }
+
+        throw new Error(body?.message || `Error ${resp.status} al generar PDF`);
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: any) {
+      console.error('[VerSolicitudes] Error al obtener PDF', err);
+      toast.error({ title: 'Error', description: 'No fue posible generar el PDF: ' + (err?.message || String(err)) });
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Mis Solicitudes</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">
+              {canViewAllSolicitudes && scopeFilter === 'todas' ? 'Solicitudes' : 'Mis Solicitudes'}
+            </h1>
+            <Badge variant={canViewAllSolicitudes && scopeFilter === 'todas' ? 'default' : 'secondary'}>
+              {canViewAllSolicitudes && scopeFilter === 'todas' ? 'Vista global' : 'Vista personal'}
+            </Badge>
+          </div>
           <p className="text-muted-foreground mt-1 text-sm md:text-base">
-            Historial y seguimiento de solicitudes
+            {canViewAllSolicitudes && scopeFilter === 'todas'
+              ? 'Historial y seguimiento de todas las solicitudes visibles'
+              : 'Historial y seguimiento de tus solicitudes'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -451,6 +533,17 @@ export default function VerSolicitudesPage() {
                 className="pl-9 w-full"
               />
             </div>
+            {canViewAllSolicitudes && (
+              <Select value={scopeFilter} onValueChange={(value: 'todas' | 'mias') => setScopeFilter(value)}>
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Alcance" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas</SelectItem>
+                  <SelectItem value="mias">Mis solicitudes</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             <Select value={selectedEstado} onValueChange={setSelectedEstado}>
               <SelectTrigger className="w-full sm:w-[220px]">
                 <SelectValue placeholder="Estado" />
@@ -473,7 +566,9 @@ export default function VerSolicitudesPage() {
       {/* Tabla de Solicitudes */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Solicitudes ({filteredSolicitudes.length})</CardTitle>
+          <CardTitle>
+            {canViewAllSolicitudes && scopeFilter === 'todas' ? 'Solicitudes' : 'Mis solicitudes'} ({filteredSolicitudes.length})
+          </CardTitle>
           {filteredSolicitudes.length > 0 && (
             <span className="text-sm text-muted-foreground">
               Página {safePage} de {totalPages}
@@ -908,9 +1003,15 @@ export default function VerSolicitudesPage() {
                   </Button>
                 )}
               </div>
-              <Button variant="ghost" size="sm" onClick={handleCerrarModal}>
-                Cerrar
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => handleVerPdf(selectedSolicitud.id)}>
+                  <Download className="w-4 h-4 mr-1" />
+                  Ver PDF
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleCerrarModal}>
+                  Cerrar
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

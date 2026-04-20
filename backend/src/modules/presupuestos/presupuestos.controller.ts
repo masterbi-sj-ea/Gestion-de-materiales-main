@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
+import { emitDashboardInvalidation } from '../../infra/dashboardRealtime';
 import { 
   listarPresupuestos, 
   guardarPresupuesto, 
@@ -51,6 +52,12 @@ export async function guardarPresupuestoController(req: AuthRequest, res: Respon
     } catch (auditError) {
       console.error('Error al registrar auditoría de presupuesto', auditError);
     }
+
+    emitDashboardInvalidation({
+      reason: 'presupuesto_actualizado',
+      idArea: Number(idArea),
+      userId: req.userId ?? null,
+    });
 
     return res.status(200).json({
       message: 'Presupuesto guardado correctamente',
@@ -151,6 +158,11 @@ export async function importarPresupuestosController(req: AuthRequest, res: Resp
       creados: result.creados,
       actualizados: result.actualizados,
       omitidos: result.omitidos,
+    });
+
+    emitDashboardInvalidation({
+      reason: 'presupuesto_importado',
+      userId,
     });
 
     return res.status(200).json({

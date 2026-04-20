@@ -84,7 +84,8 @@ export default function PermisosPage() {
     setEditedPermisos(prev => {
       const modulosActuales = prev[rol] || [];
       if (isProtectedApprovalModule(rol, moduloId) && modulosActuales.includes(moduloId)) {
-        sileo.show('Permiso obligatorio', {
+        sileo.show({
+          title: 'Permiso obligatorio',
           description: 'Jefe de Producción debe conservar acceso y aprobación en el módulo Aprobaciones.',
         });
         return prev;
@@ -104,7 +105,10 @@ export default function PermisosPage() {
       actualizarPermisos(rol as UserRole, modulos);
     });
     setHasChanges(false);
-    sileo.success('Permisos actualizados exitosamente', { description: 'Los cambios de permisos se han guardado correctamente.' });
+    sileo.success({
+      title: 'Permisos actualizados exitosamente',
+      description: 'Los cambios de permisos se han guardado correctamente.',
+    });
   };
 
   const handleRestaurar = () => {

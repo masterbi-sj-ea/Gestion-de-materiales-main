@@ -19,6 +19,7 @@ import {
   seleccionarPresupuestoAreaVigente,
   validarCostoSolicitudPorArea,
 } from '../presupuestos/presupuestoValidation';
+import { emitDashboardInvalidation } from '../../infra/dashboardRealtime';
 
 export interface SolicitudResumen {
   IdSolicitud: number;
@@ -115,6 +116,8 @@ export interface SolicitudMeta {
   CodigoSolicitud: string;
   Estado: string;
   IdSolicitante: number;
+  IdArea: number | null;
+  AreaNombre: string | null;
   FechaAprobacion: string | null;
   EstadoAprobacion: string | null;
   ComentarioAprobacion: string | null;
@@ -1239,6 +1242,13 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
     }),
   );
 
+  emitDashboardInvalidation({
+    reason: 'solicitud_creada',
+    idSolicitud: row.IdSolicitud,
+    idArea: input.idArea ?? null,
+    userId: input.idSolicitante,
+  });
+
   return row;
 }
 
@@ -1289,14 +1299,27 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
     },
   ]);
 
+  let solicitudMetaActualizada: SolicitudMeta | null = null;
+  try {
+    solicitudMetaActualizada = await obtenerSolicitudMeta(input.idSolicitud);
+  } catch (error) {
+    console.error('Error obteniendo meta para invalidar dashboard tras actualizar solicitud:', error);
+  }
+
+  emitDashboardInvalidation({
+    reason: 'solicitud_actualizada',
+    idSolicitud: input.idSolicitud,
+    idArea: input.idArea ?? solicitudMetaActualizada?.IdArea ?? null,
+    userId: solicitudMetaActualizada?.IdSolicitante ?? null,
+  });
+
   if (String(input.nuevoEstado ?? '').trim().toUpperCase() === 'PENDIENTE') {
     try {
-      const meta = await obtenerSolicitudMeta(input.idSolicitud);
       emitSolicitudPendienteRealtime(
         buildSolicitudPendienteRealtimePayload({
           idSolicitud: input.idSolicitud,
-          codigoSolicitud: meta?.CodigoSolicitud ?? `#${input.idSolicitud}`,
-          area: input.area,
+          codigoSolicitud: solicitudMetaActualizada?.CodigoSolicitud ?? `#${input.idSolicitud}`,
+          area: input.area ?? solicitudMetaActualizada?.AreaNombre,
           solicitanteNombre: input.solicitanteNombre,
           items: input.detalle.length,
         }),
@@ -1528,11 +1551,15 @@ export async function obtenerSolicitudMeta(idSolicitud: number): Promise<Solicit
       s.CodigoSolicitud,
       s.Estado,
       s.IdSolicitante,
+      s.IdArea,
+      COALESCE(ar.Nombre, s.Area) AS AreaNombre,
       ap.FechaAprobacion,
       ap.EstadoAprobacion,
       ap.ComentarioAprobacion,
       ap.NombreAprobador
     FROM dbo.SolicitudesMaterial s
+    LEFT JOIN dbo.Areas ar
+      ON ar.IdArea = s.IdArea
     OUTER APPLY (
       SELECT TOP 1
         a.FechaAprobacion,
@@ -1596,6 +1623,13 @@ export async function registrarAprobacionSolicitud(input: {
     idAprobador: input.idAprobador,
     updatedAt: new Date().toISOString(),
   });
+
+  emitDashboardInvalidation({
+    reason: 'aprobacion_actualizada',
+    idSolicitud: input.idSolicitud,
+    idArea: solicitud?.IdArea ?? null,
+    userId: solicitud?.IdSolicitante ?? null,
+  });
 }
 
 export interface AprobacionSolicitud {
@@ -1639,6 +1673,18 @@ export async function registrarDespachoSolicitud(input: {
       })),
     },
   });
+
+  try {
+    const solicitud = await obtenerSolicitudMeta(input.idSolicitud);
+    emitDashboardInvalidation({
+      reason: 'despacho_registrado',
+      idSolicitud: input.idSolicitud,
+      idArea: solicitud?.IdArea ?? null,
+      userId: solicitud?.IdSolicitante ?? null,
+    });
+  } catch (error) {
+    console.error('Error obteniendo meta para invalidar dashboard tras despacho:', error);
+  }
 }
 
 function dibujarLogoPlaceholder(doc: any, x: number, y: number) {
@@ -1663,6 +1709,7 @@ type SolicitudPdfCabecera = {
   IdArea: number | null;
   OT?: string | null;
   NombreAprobador: string | null;
+  CodigoDespacho?: string | null;
 };
 
 export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThrough> {
@@ -1690,7 +1737,9 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
            AND ISNULL(arc.Activo, 1) = 1)
       ) AS CodigoCC,
       s.IdArea,
-      ap.NombreAprobador
+      ap.NombreAprobador,
+      -- Si existe un despacho asociado, obtenemos su código (formato DESP-YYYYMMDD-<IdDespacho>)
+      CASE WHEN d.IdDespacho IS NOT NULL THEN CONCAT('DESP-', CONVERT(VARCHAR(10), d.FechaDespacho, 112), '-', d.IdDespacho) ELSE NULL END AS CodigoDespacho
     FROM SolicitudesMaterial s
     JOIN Usuarios u 
       ON s.IdSolicitante = u.IdUsuario
@@ -1699,20 +1748,21 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     LEFT JOIN CentrosCosto cc 
       ON cc.IdCentroCosto = COALESCE(s.IdCentroCosto, a.IdCentroCosto)
     OUTER APPLY (
-  SELECT TOP 1 
-    uap.NombreCompleto AS NombreAprobador
-  FROM dbo.Aprobaciones ap
-  INNER JOIN dbo.Usuarios uap
-    ON uap.IdUsuario = ap.IdAprobador
-  INNER JOIN dbo.UsuariosRoles ur
-    ON ur.IdUsuario = uap.IdUsuario
-  INNER JOIN dbo.Roles r
-    ON r.IdRol = ur.IdRol
-  WHERE ap.IdSolicitud = s.IdSolicitud
-    AND ap.Estado = 'APROBADA'
-    AND r.Nombre = 'Jefe de Producción'
-  ORDER BY ap.FechaAprobacion DESC, ap.IdAprobacion DESC
-) ap
+    SELECT TOP 1
+      uap.NombreCompleto AS NombreAprobador
+    FROM dbo.Aprobaciones ap
+    INNER JOIN dbo.Usuarios uap
+      ON uap.IdUsuario = ap.IdAprobador
+    WHERE ap.IdSolicitud = s.IdSolicitud
+      AND ap.Estado = 'APROBADA'
+    ORDER BY ap.FechaAprobacion DESC, ap.IdAprobacion DESC
+  ) ap
+ OUTER APPLY (
+   SELECT TOP 1 IdDespacho, FechaDespacho
+   FROM dbo.Despachos dd
+   WHERE dd.IdSolicitud = s.IdSolicitud
+   ORDER BY FechaDespacho DESC, IdDespacho DESC
+ ) d
     WHERE s.IdSolicitud = @id
   `;
 
@@ -1721,11 +1771,21 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     .query(query);
 
   if (cabeceraResult.recordset.length === 0) {
-    throw new Error('Solicitud no encontrada');
+    const e: any = new Error('Solicitud no encontrada');
+    e.statusCode = 404;
+    e.code = 'SOLICITUD_NOT_FOUND';
+    throw e;
   }
 
   const cab = cabeceraResult.recordset[0] as SolicitudPdfCabecera;
 
+  // Si no existe aprobación (cualquier aprobador), no generamos el PDF final
+  if (!cab.NombreAprobador) {
+    const e: any = new Error('El PDF de la solicitud está disponible sólo después de la aprobación.');
+    e.statusCode = 409;
+    e.code = 'PDF_NOT_APPROVED';
+    throw e;
+  }
   const queryDetalle = `
   SELECT 
     m.IdMaterial,
@@ -1848,9 +1908,10 @@ doc.text("FECHA:", left, headerTextY);
 doc.text(fmtDate(cab.FechaSolicitudTexto), left + 45, headerTextY - 2);
 doc.moveTo(left + 35, headerTextY + 10).lineTo(left + 220, headerTextY + 10).stroke();
 
-// ESTADO
+// ESTADO (si existe código de despacho mostramos el número de requisa)
+const estadoToShow = cab.CodigoDespacho ?? cab.Estado ?? 'PENDIENTE';
 doc.text("ESTADO:", right - 220, headerTextY);
-doc.text(String(cab.Estado || "PENDIENTE"), right - 150, headerTextY - 2);
+doc.text(String(estadoToShow), right - 150, headerTextY - 2);
 doc.moveTo(right - 155, headerTextY + 10).lineTo(right, headerTextY + 10).stroke();
 
     const tableY = headerTextY + 15; // Reducido algo de espacio aquí también

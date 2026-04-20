@@ -1,8 +1,13 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../../middleware/auth';
 import { obtenerDashboardData } from './dashboard.service';
 
-export async function obtenerDashboardController(req: Request, res: Response) {
+export async function obtenerDashboardController(req: AuthRequest, res: Response) {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ message: 'Usuario no autenticado.' });
+    }
+
     const now = new Date();
     const anio = Number(req.query.anio ?? now.getFullYear());
     const mesQuery = req.query.mes;
@@ -34,10 +39,19 @@ export async function obtenerDashboardController(req: Request, res: Response) {
       anio,
       mes,
       idArea,
+    }, {
+      userId: req.userId,
+      userRoles: req.userRoles ?? [],
     });
 
     return res.json(payload);
   } catch (error: any) {
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({
+        message: error?.message || 'No autorizado para ver este dashboard.',
+      });
+    }
+
     console.error('Error en obtenerDashboardController', error);
     return res.status(500).json({
       message: error?.message || 'Error al obtener el dashboard',

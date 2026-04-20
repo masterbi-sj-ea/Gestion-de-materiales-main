@@ -74,3 +74,13 @@ HTTPS_CERT_PATH=C:\ruta\certificados\fullchain.pem
 ```
 
 Si no defines estas variables, el servidor arrancará en HTTP como hasta ahora.
+
+Si además el frontend va a consumir el socket en modo websocket/auto, apunta sus variables de Vite al origin HTTPS del backend, por ejemplo:
+
+```env
+VITE_API_URL=https://tu-dominio-o-host:4000
+VITE_SOCKET_URL=https://tu-dominio-o-host:4000
+VITE_SOCKET_TRANSPORT=auto
+```
+
+En HTTP o por IP local sin certificados, deja `VITE_SOCKET_TRANSPORT` vacío o en `polling` para evitar intentos de WSS no válidos.

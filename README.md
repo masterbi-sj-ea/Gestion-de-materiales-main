@@ -16,9 +16,21 @@
   ```env
   # URL del backend
   VITE_API_URL=http://localhost:4000
+
+  # Opcional: origin específico para Socket.IO si no coincide con el API.
+  # VITE_SOCKET_URL=http://localhost:4000
+
+  # Opcional: polling | websocket | auto
+  # Si no se define, la app usa auto cuando el origin del socket es HTTPS real
+  # y polling cuando el despliegue sigue en HTTP/IP local.
+  # VITE_SOCKET_TRANSPORT=auto
   ```
 
   Cualquier variable que comience con `VITE_` estará disponible en el código vía `import.meta.env`.
+
+  Nota sobre tiempo real:
+  Si publicas el backend con HTTPS real, configura `VITE_API_URL` y, si aplica, `VITE_SOCKET_URL`
+  apuntando al origin `https://...`. Con eso el cliente Socket.IO hará upgrade automático a websocket.
 
   ## Build de producción
 

@@ -104,10 +104,16 @@ export default function RolesPage() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       await cargarRoles();
-      sileo.success('Rol eliminado', { description: 'El rol fue eliminado correctamente.' });
+      sileo.success({
+        title: 'Rol eliminado',
+        description: 'El rol fue eliminado correctamente.',
+      });
     } catch (error) {
       console.error('Error al eliminar rol', error);
-      sileo.error('Error', { description: 'Ocurrió un error al eliminar el rol.' });
+      sileo.error({
+        title: 'Error',
+        description: 'Ocurrió un error al eliminar el rol.',
+      });
     } finally {
       setConfirmDelete({ open: false, item: null });
     }

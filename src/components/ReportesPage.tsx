@@ -126,7 +126,10 @@ export default function ReportesPage() {
 
   const handleGuardar = () => {
     console.log('Guardando configuración de reporte:', formData);
-    sileo.success('Configuración guardada exitosamente', { description: 'Los cambios se han guardado correctamente.' });
+    sileo.success({
+      title: 'Configuración guardada exitosamente',
+      description: 'Los cambios se han guardado correctamente.',
+    });
     setDialogOpen(false);
   };
 
@@ -143,14 +146,20 @@ export default function ReportesPage() {
   const confirmEliminar = () => {
     if (confirmDelete.item) {
       setReportes(reportes.filter(r => r.id !== confirmDelete.item));
-      sileo.success('Reporte eliminado', { description: 'La configuración del reporte fue eliminada con éxito.' });
+      sileo.success({
+        title: 'Reporte eliminado',
+        description: 'La configuración del reporte fue eliminada con éxito.',
+      });
     }
     setConfirmDelete({ open: false, item: null });
   };
 
   const handleGenerarManual = (reporte: ConfiguracionReporte) => {
     console.log('Generando reporte manual:', reporte);
-    sileo.info(`Generando ${reporte.nombre}...`, { description: 'El reporte se está generando y será enviado a los destinatarios.' });
+    sileo.info({
+      title: `Generando ${reporte.nombre}...`,
+      description: 'El reporte se está generando y será enviado a los destinatarios.',
+    });
   };
 
   return (

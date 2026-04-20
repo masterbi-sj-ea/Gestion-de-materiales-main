@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState, createContext, useContext } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { CheckCircle, Bell } from 'lucide-react';
 import { sileo as toast } from 'sileo';
-import { io, Socket } from 'socket.io-client';
 import { PermisosProvider } from './contexts/PermisosContext';
 import Login from './components/Login';
 import Layout from './components/Layout';
@@ -26,16 +24,17 @@ import CoberturasAccesoPage from './components/CoberturasAccesoPage';
 import { User, UserRole } from './types';
 import { AuthContext } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
-import { API_BASE_URL, API_ORIGIN } from './services/apiConfig';
+import { API_BASE_URL } from './services/apiConfig';
 import { usePermisos } from './contexts/PermisosContext';
 import { AprobacionesRealtimeProvider } from './contexts/AprobacionesRealtimeContext';
+import { RealtimeSocketProvider } from './contexts/RealtimeSocketContext';
 
 function ProtectedModuleRoute({
   moduloId,
   children,
 }: {
   moduloId: string | string[];
-  children: JSX.Element;
+  children: ReactElement;
 }) {
   const { user } = useAuth();
   const { cargandoPermisos, puedeAcceder } = usePermisos();
@@ -77,46 +76,7 @@ function App() {
     if (typeof window === 'undefined') return null;
     return sessionStorage.getItem('authToken');
   });
-  
-  const socketRef = useRef<Socket | null>(null);
   const lastToastUserId = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (user && token) {
-      // Inicializar Socket.io
-      const socket = io(API_ORIGIN);
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('socket.io conectado');
-        socket.emit('join', `user:${user.id}`);
-        // Unirse a salas según rol si es necesario
-        if (user.role === 'Bodeguero' || user.role === 'Administrador') {
-          socket.emit('join', 'bodega');
-        }
-      });
-
-      socket.on('nueva_solicitud', (data) => {
-        toast.show({
-          title: "Nueva Solicitud",
-          description: `Se ha creado la solicitud ${data.codigo} de ${data.area}`,
-          // duration: 6000,
-        });
-      });
-
-      socket.on('solicitud_aprobada', (data) => {
-        toast.show({
-          title: "Solicitud Aprobada",
-          description: `Tu solicitud ${data.codigo} ha sido aprobada.`,
-          // duration: 6000,
-        });
-      });
-
-      return () => {
-        socket.disconnect();
-      };
-    }
-  }, [user, token]);
 
   useEffect(() => {
     if (!user) {
@@ -232,13 +192,14 @@ function App() {
   return (
     <AuthContext.Provider value={{ user, token, login, logout }}>
       <PermisosProvider>
-        <Router>
-          <AprobacionesRealtimeProvider>
-            {!user ? (
-              <Login />
-            ) : (
-              <Layout>
-                <Routes>
+        <RealtimeSocketProvider>
+          <Router>
+            <AprobacionesRealtimeProvider>
+              {!user ? (
+                <Login />
+              ) : (
+                <Layout>
+                  <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route
                     path="/materiales"
@@ -361,11 +322,12 @@ function App() {
                     }
                   />
                   <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </Layout>
-            )}
-          </AprobacionesRealtimeProvider>
-        </Router>
+                  </Routes>
+                </Layout>
+              )}
+            </AprobacionesRealtimeProvider>
+          </Router>
+        </RealtimeSocketProvider>
       </PermisosProvider>
     </AuthContext.Provider>
   );

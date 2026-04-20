@@ -1,5 +1,7 @@
 import mssql from 'mssql';
 import { getPool } from '../../config/db';
+import { hasGlobalOperationalScope } from '../../infra/roleScope';
+import { listarAreasPermitidasPorUsuario } from '../areas/areas.service';
 import { listarPresupuestos } from '../presupuestos/presupuestos.service';
 import { listarMovimientosInventario } from '../kardex/kardex.service';
 
@@ -9,10 +11,27 @@ type DashboardParams = {
   idArea: number | null;
 };
 
+type DashboardViewerContext = {
+  userId: number;
+  userRoles?: string[] | null;
+};
+
 type EstadoChartRow = {
   estado: string;
   valor: number;
   color: string;
+};
+
+type DashboardAreaOption = {
+  id: number;
+  nombre: string;
+};
+
+type DashboardScope = {
+  tipo: 'global' | 'personal';
+  puedeVerTodo: boolean;
+  idsAreasPermitidas: number[] | null;
+  areasPermitidas: DashboardAreaOption[];
 };
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -61,14 +80,93 @@ function isSolicitudActiva(raw: unknown): boolean {
   return ['PENDIENTE', 'APROBADA', 'EN_DESPACHO', 'PARCIALMENTE_DESPACHADA'].includes(value);
 }
 
-export async function obtenerDashboardData(params: DashboardParams) {
+function dedupeAreaOptions(rows: DashboardAreaOption[]): DashboardAreaOption[] {
+  const map = new Map<number, string>();
+
+  for (const row of rows) {
+    const id = toInt(row.id);
+    const nombre = String(row.nombre ?? '').trim();
+    if (!id || !nombre) continue;
+    map.set(id, nombre);
+  }
+
+  return Array.from(map.entries())
+    .map(([id, nombre]) => ({ id, nombre }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
+async function resolveDashboardScope(viewer: DashboardViewerContext): Promise<DashboardScope> {
+  if (hasGlobalOperationalScope(viewer.userRoles)) {
+    return {
+      tipo: 'global',
+      puedeVerTodo: true,
+      idsAreasPermitidas: null,
+      areasPermitidas: [],
+    };
+  }
+
+  const areasPermitidasRaw = await listarAreasPermitidasPorUsuario(viewer.userId);
+  const areasPermitidas = dedupeAreaOptions(
+    (areasPermitidasRaw ?? []).map((area) => ({
+      id: Number(area?.IdArea ?? 0),
+      nombre: String(area?.Nombre ?? ''),
+    })),
+  );
+
+  return {
+    tipo: 'personal',
+    puedeVerTodo: false,
+    idsAreasPermitidas: areasPermitidas.map((area) => area.id),
+    areasPermitidas,
+  };
+}
+
+export async function obtenerDashboardData(params: DashboardParams, viewer: DashboardViewerContext) {
   const { anio, mes, idArea } = params;
+  const scope = await resolveDashboardScope(viewer);
+
+  if (
+    !scope.puedeVerTodo
+    && idArea !== null
+    && !(scope.idsAreasPermitidas ?? []).includes(idArea)
+  ) {
+    const error = new Error('No tienes acceso al área seleccionada.');
+    (error as Error & { statusCode?: number }).statusCode = 403;
+    throw error;
+  }
+
+  const effectiveAreaIds = idArea !== null ? [idArea] : scope.idsAreasPermitidas;
+  const effectiveAreaIdSet = effectiveAreaIds === null ? null : new Set(effectiveAreaIds);
+  const userScopedRequestId = scope.puedeVerTodo ? null : viewer.userId;
+
+  const matchesBudgetAreaScope = (rawAreaId: unknown): boolean => {
+    if (effectiveAreaIdSet === null) return true;
+    const areaIdValue = toInt(rawAreaId);
+    return areaIdValue !== null && effectiveAreaIdSet.has(areaIdValue);
+  };
+
+  const matchesRequestScope = (rawAreaId: unknown, rawSolicitanteId: unknown): boolean => {
+    if (userScopedRequestId === null) {
+      return matchesBudgetAreaScope(rawAreaId);
+    }
+
+    if (toInt(rawSolicitanteId) !== userScopedRequestId) {
+      return false;
+    }
+
+    if (effectiveAreaIdSet === null || effectiveAreaIdSet.size === 0) {
+      return true;
+    }
+
+    return matchesBudgetAreaScope(rawAreaId);
+  };
+
   const presupuestos = await listarPresupuestos();
 
   const presupuestosFiltrados = presupuestos.filter((item) => {
     const matchesYear = Number(item.Anio) === anio;
     const matchesMonth = mes == null ? true : Number(item.Mes) === mes;
-    const matchesArea = idArea == null ? true : Number(item.IdArea) === idArea;
+    const matchesArea = matchesBudgetAreaScope(item.IdArea);
     return matchesYear && matchesMonth && matchesArea;
   });
 
@@ -118,7 +216,7 @@ export async function obtenerDashboardData(params: DashboardParams) {
 
   for (const item of presupuestos) {
     if (Number(item.Anio) !== anio) continue;
-    if (idArea != null && Number(item.IdArea) !== idArea) continue;
+    if (!matchesBudgetAreaScope(item.IdArea)) continue;
 
     const mesItem = toInt(item.Mes);
     if (!mesItem || mesItem < 1 || mesItem > 12) continue;
@@ -132,17 +230,15 @@ export async function obtenerDashboardData(params: DashboardParams) {
   const requestEstados = pool.request();
   requestEstados.input('Anio', mssql.Int, anio);
   requestEstados.input('Mes', mssql.Int, mes);
-  requestEstados.input('IdArea', mssql.Int, idArea);
 
   const estadosResult = await requestEstados.query(`
     SELECT
       UPPER(LTRIM(RTRIM(ISNULL(s.Estado, '')))) AS Estado,
-      COUNT(*) AS Total
+      s.IdArea,
+      s.IdSolicitante
     FROM dbo.SolicitudesMaterial s
     WHERE YEAR(s.FechaSolicitud) = @Anio
-      AND (@Mes IS NULL OR MONTH(s.FechaSolicitud) = @Mes)
-      AND (@IdArea IS NULL OR s.IdArea = @IdArea)
-    GROUP BY UPPER(LTRIM(RTRIM(ISNULL(s.Estado, ''))));
+      AND (@Mes IS NULL OR MONTH(s.FechaSolicitud) = @Mes);
   `);
 
   const estadoMap = new Map<string, number>();
@@ -150,8 +246,10 @@ export async function obtenerDashboardData(params: DashboardParams) {
   let pendientesAprobacion = 0;
 
   for (const row of estadosResult.recordset ?? []) {
+    if (!matchesRequestScope(row.IdArea, row.IdSolicitante)) continue;
+
     const estadoRaw = String(row.Estado ?? '').trim().toUpperCase();
-    const total = toNumber(row.Total);
+    const total = 1;
 
     const normalized = normalizeEstadoSolicitud(estadoRaw);
     estadoMap.set(normalized, (estadoMap.get(normalized) ?? 0) + total);
@@ -172,12 +270,14 @@ export async function obtenerDashboardData(params: DashboardParams) {
   const requestTop = pool.request();
   requestTop.input('Anio', mssql.Int, anio);
   requestTop.input('Mes', mssql.Int, mes);
-  requestTop.input('IdArea', mssql.Int, idArea);
 
   const topResult = await requestTop.query(`
-    SELECT TOP 5
+    SELECT
       COALESCE(m.DescripcionArticulo, CONCAT('Material #', dd.IdMaterial)) AS Material,
-      SUM(ISNULL(dd.CantidadDespachada, 0)) AS Cantidad
+      SUM(ISNULL(dd.CantidadDespachada, 0)) AS Cantidad,
+      dd.IdMaterial,
+      s.IdArea,
+      s.IdSolicitante
     FROM dbo.DetalleDespachos dd
     INNER JOIN dbo.Despachos d
       ON d.IdDespacho = dd.IdDespacho
@@ -187,58 +287,86 @@ export async function obtenerDashboardData(params: DashboardParams) {
       ON m.IdMaterial = dd.IdMaterial
     WHERE YEAR(d.FechaDespacho) = @Anio
       AND (@Mes IS NULL OR MONTH(d.FechaDespacho) = @Mes)
-      AND (@IdArea IS NULL OR s.IdArea = @IdArea)
-    GROUP BY m.DescripcionArticulo, dd.IdMaterial
-    ORDER BY SUM(ISNULL(dd.CantidadDespachada, 0)) DESC, COALESCE(m.DescripcionArticulo, CONCAT('Material #', dd.IdMaterial));
+    GROUP BY m.DescripcionArticulo, dd.IdMaterial, s.IdArea, s.IdSolicitante;
   `);
 
-  const topMateriales = (topResult.recordset ?? []).map((row) => ({
-    material: String(row.Material ?? 'Sin descripción'),
-    cantidad: toNumber(row.Cantidad),
-    valor: null as number | null,
-  }));
+  const topMaterialesMap = new Map<string, { material: string; cantidad: number; valor: number | null }>();
+  for (const row of topResult.recordset ?? []) {
+    if (!matchesRequestScope(row.IdArea, row.IdSolicitante)) continue;
 
-  const requestCorte = pool.request();
-  const ultimoCorteResult = await requestCorte.query(`
-    SELECT TOP 1
-      c.IdCorte,
-      c.Descripcion,
-      c.FechaCorte,
-      c.Estado,
-      c.Ambito
-    FROM dbo.CortesStock c
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(c.Ambito, '')))) = 'STOCK'
-    ORDER BY
-      ISNULL(c.EsMaximo, 0) DESC,
-      c.FechaCorte DESC,
-      c.IdCorte DESC;
-  `);
+    const material = String(row.Material ?? 'Sin descripción');
+    const current = topMaterialesMap.get(material) ?? {
+      material,
+      cantidad: 0,
+      valor: null as number | null,
+    };
+    current.cantidad += toNumber(row.Cantidad);
+    topMaterialesMap.set(material, current);
+  }
 
-  const ultimoCorteRow = ultimoCorteResult.recordset?.[0] ?? null;
-  const ultimoCorte = ultimoCorteRow
-    ? {
-        idCorte: toNumber(ultimoCorteRow.IdCorte),
-        descripcion: String(ultimoCorteRow.Descripcion ?? ''),
-        fechaCorte: ultimoCorteRow.FechaCorte,
-        estado: String(ultimoCorteRow.Estado ?? ''),
-        ambito: String(ultimoCorteRow.Ambito ?? ''),
-      }
-    : null;
+  const topMateriales = Array.from(topMaterialesMap.values())
+    .sort((a, b) => b.cantidad - a.cantidad || a.material.localeCompare(b.material))
+    .slice(0, 5);
 
-  const ultimosMovimientosRaw = await listarMovimientosInventario({
-    Page: 1,
-    Limit: 5,
-  });
+  let ultimoCorte: {
+    idCorte: number;
+    descripcion: string;
+    fechaCorte: unknown;
+    estado: string;
+    ambito: string;
+  } | null = null;
 
-  const ultimosMovimientos = (Array.isArray(ultimosMovimientosRaw) ? ultimosMovimientosRaw : []).map((row: any) => ({
-    fechaMovimiento: row?.FechaMovimiento ?? row?.fechaMovimiento ?? null,
-    material: row?.DescripcionArticulo
-      ? `${row.DescripcionArticulo}${row?.NumeroArticulo ? ` (${row.NumeroArticulo})` : ''}`
-      : (row?.NumeroArticulo ?? 'Sin material'),
-    tipoMovimiento: String(row?.TipoMovimiento ?? ''),
-    cantidad: toNumber(row?.Cantidad),
-    referencia: row?.Referencia ?? null,
-  }));
+  let ultimosMovimientos: Array<{
+    fechaMovimiento: unknown;
+    material: string;
+    tipoMovimiento: string;
+    cantidad: number;
+    referencia: unknown;
+  }> = [];
+
+  if (scope.puedeVerTodo) {
+    const requestCorte = pool.request();
+    const ultimoCorteResult = await requestCorte.query(`
+      SELECT TOP 1
+        c.IdCorte,
+        c.Descripcion,
+        c.FechaCorte,
+        c.Estado,
+        c.Ambito
+      FROM dbo.CortesStock c
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(c.Ambito, '')))) = 'STOCK'
+      ORDER BY
+        ISNULL(c.EsMaximo, 0) DESC,
+        c.FechaCorte DESC,
+        c.IdCorte DESC;
+    `);
+
+    const ultimoCorteRow = ultimoCorteResult.recordset?.[0] ?? null;
+    ultimoCorte = ultimoCorteRow
+      ? {
+          idCorte: toNumber(ultimoCorteRow.IdCorte),
+          descripcion: String(ultimoCorteRow.Descripcion ?? ''),
+          fechaCorte: ultimoCorteRow.FechaCorte,
+          estado: String(ultimoCorteRow.Estado ?? ''),
+          ambito: String(ultimoCorteRow.Ambito ?? ''),
+        }
+      : null;
+
+    const ultimosMovimientosRaw = await listarMovimientosInventario({
+      Page: 1,
+      Limit: 5,
+    });
+
+    ultimosMovimientos = (Array.isArray(ultimosMovimientosRaw) ? ultimosMovimientosRaw : []).map((row: any) => ({
+      fechaMovimiento: row?.FechaMovimiento ?? row?.fechaMovimiento ?? null,
+      material: row?.DescripcionArticulo
+        ? `${row.DescripcionArticulo}${row?.NumeroArticulo ? ` (${row.NumeroArticulo})` : ''}`
+        : (row?.NumeroArticulo ?? 'Sin material'),
+      tipoMovimiento: String(row?.TipoMovimiento ?? ''),
+      cantidad: toNumber(row?.Cantidad),
+      referencia: row?.Referencia ?? null,
+    }));
+  }
 
   const areasMap = new Map<number, string>();
   for (const item of presupuestos) {
@@ -249,11 +377,22 @@ export async function obtenerDashboardData(params: DashboardParams) {
     }
   }
 
-  const areas = Array.from(areasMap.entries())
-    .map(([id, nombre]) => ({ id, nombre }))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const areas = scope.puedeVerTodo
+    ? Array.from(areasMap.entries())
+      .map(([id, nombre]) => ({ id, nombre }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    : scope.areasPermitidas;
 
   return {
+    alcance: {
+      tipo: scope.tipo,
+      puedeVerTodo: scope.puedeVerTodo,
+      puedeSeleccionarTodasLasAreas: scope.puedeVerTodo,
+      idsAreasPermitidas: scope.idsAreasPermitidas ?? [],
+      descripcion: scope.puedeVerTodo
+        ? 'Vista global del negocio.'
+        : 'Vista personal: tus áreas permitidas y tus solicitudes.',
+    },
     areas,
     resumen: {
       presupuestoTotal,
@@ -277,4 +416,4 @@ export async function obtenerDashboardData(params: DashboardParams) {
   };
 }
 
-export type { DashboardParams, EstadoChartRow };
+export type { DashboardParams, DashboardViewerContext, EstadoChartRow };

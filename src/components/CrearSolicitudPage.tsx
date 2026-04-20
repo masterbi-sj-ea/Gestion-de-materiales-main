@@ -582,7 +582,8 @@ export default function CrearSolicitudPage() {
           ? new Date(String(cabecera.FechaSolicitud)).toISOString().slice(0, 10)
           : fechaSolicitud;
 
-        // Si es clonación, usamos la fecha de hoy, no la original
+        // Si estamos editando, usamos la fecha original; cuando clonamos
+        // mantenemos la fecha por defecto (hoy).
         if (editId) {
           setFechaSolicitud(fecha);
         }
@@ -622,13 +623,33 @@ export default function CrearSolicitudPage() {
           };
         });
 
-        setItems(mappedItems);
-        
+        // Si la solicitud a clonar tiene más líneas de las permitidas, recortamos
+        // y avisamos al usuario. El frontend limita a 9 líneas por plantilla física.
+        let finalItems = mappedItems;
+        if (mappedItems.length > 9) {
+          finalItems = mappedItems.slice(0, 9);
+          toast.warning({
+            title: 'Clonación parcial',
+            description: 'Se han recortado las líneas de la solicitud clonada al máximo permitido (9).',
+          });
+        }
+
+        setItems(finalItems);
+
         if (cloneId) {
+          // Aseguramos la fecha de hoy para la clonación (no reutilizamos la fecha original)
+          setFechaSolicitud(getLocalDateInputValue());
           toast.info({
             title: 'Solicitud clonada',
             description: 'Se han cargado los materiales de la solicitud anterior. Revisa y envía.',
           });
+
+          // Limpiar el parámetro ?clone de la URL para evitar recargas accidentales
+          try {
+            navigate('/solicitudes/crear', { replace: true });
+          } catch (e) {
+            // noop
+          }
         }
       } catch (e: any) {
         console.error('Error al cargar solicitud', e);
@@ -909,25 +930,10 @@ export default function CrearSolicitudPage() {
       }
       const data = await resp.json();
 
-      // Descargar PDF automáticamente (igual que en Despacho) tras la creación
+      // No descargar automáticamente el PDF final: estará disponible después de la aprobación.
       const idSolicitudFinal = data.IdSolicitud ?? data.idSolicitud ?? null;
       if (idSolicitudFinal && !editId) {
-        try {
-          const pdfResp = await apiFetch(`/solicitudes/${idSolicitudFinal}/pdf`);
-          if (pdfResp.ok) {
-            const blob = await pdfResp.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Solicitud_${idSolicitudFinal}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-          }
-        } catch (pdfErr) {
-          console.error('Error al descargar PDF:', pdfErr);
-        }
+        // El PDF final (con firma del aprobador) se genera sólo después de la aprobación.
       }
 
       toast.success({

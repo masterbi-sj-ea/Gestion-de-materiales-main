@@ -2,9 +2,9 @@
 
 // Tipado explícito para variables de entorno prefijadas con VITE_
 interface ImportMetaEnv {
-  readonly VITE_API_URL: string;
-  // Agrega aquí otras variables si las necesitas, por ejemplo:
-  // readonly VITE_APP_NAME: string;
+  readonly VITE_API_URL?: string;
+  readonly VITE_SOCKET_URL?: string;
+  readonly VITE_SOCKET_TRANSPORT?: 'polling' | 'websocket' | 'auto';
 }
 
 interface ImportMeta {

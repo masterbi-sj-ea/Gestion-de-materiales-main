@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
+import { hasGlobalOperationalScope } from '../../infra/roleScope';
 import {
   crearSolicitud,
   listarSolicitudes,
@@ -74,6 +75,33 @@ function normalizarIdEnteroPositivo(value: unknown): number | null {
   }
 
   return normalized;
+}
+
+function buildHttpError(statusCode: number, message: string) {
+  const error = new Error(message) as Error & { statusCode?: number };
+  error.statusCode = statusCode;
+  return error;
+}
+
+function puedeVerTodasLasSolicitudes(req: AuthRequest): boolean {
+  return hasGlobalOperationalScope(req.userRoles ?? []);
+}
+
+async function assertSolicitudReadable(req: AuthRequest, idSolicitud: number) {
+  if (!req.userId) {
+    throw buildHttpError(401, 'Usuario no autenticado');
+  }
+
+  const meta = await obtenerSolicitudMeta(idSolicitud);
+  if (!meta) {
+    throw buildHttpError(404, 'Solicitud no encontrada');
+  }
+
+  if (puedeVerTodasLasSolicitudes(req) || Number(meta.IdSolicitante) === req.userId) {
+    return meta;
+  }
+
+  throw buildHttpError(403, 'No tienes acceso a esta solicitud');
 }
 
 async function validarAccesoAreasSolicitud(userId: number, idAreaCabecera: unknown, detalle: any[]): Promise<void> {
@@ -294,6 +322,10 @@ export async function previewPresupuestoSolicitudController(req: AuthRequest, re
 
 export async function listarSolicitudesController(req: AuthRequest, res: Response) {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ message: 'Usuario no autenticado' });
+    }
+
     const {
       estado,
       idArea,
@@ -304,7 +336,8 @@ export async function listarSolicitudesController(req: AuthRequest, res: Respons
       pageSize,
     } = req.query as Record<string, string | undefined>;
 
-    const idSolicitante = soloMias === 'true' ? req.userId ?? undefined : undefined;
+    const vistaGlobal = puedeVerTodasLasSolicitudes(req);
+    const idSolicitante = !vistaGlobal || soloMias === 'true' ? req.userId : undefined;
     const estadoNormalizado = estado ? normalizarEstadoSolicitud(estado) : undefined;
 
     if (page || pageSize) {
@@ -344,12 +377,18 @@ export async function obtenerSolicitudController(req: AuthRequest, res: Response
   }
 
   try {
+    await assertSolicitudReadable(req, idSolicitud);
+
     const solicitud = await obtenerSolicitud(idSolicitud);
     if (!solicitud.cabecera) {
       return res.status(404).json({ message: 'Solicitud no encontrada' });
     }
     return res.json(solicitud);
   } catch (error: any) {
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({ message: error?.message || 'No autorizado' });
+    }
+
     console.error('Error en obtenerSolicitudController', error);
     return res.status(500).json({ message: 'Error al obtener solicitud' });
   }
@@ -394,6 +433,8 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
     if (!userId) {
       return res.status(401).json({ message: 'Usuario no autenticado' });
     }
+
+    await assertSolicitudReadable(req, idSolicitud);
 
     await validarAccesoAreasSolicitud(userId, idArea, detalle);
 
@@ -563,9 +604,15 @@ export async function listarAprobacionesPorSolicitudController(req: AuthRequest,
   }
 
   try {
+    await assertSolicitudReadable(req, idSolicitud);
+
     const aprobaciones = await listarAprobacionesPorSolicitud(idSolicitud);
     return res.json(aprobaciones);
   } catch (error: any) {
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({ message: error?.message || 'No autorizado' });
+    }
+
     console.error('Error en listarAprobacionesPorSolicitudController', error);
     return res.status(500).json({ message: 'Error al listar aprobaciones de la solicitud' });
   }
@@ -681,16 +728,50 @@ export async function registrarDespachoSolicitudController(req: AuthRequest, res
 }
 
 export async function generarPdfSolicitudController(req: AuthRequest, res: Response) {
+  const { id } = req.params;
+  const idSolicitud = Number(id);
+  if (!idSolicitud || Number.isNaN(idSolicitud)) {
+    return res.status(400).json({ message: 'Id de solicitud inválido' });
+  }
+
+  const userId = req.userId ?? null;
+  if (!userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado' });
+  }
+
   try {
-    const { id } = req.params;
-    const stream = await generarPdfSolicitud(Number(id));
+    // Verificar que la solicitud exista y que el usuario tenga acceso a ella
+    const meta = await obtenerSolicitudMeta(idSolicitud);
+    if (!meta) {
+      await registrarAuditoria(userId, 'INTENTO_DESCARGA_PDF_SOLICITUD', { idSolicitud, reason: 'Solicitud no encontrada' }).catch(() => {});
+      return res.status(404).json({ code: 'SOLICITUD_NOT_FOUND', message: 'Solicitud no encontrada' });
+    }
+
+    const esSolicitante = meta.IdSolicitante === userId;
+    const vistaGlobal = puedeVerTodasLasSolicitudes(req);
+    if (!esSolicitante && !vistaGlobal) {
+      await registrarAuditoria(userId, 'INTENTO_DESCARGA_PDF_SOLICITUD', { idSolicitud, reason: 'Acceso denegado' }).catch(() => {});
+      return res.status(403).json({ code: 'ACCESS_DENIED', message: 'No tienes acceso a esta solicitud' });
+    }
+
+    const stream = await generarPdfSolicitud(idSolicitud);
+
+    // Auditar intento exitoso (no esperamos a que termine el pipe)
+    registrarAuditoria(userId, 'DESCARGAR_PDF_SOLICITUD', { idSolicitud }).catch(() => {});
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=Solicitud-${id}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=Solicitud-${idSolicitud}.pdf`);
 
     stream.pipe(res);
   } catch (error: any) {
     console.error('Error al generar PDF de solicitud:', error);
+    // Auditar intento fallido
+    registrarAuditoria(userId, 'INTENTO_DESCARGA_PDF_SOLICITUD', { idSolicitud, error: String(error?.message ?? error) }).catch(() => {});
+
+    if (typeof error?.statusCode === 'number') {
+      return res.status(error.statusCode).json({ code: error.code, message: error.message || 'Error al generar PDF' });
+    }
+
     return res.status(500).json({ message: error.message || 'Error al generar PDF' });
   }
 }

@@ -1,11 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import { io, type Socket } from 'socket.io-client';
 import { sileo } from 'sileo';
-import { API_ORIGIN } from '../services/apiConfig';
 import { apiFetch } from '../services/apiClient';
 import { useAuth } from '../hooks/useAuth';
 import { usePermisos } from './PermisosContext';
+import { useRealtimeSocket } from './RealtimeSocketContext';
 
 const SOCKET_ROOM_APROBACIONES = 'aprobaciones';
 const SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION = 'solicitud_pendiente_aprobacion';
@@ -146,6 +145,12 @@ function arrayBufferToUint8Array(value: ArrayBuffer | null): Uint8Array | null {
   return value ? new Uint8Array(value) : null;
 }
 
+function uint8ArrayToArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(value.byteLength);
+  new Uint8Array(buffer).set(value);
+  return buffer;
+}
+
 function uint8ArraysEqual(left: Uint8Array, right: Uint8Array): boolean {
   if (left.length !== right.length) {
     return false;
@@ -239,6 +244,7 @@ export function useAprobacionesRealtime(): AprobacionesRealtimeContextValue {
 
 export function AprobacionesRealtimeProvider({ children }: { children: ReactNode }) {
   const { user, token } = useAuth();
+  const { socket } = useRealtimeSocket();
   const { cargandoPermisos, puedeAcceder, getPermisosModulo } = usePermisos();
   const location = useLocation();
   const canShowDesktopNotifications = browserSupportsDesktopNotifications();
@@ -422,7 +428,7 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
       if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: expectedServerKey,
+          applicationServerKey: uint8ArrayToArrayBuffer(expectedServerKey),
         });
       }
 
@@ -599,12 +605,11 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
   }, [canAccessAprobaciones, location.pathname, pendingCount]);
 
   useEffect(() => {
-    if (!token || !canAccessAprobaciones) {
+    if (!socket || !token || !canAccessAprobaciones) {
       setRealtimeConnected(false);
       return;
     }
 
-    const socket: Socket = io(API_ORIGIN);
     let isCleaningUp = false;
 
     const playSoundIfEnabled = async () => {
@@ -700,20 +705,28 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
       }
 
       setRealtimeConnected(false);
-      console.error('Error de conexión en tiempo real para aprobaciones', error);
+      if (error?.message) {
+        console.warn('Canal realtime de aprobaciones en espera:', error.message);
+      }
+    };
+
+    const handlePendingRequestEvent = (payload: SolicitudPendienteRealtimePayload) => {
+      void handlePendingRequest(payload);
+    };
+
+    const handleApprovalUpdateEvent = (payload: SolicitudAprobacionActualizadaRealtimePayload) => {
+      void handleApprovalUpdate(payload);
     };
 
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('connect_error', handleConnectError);
+    socket.on(SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION, handlePendingRequestEvent);
+    socket.on(SOCKET_EVENT_SOLICITUD_APROBACION_ACTUALIZADA, handleApprovalUpdateEvent);
 
-    socket.on(SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION, (payload: SolicitudPendienteRealtimePayload) => {
-      void handlePendingRequest(payload);
-    });
-
-    socket.on(SOCKET_EVENT_SOLICITUD_APROBACION_ACTUALIZADA, (payload: SolicitudAprobacionActualizadaRealtimePayload) => {
-      void handleApprovalUpdate(payload);
-    });
+    if (socket.connected) {
+      handleConnect();
+    }
 
     return () => {
       isCleaningUp = true;
@@ -721,11 +734,11 @@ export function AprobacionesRealtimeProvider({ children }: { children: ReactNode
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('connect_error', handleConnectError);
-      socket.off(SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION);
-      socket.off(SOCKET_EVENT_SOLICITUD_APROBACION_ACTUALIZADA);
-      socket.disconnect();
+      socket.off(SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION, handlePendingRequestEvent);
+      socket.off(SOCKET_EVENT_SOLICITUD_APROBACION_ACTUALIZADA, handleApprovalUpdateEvent);
+      socket.emit('leave', SOCKET_ROOM_APROBACIONES);
     };
-  }, [canAccessAprobaciones, token]);
+  }, [canAccessAprobaciones, refreshPendingCount, socket, token]);
 
   useEffect(() => {
     return () => {
