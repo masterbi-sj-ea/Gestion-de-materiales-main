@@ -39,9 +39,65 @@ interface PermisosContextType {
 
 const PermisosContext = createContext<PermisosContextType | null>(null);
 
+function normalizeRoleKey(rol: string | null | undefined): string {
+  return String(rol || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function normalizeModuleKey(moduloId: string | null | undefined): string {
+  return String(moduloId || '').trim().toLowerCase();
+}
+
+function isProductionChiefRole(rol: string | null | undefined): boolean {
+  return normalizeRoleKey(rol) === 'jefe de produccion';
+}
+
+function buildRolePermissionOverride(rol: UserRole, moduloId: string): Partial<PermisoAcciones> {
+  const normalizedModulo = normalizeModuleKey(moduloId);
+
+  if (isProductionChiefRole(rol) && normalizedModulo === 'aprobaciones') {
+    return {
+      puedeVer: true,
+      puedeAprobar: true,
+    };
+  }
+
+  return {};
+}
+
+function mergePermisoAcciones(base: PermisoAcciones, override: Partial<PermisoAcciones>): PermisoAcciones {
+  return {
+    puedeVer: base.puedeVer || !!override.puedeVer,
+    puedeCrear: base.puedeCrear || !!override.puedeCrear,
+    puedeEditar: base.puedeEditar || !!override.puedeEditar,
+    puedeAprobar: base.puedeAprobar || !!override.puedeAprobar,
+    puedeEliminar: base.puedeEliminar || !!override.puedeEliminar,
+  };
+}
+
+function ensureRequiredModulesForRole(rol: UserRole, modulosSeleccionados: string[]): string[] {
+  const normalizedModules = new Set(modulosSeleccionados.map((codigo) => normalizeModuleKey(codigo)).filter(Boolean));
+
+  if (isProductionChiefRole(rol)) {
+    normalizedModules.add('aprobaciones');
+  }
+
+  return Array.from(normalizedModules);
+}
+
 function isSuperUserRole(rol: string | null | undefined): boolean {
-  const normalized = String(rol || '').trim().toLowerCase();
+  const normalized = normalizeRoleKey(rol);
   return normalized === 'administrador' || normalized === 'admin' || normalized === 'administrator';
+}
+
+function findPermisoRol(permisos: PermisoRol[], rol: UserRole): PermisoRol | undefined {
+  const normalizedRol = normalizeRoleKey(rol);
+  return permisos.find((permiso) => normalizeRoleKey(permiso.rol) === normalizedRol);
 }
 
 export const usePermisos = () => {
@@ -188,22 +244,31 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   const actualizarPermisos = (rol: UserRole, modulosSeleccionados: string[]) => {
+    const normalizedSelectedModules = ensureRequiredModulesForRole(rol, modulosSeleccionados);
+
     setPermisos(prevPermisos =>
       prevPermisos.map(p =>
-        p.rol === rol
+        normalizeRoleKey(p.rol) === normalizeRoleKey(rol)
           ? {
               ...p,
-              modulosPermitidos: modulosSeleccionados.map((codigo) => codigo.toLowerCase()),
+              modulosPermitidos: normalizedSelectedModules,
               accionesPorModulo: modulos.reduce<Record<string, PermisoAcciones>>((acc, modulo) => {
-                const normalizedId = modulo.id.toLowerCase();
-                const tieneAcceso = modulosSeleccionados.includes(modulo.id);
-                acc[normalizedId] = {
-                  puedeVer: tieneAcceso,
-                  puedeCrear: false,
-                  puedeEditar: false,
-                  puedeAprobar: false,
-                  puedeEliminar: false,
-                };
+                const normalizedId = normalizeModuleKey(modulo.id);
+                const tieneAcceso = normalizedSelectedModules.includes(normalizedId);
+                const currentActions = p.accionesPorModulo?.[normalizedId] || emptyPermisosModulo;
+
+                acc[normalizedId] = !tieneAcceso
+                  ? emptyPermisosModulo
+                  : mergePermisoAcciones(
+                      {
+                        puedeVer: true,
+                        puedeCrear: currentActions.puedeCrear,
+                        puedeEditar: currentActions.puedeEditar,
+                        puedeAprobar: currentActions.puedeAprobar,
+                        puedeEliminar: currentActions.puedeEliminar,
+                      },
+                      buildRolePermissionOverride(rol, normalizedId),
+                    );
                 return acc;
               }, {}),
             }
@@ -221,14 +286,26 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
       .map((m) => {
         const idModulo = codigoToIdModulo[m.id];
         if (!idModulo) return null;
-        const tieneAcceso = modulosSeleccionados.includes(m.id);
+        const normalizedId = normalizeModuleKey(m.id);
+        const tieneAcceso = normalizedSelectedModules.includes(normalizedId);
+        const permisoRolActual = findPermisoRol(permisos, rol);
+        const currentActions = permisoRolActual?.accionesPorModulo?.[normalizedId] || emptyPermisosModulo;
+        const nextActions = !tieneAcceso
+          ? emptyPermisosModulo
+          : mergePermisoAcciones(
+              {
+                puedeVer: true,
+                puedeCrear: currentActions.puedeCrear,
+                puedeEditar: currentActions.puedeEditar,
+                puedeAprobar: currentActions.puedeAprobar,
+                puedeEliminar: currentActions.puedeEliminar,
+              },
+              buildRolePermissionOverride(rol, normalizedId),
+            );
+
         return {
           idModulo,
-          puedeVer: tieneAcceso,
-          puedeCrear: false,
-          puedeEditar: false,
-          puedeAprobar: false,
-          puedeEliminar: false
+          ...nextActions,
         };
       })
       .filter(Boolean);
@@ -254,8 +331,8 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
       return modulos.map((modulo) => modulo.id.toLowerCase());
     }
 
-    const permisoRol = permisos.find(p => p.rol === rol);
-    return permisoRol?.modulosPermitidos || [];
+    const permisoRol = findPermisoRol(permisos, rol);
+    return ensureRequiredModulesForRole(rol, permisoRol?.modulosPermitidos || []);
   };
 
   const puedeAcceder = (rol: UserRole, moduloId: string): boolean => {
@@ -278,8 +355,10 @@ export function PermisosProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const permisoRol = permisos.find((p) => p.rol === rol);
-    return permisoRol?.accionesPorModulo?.[moduloId.toLowerCase()] || emptyPermisosModulo;
+    const permisoRol = findPermisoRol(permisos, rol);
+    const normalizedModulo = normalizeModuleKey(moduloId);
+    const basePermissions = permisoRol?.accionesPorModulo?.[normalizedModulo] || emptyPermisosModulo;
+    return mergePermisoAcciones(basePermissions, buildRolePermissionOverride(rol, normalizedModulo));
   };
 
   return (

@@ -26,12 +26,23 @@ router.get(
 router.post(
   '/presupuesto-preview',
   requireAnyModulePermission([
+    { moduloCodigo: 'crear-solicitud', accion: 'ver' },
+    { moduloCodigo: 'crear-solicitud', accion: 'crear' },
+    { moduloCodigo: 'solicitudes', accion: 'ver' },
     { moduloCodigo: 'solicitudes', accion: 'crear' },
     { moduloCodigo: 'solicitudes', accion: 'editar' },
   ]),
   previewPresupuestoSolicitudController,
 );
-router.post('/', requireModulePermission('solicitudes', 'crear'), crearSolicitudController);
+router.post(
+  '/',
+  requireAnyModulePermission([
+    { moduloCodigo: 'crear-solicitud', accion: 'ver' },
+    { moduloCodigo: 'crear-solicitud', accion: 'crear' },
+    { moduloCodigo: 'solicitudes', accion: 'crear' },
+  ]),
+  crearSolicitudController,
+);
 router.put('/:id', requireModulePermission('solicitudes', 'editar'), actualizarSolicitudController);
 router.get(
   '/:id',

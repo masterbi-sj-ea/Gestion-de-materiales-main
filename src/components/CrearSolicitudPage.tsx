@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useCatalogosSolicitud, type RecursoListado } from '../hooks/useCatalogosSolicitud';
 import { apiFetch } from '../services/apiClient';
+import { usePermisos } from '../contexts/PermisosContext';
 
 // Componentes UI
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -88,15 +89,19 @@ export interface ItemSolicitud {
   stockDisponible: number | null;
   costoUnitario: number;
   subtotal: number;
+  comentarioLinea?: string | null;
   tieneImagen?: boolean | number | null;
   rutaImagenFinal?: string | null;
 }
 
 export default function CrearSolicitudPage() {
   const { user, token } = useAuth();
+  const { getPermisosModulo, puedeAcceder } = usePermisos();
   const navigate = useNavigate();
   const location = useLocation();
   const rehidratandoSolicitudRef = useRef(false);
+  const solicitudesModuleCode = 'solicitudes';
+  const crearSolicitudModuleCode = 'crear-solicitud';
   
   // -- Estados Globales de la Solicitud --
   const [items, setItems] = useState<ItemSolicitud[]>([]);
@@ -142,6 +147,19 @@ export default function CrearSolicitudPage() {
   // -- Estados del Servidor --
   const [loading, setLoading] = useState(false);
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
+
+  const modulePermissions = user ? getPermisosModulo(user.role, solicitudesModuleCode) : null;
+  const createModulePermissions = user ? getPermisosModulo(user.role, crearSolicitudModuleCode) : null;
+  const canViewSolicitudes = !!user && puedeAcceder(user.role, solicitudesModuleCode);
+  const canAccessCrearSolicitud = !!user && puedeAcceder(user.role, crearSolicitudModuleCode);
+  const canUseCreateSolicitudFlow = canViewSolicitudes || canAccessCrearSolicitud;
+  const canCreateSolicitudes = canAccessCrearSolicitud || !!createModulePermissions?.puedeCrear || !!modulePermissions?.puedeCrear;
+  const canEditSolicitudes = !!modulePermissions?.puedeEditar;
+  const isEditingSolicitud = Boolean(editId);
+  const canPersistSolicitud = isEditingSolicitud ? canEditSolicitudes : canCreateSolicitudes;
+  const permissionMessage = isEditingSolicitud
+    ? 'Tu rol puede consultar solicitudes, pero no tiene permiso para editarlas.'
+    : 'Tu rol no tiene acceso al módulo Crear Solicitud o no tiene permiso para registrar nuevas solicitudes.';
 
   // -- Datos Derivados Memorizados --
   const gruposUnicos = useMemo(() => Array.from(
@@ -277,6 +295,14 @@ export default function CrearSolicitudPage() {
     : null;
 
   const total = useMemo(() => items.reduce((sum, item) => sum + item.subtotal, 0), [items]);
+  const lineasActividad = useMemo(
+    () => Array.from(new Set(
+      items
+        .map((item) => String(item.comentarioLinea ?? '').trim())
+        .filter((value) => value.length > 0),
+    )),
+    [items],
+  );
 
   const previewPayload = useMemo(() => ({
     idSolicitud: editId ? Number(editId) : null,
@@ -293,7 +319,7 @@ export default function CrearSolicitudPage() {
     })),
   }), [editId, fechaSolicitud, idAreaDestino, items]);
 
-  const canRequestBudgetPreview = items.length > 0 && Boolean(idAreaDestino || items.some((item) => item.idArea));
+  const canRequestBudgetPreview = canUseCreateSolicitudFlow && items.length > 0 && Boolean(idAreaDestino || items.some((item) => item.idArea));
 
   const {
     data: presupuestoPreview,
@@ -590,6 +616,7 @@ export default function CrearSolicitudPage() {
             stockDisponible: d.EnStock ?? null,
             costoUnitario,
             subtotal: cantidad * costoUnitario,
+            comentarioLinea: d.ComentarioLinea ?? d.comentarioLinea ?? null,
             tieneImagen: d.TieneImagen ?? d.tieneImagen ?? null,
             rutaImagenFinal: d.RutaImagenFinal ?? d.rutaImagenFinal ?? null,
           };
@@ -679,6 +706,7 @@ export default function CrearSolicitudPage() {
       stockDisponible: material.enStock,
       costoUnitario,
       subtotal: cantidadNumber * costoUnitario,
+      comentarioLinea: ot?.trim() || null,
       tieneImagen: material.tieneImagen ?? null,
       rutaImagenFinal: material.rutaImagenFinal ?? null,
     };
@@ -693,6 +721,20 @@ export default function CrearSolicitudPage() {
 
   const handleEliminarItem = (index: number) => {
     setItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleActualizarComentarioLinea = (index: number, comentarioLinea: string) => {
+    setItems((prev) => prev.map((item, itemIndex) => {
+      if (itemIndex !== index) {
+        return item;
+      }
+
+      const normalized = comentarioLinea.trim();
+      return {
+        ...item,
+        comentarioLinea: normalized.length > 0 ? normalized : null,
+      };
+    }));
   };
 
   const handleEditarItem = (index: number) => {
@@ -738,6 +780,14 @@ export default function CrearSolicitudPage() {
       toast.error({
         title: 'No hay sesión activa',
         description: 'Inicia sesión nuevamente para continuar.',
+      });
+      return;
+    }
+
+    if (!canPersistSolicitud) {
+      toast.error({
+        title: isEditingSolicitud ? 'Sin permiso para editar' : 'Sin permiso para crear',
+        description: permissionMessage,
       });
       return;
     }
@@ -804,6 +854,10 @@ export default function CrearSolicitudPage() {
     setErrorLocal(null);
 
       try {
+      const otCabecera = lineasActividad.length > 1
+        ? null
+        : lineasActividad[0] ?? (ot?.trim() || null);
+
       const payload = {
         idSolicitante: user?.id ? Number(user.id) : null,
         fechaSolicitud,
@@ -816,12 +870,12 @@ export default function CrearSolicitudPage() {
         idRecurso: null,
         idCatalogoSolicitud: catalogoSolicitudFinalId,
         idCentroCosto: areaSeleccionada ? areaSeleccionada.idCentroCosto ?? null : null,
-        ot: ot?.trim() || null,
+        ot: otCabecera,
         detalle: items.map((it) => ({
           idMaterial: it.idMaterial,
           cantidadSolicitada: it.cantidad,
           unidadMedida: it.unidadMedida ?? null,
-          comentarioLinea: (it as any).comentarioLinea ?? null,
+          comentarioLinea: it.comentarioLinea ?? null,
           idArea: it.idArea ?? (areaSeleccionada ? Number(areaSeleccionada.id) : null),
           idRecurso: it.idRecurso ?? null,
         })),
@@ -952,7 +1006,7 @@ export default function CrearSolicitudPage() {
                     <Input
                       value={ot}
                       onChange={(e) => setOt(e.target.value)}
-                      placeholder="OT / Comentario"
+                      placeholder="OT / O.C. de la línea"
                       className="border-0 bg-transparent text-[10px] sm:text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-0"
                     />
                   </div>
@@ -966,6 +1020,12 @@ export default function CrearSolicitudPage() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
+              {!canPersistSolicitud && (
+                <Alert className="mt-4 border-amber-500/30 bg-amber-500/5 text-amber-950">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{permissionMessage}</AlertDescription>
+                </Alert>
+              )}
         </CardContent>
       </Card>
 
@@ -1016,6 +1076,7 @@ export default function CrearSolicitudPage() {
         editingIndex={editingIndex}
         editingCantidad={editingCantidad}
         setEditingCantidad={setEditingCantidad}
+        onActualizarComentarioLinea={handleActualizarComentarioLinea}
         onEditarItem={handleEditarItem}
         onGuardarEdicionItem={handleGuardarEdicionItem}
         onCancelarEdicionItem={handleCancelarEdicionItem}
@@ -1050,7 +1111,7 @@ export default function CrearSolicitudPage() {
           <Button 
             size="lg"
             onClick={handleEnviarSolicitud} 
-            disabled={loading || items.length === 0 || (canRequestBudgetPreview && presupuestoPreviewLoading) || solicitudBloqueadaPorPresupuesto}
+            disabled={loading || !canPersistSolicitud || items.length === 0 || (canRequestBudgetPreview && presupuestoPreviewLoading) || solicitudBloqueadaPorPresupuesto}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg shadow-blue-200 transition-all active:scale-95 disabled:opacity-50 px-8"
           >
             {loading ? (

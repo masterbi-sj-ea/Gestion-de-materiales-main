@@ -22,6 +22,7 @@ interface ItemSolicitud {
   stockDisponible: number | null;
   costoUnitario: number;
   subtotal: number;
+  comentarioLinea?: string | null;
   tieneImagen?: boolean | number | null;
   rutaImagenFinal?: string | null;
 }
@@ -32,6 +33,7 @@ interface TablaDetalleSolicitudProps {
   editingIndex: number | null;
   editingCantidad: string;
   setEditingCantidad: (val: string) => void;
+  onActualizarComentarioLinea: (index: number, comentarioLinea: string) => void;
   onEditarItem: (index: number) => void;
   onGuardarEdicionItem: () => void;
   onCancelarEdicionItem: () => void;
@@ -44,6 +46,7 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
   editingIndex,
   editingCantidad,
   setEditingCantidad,
+  onActualizarComentarioLinea,
   onEditarItem,
   onGuardarEdicionItem,
   onCancelarEdicionItem,
@@ -73,6 +76,7 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
                     <TableHead className="min-w-[200px]">Descripción</TableHead>
                     <TableHead className="min-w-[150px]">Área Destino</TableHead>
                     <TableHead className="min-w-[140px]">Recurso</TableHead>
+                    <TableHead className="min-w-[180px]">Actividad / O.C.</TableHead>
                     <TableHead className="min-w-[80px]">Unidad</TableHead>
                     <TableHead className="text-right min-w-[80px]">Stock</TableHead>
                     <TableHead className="text-right min-w-[120px]">Cantidad</TableHead>
@@ -105,6 +109,14 @@ export const TablaDetalleSolicitud: React.FC<TablaDetalleSolicitudProps> = ({
                         </div>
                       </TableCell>
                       <TableCell>{item.recursoNombre || '-'}</TableCell>
+                      <TableCell>
+                        <Input
+                          value={item.comentarioLinea ?? ''}
+                          onChange={(event) => onActualizarComentarioLinea(index, event.target.value)}
+                          placeholder="Actividad u orden"
+                          className="h-8 min-w-[160px]"
+                        />
+                      </TableCell>
                       <TableCell>{item.unidadMedida}</TableCell>
                       <TableCell className={`text-right ${(!item.stockDisponible || item.stockDisponible < item.cantidad) ? 'text-red-500 font-bold' : ''}`}>
                         {item.stockDisponible ?? 0}

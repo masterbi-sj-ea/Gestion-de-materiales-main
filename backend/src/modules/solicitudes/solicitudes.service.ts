@@ -12,6 +12,7 @@ import { PassThrough } from 'stream';
 import fs from 'fs';
 import path from 'path';
 import { listarPresupuestos, type Presupuesto } from '../presupuestos/presupuestos.service';
+import { sendPendingApprovalPushNotification } from '../push/push.service';
 import {
   ESTADOS_COMPROMETEN_PRESUPUESTO,
   agruparCostoSolicitudPorArea,
@@ -102,7 +103,6 @@ export interface SolicitudDetalle {
   EnStock: number | null;
   UltimaFechaCompra: string | null;
   UltimoPrecioCompra: number | null;
-  UltimaMonedaCompra: string | null;
 }
 
 export interface SolicitudCompleta {
@@ -119,6 +119,25 @@ export interface SolicitudMeta {
   EstadoAprobacion: string | null;
   ComentarioAprobacion: string | null;
   NombreAprobador: string | null;
+}
+
+interface SolicitudPendienteRealtimePayload {
+  id: number;
+  codigo: string;
+  area: string;
+  solicitante: string;
+  items: number;
+  createdAt: string;
+}
+
+interface SolicitudAprobacionActualizadaRealtimePayload {
+  id: number;
+  codigo: string;
+  estado: 'APROBADA' | 'RECHAZADA';
+  aprobador: string | null;
+  comentario: string | null;
+  idAprobador: number;
+  updatedAt: string;
 }
 
 interface SolicitudAprobacionReciente {
@@ -172,6 +191,12 @@ type SolicitudDetalleExtra = {
   CodigoCuenta: string | null;
 };
 
+const SOCKET_ROOM_BODEGA = 'bodega';
+const SOCKET_ROOM_APROBACIONES = 'aprobaciones';
+const SOCKET_EVENT_NUEVA_SOLICITUD = 'nueva_solicitud';
+const SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION = 'solicitud_pendiente_aprobacion';
+const SOCKET_EVENT_SOLICITUD_APROBACION_ACTUALIZADA = 'solicitud_aprobacion_actualizada';
+
 async function obtenerAprobacionesRecientes(idsSolicitud: number[]): Promise<Map<number, SolicitudAprobacionReciente>> {
   if (idsSolicitud.length === 0) {
     return new Map();
@@ -220,6 +245,44 @@ function compactText(value: unknown): string | null {
   return text ? text : null;
 }
 
+function buildSolicitudPendienteRealtimePayload(args: {
+  idSolicitud: number;
+  codigoSolicitud: string;
+  area?: string | null;
+  solicitanteNombre?: string | null;
+  items: number;
+}): SolicitudPendienteRealtimePayload {
+  return {
+    id: args.idSolicitud,
+    codigo: compactText(args.codigoSolicitud) ?? `#${args.idSolicitud}`,
+    area: compactText(args.area) ?? 'General',
+    solicitante: compactText(args.solicitanteNombre) ?? 'Usuario no identificado',
+    items: Math.max(0, Number(args.items ?? 0)),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function emitSolicitudPendienteRealtime(payload: SolicitudPendienteRealtimePayload) {
+  try {
+    io.to(SOCKET_ROOM_BODEGA).emit(SOCKET_EVENT_NUEVA_SOLICITUD, payload);
+    io.to(SOCKET_ROOM_APROBACIONES).emit(SOCKET_EVENT_SOLICITUD_PENDIENTE_APROBACION, payload);
+  } catch (error) {
+    console.error('Error emitiendo socket solicitud_pendiente_aprobacion:', error);
+  }
+
+  void sendPendingApprovalPushNotification(payload).catch((error) => {
+    console.error('No se pudo enviar la notificación push de solicitud pendiente', error);
+  });
+}
+
+function emitSolicitudAprobacionActualizadaRealtime(payload: SolicitudAprobacionActualizadaRealtimePayload) {
+  try {
+    io.to(SOCKET_ROOM_APROBACIONES).emit(SOCKET_EVENT_SOLICITUD_APROBACION_ACTUALIZADA, payload);
+  } catch (error) {
+    console.error('Error emitiendo socket solicitud_aprobacion_actualizada:', error);
+  }
+}
+
 function uniqueTexts(values: Array<unknown>): string[] {
   return Array.from(
     new Set(values.map(compactText).filter((value): value is string => value !== null)),
@@ -241,6 +304,69 @@ function formatCompactSummary(
   }
 
   return `${values.slice(0, maxVisible).join(separator)} +${values.length - maxVisible}`;
+}
+
+function shouldTryNextStoredProcedureVariant(error: any): boolean {
+  const message = String(error?.originalError?.info?.message || error?.message || '').toLowerCase();
+
+  return [
+    'parameter',
+    'expects parameter',
+    'too many arguments',
+    'too many parameters',
+    'was not supplied',
+  ].some((fragment) => message.includes(fragment));
+}
+
+async function executeStoredProcedureWithVariants<T = any>(
+  name: string,
+  variants: Array<(request: sql.Request) => void>,
+) {
+  const pool = await getPool();
+  let lastError: any;
+
+  for (const configureRequest of variants) {
+    const request = pool.request();
+    configureRequest(request);
+
+    try {
+      return await request.execute<T>(name);
+    } catch (error: any) {
+      lastError = error;
+      if (!shouldTryNextStoredProcedureVariant(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+function buildSolicitudDetalleTvp(
+  detalle: CrearSolicitudDetalleInput[],
+  idAreaCabecera?: number | null,
+  idRecursoCabecera?: number | null,
+) {
+  const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
+  tvp.columns.add('IdMaterial', sql.Int);
+  tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
+  tvp.columns.add('UnidadMedida', sql.NVarChar(100));
+  tvp.columns.add('ComentarioLinea', sql.NVarChar(510));
+  tvp.columns.add('IdArea', sql.Int);
+  tvp.columns.add('IdRecurso', sql.Int);
+
+  for (const d of detalle) {
+    tvp.rows.add(
+      d.idMaterial,
+      d.cantidadSolicitada,
+      d.unidadMedida ?? null,
+      d.comentarioLinea ?? null,
+      d.idArea ?? idAreaCabecera ?? null,
+      d.idRecurso ?? idRecursoCabecera ?? null,
+    );
+  }
+
+  return tvp;
 }
 
 async function cargarResumenSolicitudes(
@@ -988,11 +1114,12 @@ export interface CrearSolicitudInput {
   fechaSolicitud?: string | null; // ISO string o null para SYSDATETIME()
   estado?: string | null; // por defecto 'PENDIENTE'
   area?: string | null;
+  solicitanteNombre?: string | null;
   comentario?: string | null;
   idCorteStock?: number | null;
   idArea?: number | null;
   idRecurso?: number | null;
-   idCatalogoSolicitud?: number | null;
+  idCatalogoSolicitud?: number | null;
   idCentroCosto?: number | null;
   ot?: string | null;
   detalle: CrearSolicitudDetalleInput[];
@@ -1003,10 +1130,11 @@ export interface ActualizarSolicitudInput {
   fechaSolicitud?: string | null;
   nuevoEstado?: string | null;
   area?: string | null;
+  solicitanteNombre?: string | null;
   comentario?: string | null;
   idArea?: number | null;
   idRecurso?: number | null;
-   idCatalogoSolicitud?: number | null;
+  idCatalogoSolicitud?: number | null;
   idCentroCosto?: number | null;
   ot?: string | null;
   detalle: CrearSolicitudDetalleInput[];
@@ -1050,41 +1178,17 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
     detalle: input.detalle,
   });
 
-  const pool = await getPool();
-
-  // Construir TVP para dbo.TDetalleSolicitudMaterial
-  const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
-  tvp.columns.add('IdMaterial', sql.Int);
-  tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
-  tvp.columns.add('UnidadMedida', sql.NVarChar(100));
-  tvp.columns.add('ComentarioLinea', sql.NVarChar(510));
-  tvp.columns.add('IdArea', sql.Int);
-  tvp.columns.add('IdRecurso', sql.Int);
-
-  for (const d of input.detalle) {
-    tvp.rows.add(
-      d.idMaterial,
-      d.cantidadSolicitada,
-      d.unidadMedida ?? null,
-      d.comentarioLinea ?? null,
-      d.idArea ?? input.idArea ?? null,
-      d.idRecurso ?? input.idRecurso ?? null
-    );
-  }
-
-  const request = pool.request();
-
-  request.input('IdSolicitante', sql.Int, input.idSolicitante);
-  request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
-  request.input('Estado', sql.NVarChar(30), input.estado ?? 'PENDIENTE');
-  request.input('Area', sql.NVarChar(100), input.area ?? null);
-  request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
-  request.input('IdCorteStock', sql.Int, input.idCorteStock ?? null);
-  request.input('IdArea', sql.Int, input.idArea ?? null);
-  request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
-  request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
-  request.input('OT', sql.NVarChar(100), input.ot ?? null);
-  request.input('Detalle', tvp as any);
+  const baseInputs = (request: sql.Request) => {
+    request.input('IdSolicitante', sql.Int, input.idSolicitante);
+    request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
+    request.input('Estado', sql.NVarChar(30), input.estado ?? 'PENDIENTE');
+    request.input('Area', sql.NVarChar(100), input.area ?? null);
+    request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
+    request.input('IdCorteStock', sql.Int, input.idCorteStock ?? null);
+    request.input('IdArea', sql.Int, input.idArea ?? null);
+    request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
+    request.input('Detalle', buildSolicitudDetalleTvp(input.detalle, input.idArea, input.idRecurso) as any);
+  };
 
   // Log temporal para depuración: muestra la cabecera que se enviará al SP
   try {
@@ -1101,23 +1205,39 @@ export async function crearSolicitud(input: CrearSolicitudInput): Promise<{ IdSo
     console.error('[BACK] error log crearSolicitud cabecera', e);
   }
 
-  const result = await request.execute<{ IdSolicitud: number; CodigoSolicitud: string }>('sp_CrearSolicitudMaterial');
+  const result = await executeStoredProcedureWithVariants<{ IdSolicitud: number; CodigoSolicitud: string }>('sp_CrearSolicitudMaterial', [
+    (request) => {
+      baseInputs(request);
+      request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
+      request.input('OT', sql.NVarChar(100), input.ot ?? null);
+    },
+    (request) => {
+      baseInputs(request);
+      request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
+    },
+    (request) => {
+      baseInputs(request);
+      request.input('OT', sql.NVarChar(100), input.ot ?? null);
+    },
+    (request) => {
+      baseInputs(request);
+    },
+  ]);
 
   const row = (result.recordset && result.recordset[0]) as { IdSolicitud: number; CodigoSolicitud: string } | undefined;
   if (!row) {
     throw new Error('No se pudo crear la solicitud');
   }
 
-  // Notificar por Socket a bodega
-  try {
-    io.to('bodega').emit('nueva_solicitud', {
-      id: row.IdSolicitud,
-      codigo: row.CodigoSolicitud,
-      area: input.area || 'General'
-    });
-  } catch (err) {
-    console.error('Error emitiendo socket nueva_solicitud:', err);
-  }
+  emitSolicitudPendienteRealtime(
+    buildSolicitudPendienteRealtimePayload({
+      idSolicitud: row.IdSolicitud,
+      codigoSolicitud: row.CodigoSolicitud,
+      area: input.area,
+      solicitanteNombre: input.solicitanteNombre,
+      items: input.detalle.length,
+    }),
+  );
 
   return row;
 }
@@ -1139,40 +1259,52 @@ export async function actualizarSolicitud(input: ActualizarSolicitudInput): Prom
     detalle: input.detalle,
   });
 
-  const pool = await getPool();
+  const baseInputs = (request: sql.Request) => {
+    request.input('IdSolicitud', sql.Int, input.idSolicitud);
+    request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
+    request.input('NuevoEstado', sql.NVarChar(30), input.nuevoEstado ?? null);
+    request.input('Area', sql.NVarChar(100), input.area ?? null);
+    request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
+    request.input('IdArea', sql.Int, input.idArea ?? null);
+    request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
+    request.input('Detalle', buildSolicitudDetalleTvp(input.detalle, input.idArea, input.idRecurso) as any);
+  };
 
-  const tvp = new sql.Table('dbo.TDetalleSolicitudMaterial');
-  tvp.columns.add('IdMaterial', sql.Int);
-  tvp.columns.add('CantidadSolicitada', sql.Decimal(18, 4));
-  tvp.columns.add('UnidadMedida', sql.NVarChar(100));
-  tvp.columns.add('ComentarioLinea', sql.NVarChar(510));
-  tvp.columns.add('IdArea', sql.Int);
-  tvp.columns.add('IdRecurso', sql.Int);
+  await executeStoredProcedureWithVariants('sp_ActualizarSolicitudMaterial', [
+    (request) => {
+      baseInputs(request);
+      request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
+      request.input('OT', sql.NVarChar(100), input.ot ?? null);
+    },
+    (request) => {
+      baseInputs(request);
+      request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
+    },
+    (request) => {
+      baseInputs(request);
+      request.input('OT', sql.NVarChar(100), input.ot ?? null);
+    },
+    (request) => {
+      baseInputs(request);
+    },
+  ]);
 
-  for (const d of input.detalle) {
-    tvp.rows.add(
-      d.idMaterial,
-      d.cantidadSolicitada,
-      d.unidadMedida ?? null,
-      d.comentarioLinea ?? null,
-      d.idArea ?? input.idArea ?? null,
-      d.idRecurso ?? input.idRecurso ?? null
-    );
+  if (String(input.nuevoEstado ?? '').trim().toUpperCase() === 'PENDIENTE') {
+    try {
+      const meta = await obtenerSolicitudMeta(input.idSolicitud);
+      emitSolicitudPendienteRealtime(
+        buildSolicitudPendienteRealtimePayload({
+          idSolicitud: input.idSolicitud,
+          codigoSolicitud: meta?.CodigoSolicitud ?? `#${input.idSolicitud}`,
+          area: input.area,
+          solicitanteNombre: input.solicitanteNombre,
+          items: input.detalle.length,
+        }),
+      );
+    } catch (error) {
+      console.error('Error obteniendo metadatos para socket solicitud_pendiente_aprobacion:', error);
+    }
   }
-
-  const request = pool.request();
-  request.input('IdSolicitud', sql.Int, input.idSolicitud);
-request.input('FechaSolicitud', sql.DateTime2, input.fechaSolicitud ?? null);
-request.input('NuevoEstado', sql.NVarChar(30), input.nuevoEstado ?? null);
-request.input('Area', sql.NVarChar(100), input.area ?? null);
-request.input('Comentario', sql.NVarChar(500), input.comentario ?? null);
-request.input('IdArea', sql.Int, input.idArea ?? null);
-request.input('IdCatalogoSolicitud', sql.Int, input.idCatalogoSolicitud ?? null);
-request.input('IdCentroCosto', sql.Int, input.idCentroCosto ?? null);
-request.input('OT', sql.NVarChar(100), input.ot ?? null);
-request.input('Detalle', tvp as any);
-
-  await request.execute('sp_ActualizarSolicitudMaterial');
 }
 
 export async function listarSolicitudes(params: {
@@ -1424,6 +1556,7 @@ export async function registrarAprobacionSolicitud(input: {
   idAprobador: number;
   estado: 'APROBADA' | 'RECHAZADA';
   comentario?: string | null;
+  nombreAprobador?: string | null;
 }): Promise<void> {
   const comentarioNormalizado = typeof input.comentario === 'string' ? input.comentario.trim() : '';
   const comentarioFinal = comentarioNormalizado.length > 0 ? comentarioNormalizado : null;
@@ -1434,9 +1567,15 @@ export async function registrarAprobacionSolicitud(input: {
     Comentario: comentarioFinal,
   });
 
+  let solicitud: SolicitudMeta | null = null;
+  try {
+    solicitud = await obtenerSolicitudMeta(input.idSolicitud);
+  } catch (error) {
+    console.error('Error obteniendo meta para socket solicitud_aprobacion_actualizada:', error);
+  }
+
   if (input.estado === 'APROBADA') {
     try {
-      const solicitud = await obtenerSolicitudMeta(input.idSolicitud);
       if (solicitud?.IdSolicitante) {
         io.to(`user:${solicitud.IdSolicitante}`).emit('solicitud_aprobada', {
           id: input.idSolicitud,
@@ -1447,6 +1586,16 @@ export async function registrarAprobacionSolicitud(input: {
       console.error('Error emitiendo socket solicitud_aprobada:', err);
     }
   }
+
+  emitSolicitudAprobacionActualizadaRealtime({
+    id: input.idSolicitud,
+    codigo: solicitud?.CodigoSolicitud || `#${input.idSolicitud}`,
+    estado: input.estado,
+    aprobador: compactText(input.nombreAprobador),
+    comentario: comentarioFinal,
+    idAprobador: input.idAprobador,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export interface AprobacionSolicitud {
@@ -1584,6 +1733,7 @@ export async function generarPdfSolicitud(idSolicitud: number): Promise<PassThro
     m.DescripcionArticulo AS Descripcion,
     m.UnidadMedida,
     d.CantidadSolicitada,
+    NULLIF(LTRIM(RTRIM(d.ComentarioLinea)), '') AS ActividadLinea,
     a.Nombre AS Actividad,
     arc.CodigoCuenta
   FROM DetalleSolicitudesMaterial d
@@ -1785,8 +1935,9 @@ doc.moveTo(right - 155, headerTextY + 10).lineTo(right, headerTextY + 10).stroke
         drawCellTextFit(it.Descripcion, left + wCodigo + 5, y, wDesc - 10, 'left', true);
         drawCellTextFit(it.UnidadMedida, left + wCodigo + wDesc, y, wUM, 'center');
         drawCellTextFit(String(it.CantidadSolicitada), left + wCodigo + wDesc + wUM, y, wCant, 'center');
-        // Mostrar OT en ACTIVIDAD si existe y no es vacío; si no, usar la actividad del detalle o el nombre del área
-        const actividadValor = (cab.OT && String(cab.OT).trim() !== '') ? String(cab.OT) : (it.Actividad || cab.AreaNombre || '');
+        // Prioridad: actividad capturada en la línea, luego OT de cabecera, luego actividad/área derivada.
+        const actividadLinea = typeof it.ActividadLinea === 'string' ? String(it.ActividadLinea).trim() : '';
+        const actividadValor = actividadLinea || ((cab.OT && String(cab.OT).trim() !== '') ? String(cab.OT) : (it.Actividad || cab.AreaNombre || ''));
         drawCellTextFit(
           actividadValor,
           left + wCodigo + wDesc + wUM + wCant + 2,

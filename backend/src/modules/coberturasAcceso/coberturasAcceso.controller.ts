@@ -37,6 +37,15 @@ function isDuplicateError(error: any): boolean {
   return sqlNumber === 2627 || sqlNumber === 2601 || message.includes('ya está asignado');
 }
 
+function getErrorMessage(error: any, fallback: string): string {
+  const message = error?.originalError?.info?.message || error?.message;
+  if (typeof message === 'string' && message.trim()) {
+    return message.trim();
+  }
+
+  return fallback;
+}
+
 export async function listarCoberturasAccesoController(_req: Request, res: Response) {
   try {
     const coberturas = await listarCoberturasAcceso();
@@ -340,6 +349,12 @@ export async function agregarUsuarioCoberturaController(req: AuthRequest, res: R
     if (isDuplicateError(error)) {
       return res.status(409).json({ message: 'El usuario ya está asignado a esta cobertura' });
     }
+
+    const message = getErrorMessage(error, 'Error al asignar usuario a la cobertura');
+    if (env.NODE_ENV !== 'production') {
+      return res.status(500).json({ message, details: { message: error?.message, stack: error?.stack, info: error?.originalError?.info } });
+    }
+
     return res.status(500).json({ message: 'Error al asignar usuario a la cobertura' });
   }
 }

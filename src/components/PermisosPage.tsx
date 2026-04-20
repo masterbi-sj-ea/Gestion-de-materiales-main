@@ -42,6 +42,24 @@ const rolesInfo: Partial<Record<UserRole, { nombre: string; descripcion: string;
   }
 };
 
+function normalizeRoleKey(value: string | null | undefined): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function isProductionChiefRole(value: string | null | undefined): boolean {
+  return normalizeRoleKey(value) === 'jefe de produccion';
+}
+
+function isProtectedApprovalModule(rol: UserRole, moduloId: string): boolean {
+  return isProductionChiefRole(rol) && String(moduloId || '').trim().toLowerCase() === 'aprobaciones';
+}
+
 export default function PermisosPage() {
   const { permisos, actualizarPermisos, modulos } = usePermisos();
 
@@ -65,6 +83,13 @@ export default function PermisosPage() {
   const handleToggleModulo = (rol: UserRole, moduloId: string) => {
     setEditedPermisos(prev => {
       const modulosActuales = prev[rol] || [];
+      if (isProtectedApprovalModule(rol, moduloId) && modulosActuales.includes(moduloId)) {
+        sileo.show('Permiso obligatorio', {
+          description: 'Jefe de Producción debe conservar acceso y aprobación en el módulo Aprobaciones.',
+        });
+        return prev;
+      }
+
       const nuevosModulos = modulosActuales.includes(moduloId)
         ? modulosActuales.filter(m => m !== moduloId)
         : [...modulosActuales, moduloId];
@@ -250,6 +275,7 @@ export default function PermisosPage() {
                       <TableBody>
                         {modulos.map((modulo) => {
                           const tieneAcceso = editedPermisos[rol as UserRole]?.includes(modulo.id);
+                          const bloqueadoPorRol = isProtectedApprovalModule(rol as UserRole, modulo.id);
 
                           return (
                             <TableRow key={modulo.id}>
@@ -272,6 +298,7 @@ export default function PermisosPage() {
                               <TableCell className="text-right">
                                 <Switch
                                   checked={tieneAcceso}
+                                  disabled={bloqueadoPorRol}
                                   onCheckedChange={() => handleToggleModulo(rol as UserRole, modulo.id)}
                                 />
                               </TableCell>

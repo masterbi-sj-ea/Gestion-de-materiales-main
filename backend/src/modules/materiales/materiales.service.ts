@@ -11,6 +11,7 @@ export interface Material {
   DescripcionArticulo: string;
   UnidadMedida: string;
   GrupoArticulos: string | null;
+  Activo?: boolean | number | null;
 }
 
 export interface MaterialConStock extends Material {
@@ -59,11 +60,90 @@ export interface MaterialImagen {
   FuenteImagen: string | null;
 }
 
+export interface ReactivarMaterialResult {
+  IdMaterial: number;
+  Resultado: string;
+}
+
+type CanonicalCurrency = 'USD' | 'COR';
+
+function normalizeImportCurrency(value?: string | null): CanonicalCurrency {
+  const raw = String(value ?? '').trim().toUpperCase();
+
+  if (!raw) return 'COR';
+
+  if (
+    raw.includes('USD') ||
+    raw === 'US$' ||
+    raw === '$'
+  ) {
+    return 'USD';
+  }
+
+  if (
+    raw.includes('COR') ||
+    raw.includes('CORD') ||
+    raw.includes('CORDOBA') ||
+    raw.includes('C$') ||
+    raw.includes('NIO')
+  ) {
+    return 'COR';
+  }
+
+  // Politica segura para la operacion actual:
+  // lo no reconocido se asume como COR para no romper la carga semanal.
+  return 'COR';
+}
+
+function roundMoney(value: number, decimals = 4): number {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
+}
+
+function convertImportPriceToUsd(
+  precio: number | null | undefined,
+  monedaOriginal: CanonicalCurrency,
+  tipoCambioUsdToCord: number,
+): number | null {
+  if (precio === null || precio === undefined || !Number.isFinite(precio)) {
+    return null;
+  }
+
+  if (monedaOriginal === 'USD') {
+    return roundMoney(precio, 4);
+  }
+
+  return roundMoney(precio / tipoCambioUsdToCord, 4);
+}
+
 export async function listarMateriales(): Promise<Material[]> {
   return callSpMany<Material>('sp_ListarMateriales');
 }
 
-export async function listarMaterialesConStock(): Promise<MaterialConStock[]> {
+export async function listarMaterialesConStock(options: { incluirInactivos?: boolean } = {}): Promise<MaterialConStock[]> {
+  if (options.incluirInactivos) {
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        m.IdMaterial,
+        m.NumeroArticulo,
+        m.DescripcionArticulo,
+        m.UnidadMedida,
+        m.GrupoArticulos,
+        sa.EnStock,
+        sa.UltimaFechaCompra,
+        sa.UltimoPrecioCompra,
+        sa.UltimaMonedaCompra,
+        ISNULL(m.Activo, 1) AS Activo
+      FROM dbo.Materiales m WITH (NOLOCK)
+      LEFT JOIN dbo.StockActual sa WITH (NOLOCK)
+        ON sa.IdMaterial = m.IdMaterial
+      ORDER BY m.NumeroArticulo;
+    `);
+
+    return (result.recordset ?? []) as MaterialConStock[];
+  }
+
   return callSpMany<MaterialConStock>('sp_ListarMaterialesConStock');
 }
 
@@ -456,6 +536,10 @@ export async function eliminarMaterial(idMaterial: number): Promise<void> {
   await callSpOne('sp_EliminarMaterial', { IdMaterial: idMaterial });
 }
 
+export async function reactivarMaterial(idMaterial: number): Promise<ReactivarMaterialResult | null> {
+  return callSpOne<ReactivarMaterialResult>('sp_ReactivarMaterial', { IdMaterial: idMaterial });
+}
+
 export async function importarMaterialesYStock(
   datos: MaterialImportRow[],
   idUsuario?: number,
@@ -473,38 +557,65 @@ export async function importarMaterialesYStock(
   tvp.columns.add('UltimoPrecioCompra', sql.Decimal(18, 4));
   tvp.columns.add('UltimaMonedaCompra', sql.NVarChar(10));
 
+  const tipoCambioUsdToCord = env.MATERIALES_TIPO_CAMBIO_USD_TO_CORD;
+
   const parseFecha = (value?: string | null): Date | null => {
     if (!value) return null;
-    const str = value.trim();
+
+    const str = String(value).trim();
     if (!str) return null;
 
-    let d: number, m: number, y: number;
-    const slashParts = str.split('/');
-    if (slashParts.length === 3) {
-      d = Number(slashParts[0]);
-      m = Number(slashParts[1]);
-      y = Number(slashParts[2]);
+    let y: number;
+    let m: number;
+    let d: number;
+
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      y = Number(isoMatch[1]);
+      m = Number(isoMatch[2]);
+      d = Number(isoMatch[3]);
     } else {
-      const dashParts = str.split('-');
-      if (dashParts.length === 3) {
-        y = Number(dashParts[0]);
-        m = Number(dashParts[1]);
-        d = Number(dashParts[2]);
+      const slashParts = str.split('/');
+      if (slashParts.length === 3) {
+        d = Number(slashParts[0]);
+        m = Number(slashParts[1]);
+        y = Number(slashParts[2]);
       } else {
-        return null;
+        const dashParts = str.split('-');
+        if (dashParts.length === 3) {
+          y = Number(dashParts[0]);
+          m = Number(dashParts[1]);
+          d = Number(dashParts[2]);
+        } else {
+          return null;
+        }
       }
     }
 
     if (!y || !m || !d) return null;
+
     const date = new Date(y, m - 1, d);
     if (Number.isNaN(date.getTime())) return null;
-    if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
+
+    if (
+      date.getFullYear() !== y ||
+      date.getMonth() !== m - 1 ||
+      date.getDate() !== d
+    ) {
       return null;
     }
+
     return date;
   };
 
   for (const row of datos) {
+    const monedaOriginal = normalizeImportCurrency(row.UltimaMonedaCompra);
+    const precioUsd = convertImportPriceToUsd(
+      row.UltimoPrecioCompra,
+      monedaOriginal,
+      tipoCambioUsdToCord,
+    );
+
     tvp.rows.add(
       row.NumeroArticulo,
       row.DescripcionArticulo,
@@ -512,8 +623,8 @@ export async function importarMaterialesYStock(
       row.UnidadMedida,
       row.GrupoArticulos ?? null,
       parseFecha(row.UltimaFechaCompra ?? null),
-      row.UltimoPrecioCompra ?? null,
-      row.UltimaMonedaCompra ?? null,
+      precioUsd,
+      precioUsd === null ? null : 'USD',
     );
   }
 

@@ -10,6 +10,12 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return i > 0 ? i : fallback;
 }
 
+function parsePositiveNumber(value: string | undefined, fallback: number): number {
+  if (value == null) return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: process.env.PORT ? Number(process.env.PORT) : 4000,
@@ -23,6 +29,17 @@ export const env = {
   DB_LOG_SLOW_MS: parsePositiveInt(process.env.DB_LOG_SLOW_MS, 2000),
   JWT_SECRET: process.env.JWT_SECRET || 'change-me-in-production',
 
+  // Tipo de cambio de referencia para normalizar importaciones de materiales a USD.
+  MATERIALES_TIPO_CAMBIO_USD_TO_CORD: parsePositiveNumber(
+    process.env.MATERIALES_TIPO_CAMBIO_USD_TO_CORD,
+    36.80,
+  ),
+
   // Carpeta raíz donde viven las imágenes (NAS / disco), ej: \\NAS02\Desarollo\Imagenes_items
   MATERIALES_IMG_ROOT: (process.env.MATERIALES_IMG_ROOT || '').trim() || null,
+  WEB_PUSH_VAPID_PUBLIC_KEY: (process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim() || null,
+  WEB_PUSH_VAPID_PRIVATE_KEY: (process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim() || null,
+  WEB_PUSH_VAPID_SUBJECT: (process.env.WEB_PUSH_VAPID_SUBJECT || '').trim() || null,
+  HTTPS_KEY_PATH: (process.env.HTTPS_KEY_PATH || '').trim() || null,
+  HTTPS_CERT_PATH: (process.env.HTTPS_CERT_PATH || '').trim() || null,
 };

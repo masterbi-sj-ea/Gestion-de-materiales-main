@@ -165,6 +165,7 @@ export async function crearSolicitudController(req: AuthRequest, res: Response) 
       fechaSolicitud: fechaSolicitud ?? null,
       estado: estado ?? 'PENDIENTE',
       area: area ?? null,
+      solicitanteNombre: req.userName ?? null,
       comentario: comentario ?? null,
       idCorteStock: idCorteStock ?? null,
       idArea: idArea ?? null,
@@ -363,6 +364,7 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
 
   const {
     fechaSolicitud,
+    area,
     comentario,
     idArea,
     idRecurso,
@@ -399,13 +401,14 @@ export async function actualizarSolicitudController(req: AuthRequest, res: Respo
       idSolicitud,
       fechaSolicitud: fechaSolicitud ?? null,
       nuevoEstado: nuevoEstado ?? 'PENDIENTE',
+      area: area ?? null,
+      solicitanteNombre: req.userName ?? null,
       comentario: comentario ?? null,
       idArea: idArea ?? null,
       idRecurso: idRecurso ?? null,
       idCatalogoSolicitud,
       idCentroCosto: idCentroCosto ?? null,
       ot: ot ?? null,
-      area: null,
       detalle: detalle.map((d: any) => ({
         idMaterial: d.idMaterial,
         cantidadSolicitada: d.cantidadSolicitada,
@@ -474,6 +477,7 @@ export async function registrarAprobacionSolicitudController(req: AuthRequest, r
       idAprobador: userId,
       estado: estadoNormalizado as 'APROBADA' | 'RECHAZADA',
       comentario: comentarioNormalizado,
+      nombreAprobador: req.userName ?? null,
     });
 
     try {

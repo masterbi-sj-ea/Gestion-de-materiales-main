@@ -94,7 +94,7 @@ function formatCurrency(value: number | null): string {
   }
 
   const absolute = Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return value < 0 ? `-$${absolute}` : `$${absolute}`;
+  return value < 0 ? `-${absolute} USD` : `${absolute} USD`;
 }
 
 function statusBadge(area: SolicitudPresupuestoPreviewArea) {
@@ -216,25 +216,25 @@ export function PresupuestoSolicitudPreview({ loading, error, preview, visible }
 
                     <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-3">
                       <div className="rounded-lg bg-slate-50 p-3">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Presupuesto</div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Presupuesto (USD)</div>
                         <div className="mt-1 font-semibold text-slate-900">{formatCurrency(area.presupuesto)}</div>
                       </div>
                       <div className="rounded-lg bg-slate-50 p-3">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Comprometido actual</div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Comprometido actual (USD)</div>
                         <div className="mt-1 font-semibold text-slate-900">{formatCurrency(area.comprometidoActual)}</div>
                       </div>
                       <div className="rounded-lg bg-slate-50 p-3">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Disponible actual</div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Disponible actual (USD)</div>
                         <div className={`mt-1 font-semibold ${disponibleAntesClassName}`}>
                           {disponibleAntesTexto}
                         </div>
                       </div>
                       <div className="rounded-lg bg-slate-50 p-3">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Solicitud actual</div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Solicitud actual (USD)</div>
                         <div className="mt-1 font-semibold text-slate-900">{formatCurrency(area.solicitadoNuevo)}</div>
                       </div>
                       <div className="rounded-lg bg-slate-50 p-3">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Disponible despues</div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Disponible despues (USD)</div>
                         <div className={`mt-1 font-semibold ${disponibleDespuesClassName}`}>
                           {disponibleDespuesTexto}
                         </div>

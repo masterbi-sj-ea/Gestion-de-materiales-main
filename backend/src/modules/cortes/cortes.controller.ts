@@ -8,6 +8,8 @@ import {
 	obtenerDetalleCorte,
 	cargarSnapshotCorte,
 	registrarConteoCorte,
+	aprobarCorte,
+	aplicarAjusteCorte,
 	type RegistrarConteoDetalleInput,
 } from './cortes.service';
 import { registrarAuditoria } from '../auditoria/auditoria.service';
@@ -43,6 +45,11 @@ function normalizarDetalleConteo(value: unknown): RegistrarConteoDetalleInput[] 
 		});
 
 	return detalleNormalizado.filter((item): item is RegistrarConteoDetalleInput => item !== null);
+}
+
+function normalizarTextoOpcional(value: unknown): string | null {
+	const normalized = String(value ?? '').trim();
+	return normalized.length > 0 ? normalized : null;
 }
 
 export async function listarCortesController(_req: Request, res: Response) {
@@ -148,6 +155,80 @@ export async function registrarConteoCorteController(req: AuthRequest, res: Resp
 	} catch (error: any) {
 		console.error('Error en registrarConteoCorteController', error);
 		return res.status(500).json({ message: 'Error al registrar el conteo del corte de stock' });
+	}
+}
+
+export async function aprobarCorteController(req: AuthRequest, res: Response) {
+	const id = parsePositiveInteger(req.params.id);
+	if (!id) {
+		return res.status(400).json({ message: 'Id de corte inválido' });
+	}
+
+	if (!req.userId) {
+		return res.status(401).json({ message: 'Usuario no autenticado' });
+	}
+
+	const observacionRevision = normalizarTextoOpcional(req.body?.observacionRevision);
+
+	try {
+		const resultado = await aprobarCorte(id, req.userId, observacionRevision);
+
+		try {
+			await registrarAuditoria(req.userId, 'APROBAR_CORTE_STOCK', {
+				modulo: 'Cortes de Stock',
+				entidad: `Corte #${id}`,
+				idCorte: id,
+				resultado: resultado.resultado,
+				nuevoEstado: resultado.nuevoEstado,
+				observacionRevision,
+				detalles: `Aprobación de corte de stock (ID ${id})`,
+			});
+		} catch (auditError) {
+			console.error('Error al registrar auditoría APROBAR_CORTE_STOCK', auditError);
+		}
+
+		return res.status(200).json(resultado);
+	} catch (error: any) {
+		console.error('Error en aprobarCorteController', error);
+		return res.status(500).json({ message: 'Error al aprobar el corte de stock' });
+	}
+}
+
+export async function aplicarAjusteCorteController(req: AuthRequest, res: Response) {
+	const id = parsePositiveInteger(req.params.id);
+	if (!id) {
+		return res.status(400).json({ message: 'Id de corte inválido' });
+	}
+
+	if (!req.userId) {
+		return res.status(401).json({ message: 'Usuario no autenticado' });
+	}
+
+	const observacionAplicacion = normalizarTextoOpcional(req.body?.observacionAplicacion);
+
+	try {
+		const resultado = await aplicarAjusteCorte(id, req.userId, observacionAplicacion);
+
+		try {
+			await registrarAuditoria(req.userId, 'APLICAR_AJUSTE_CORTE_STOCK', {
+				modulo: 'Cortes de Stock',
+				entidad: `Corte #${id}`,
+				idCorte: id,
+				resultado: resultado.resultado,
+				nuevoEstado: resultado.nuevoEstado,
+				observacionAplicacion,
+				lineasAjustadas: resultado.lineasAjustadas,
+				lineasSinDiferencia: resultado.lineasSinDiferencia,
+				detalles: `Aplicación de ajuste de corte de stock (ID ${id})`,
+			});
+		} catch (auditError) {
+			console.error('Error al registrar auditoría APLICAR_AJUSTE_CORTE_STOCK', auditError);
+		}
+
+		return res.status(200).json(resultado);
+	} catch (error: any) {
+		console.error('Error en aplicarAjusteCorteController', error);
+		return res.status(500).json({ message: 'Error al aplicar el ajuste del corte de stock' });
 	}
 }
 

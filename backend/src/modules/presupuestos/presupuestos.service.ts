@@ -2,7 +2,6 @@ import sql from 'mssql';
 import { getPool } from '../../config/db';
 import {
   buildDespachosPreviosOuterApply,
-  buildDevolucionesPresupuestoOuterApply,
   resolveDetalleDespachosSchema,
 } from '../../infra/detalleDespachos';
 
@@ -307,14 +306,18 @@ async function loadPresupuestoRows() {
         CASE
           WHEN (
             ISNULL(despachosPrevios.CantidadYaDespachada, 0)
-            - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+            - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
           ) > 0
             THEN (
               ISNULL(despachosPrevios.CantidadYaDespachada, 0)
-              - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+              - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
             ) * ISNULL(sa.UltimoPrecioCompra, 0)
           ELSE 0
-        END AS EjecutadoReal
+        END AS EjecutadoReal,
+        ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
+          * ISNULL(sa.UltimoPrecioCompra, 0) AS MontoDevolucionPresupuestariaVigente,
+        ISNULL(devolucionesPresupuesto.CantidadReconsumidaPorAnulacion, 0)
+          * ISNULL(sa.UltimoPrecioCompra, 0) AS MontoReconsumoPorAnulacion
       FROM dbo.SolicitudesMaterial s
       INNER JOIN dbo.DetalleSolicitudesMaterial d ON d.IdSolicitud = s.IdSolicitud
       LEFT JOIN dbo.StockActual sa ON sa.IdMaterial = d.IdMaterial
@@ -324,14 +327,40 @@ async function loadPresupuestoRows() {
         detalleDespachoAlias: 'dd',
         despachoAlias: 'desp',
       })}
-      ${buildDevolucionesPresupuestoOuterApply(detalleDespachosSchema, {
-        solicitudIdExpression: 's.IdSolicitud',
-        detalleSolicitudAlias: 'd',
-        detalleDespachoAlias: 'dd_dev',
-        despachoAlias: 'desp_dev',
-        detalleDevolucionAlias: 'ddv',
-        devolucionAlias: 'dev',
-      })}
+      OUTER APPLY (
+        SELECT
+          SUM(
+            CASE
+              WHEN dev.Estado = 'REGISTRADA'
+               AND ISNULL(dev.ReversaPresupuesto, 0) = 1
+              THEN ISNULL(ddv.CantidadDevuelta, 0)
+              ELSE 0
+            END
+          ) AS CantidadDevueltaPresupuestoVigente,
+          SUM(
+            CASE
+              WHEN dev.Estado = 'ANULADA'
+               AND ISNULL(dev.ReversaPresupuesto, 0) = 1
+              THEN ISNULL(ddv.CantidadDevuelta, 0)
+              ELSE 0
+            END
+          ) AS CantidadReconsumidaPorAnulacion
+        FROM dbo.DetalleDevolucionesDespacho ddv
+        INNER JOIN dbo.DevolucionesDespacho dev
+          ON dev.IdDevolucion = ddv.IdDevolucion
+        INNER JOIN dbo.DetalleDespachos dd_dev
+          ON dd_dev.IdDetalleDespacho = ddv.IdDetalleDespacho
+        INNER JOIN dbo.Despachos desp_dev
+          ON desp_dev.IdDespacho = dd_dev.IdDespacho
+        WHERE desp_dev.IdSolicitud = s.IdSolicitud
+          AND (
+            ddv.IdDetalleSolicitud = d.IdDetalleSolicitud
+            OR (
+              ddv.IdDetalleSolicitud IS NULL
+              AND dd_dev.IdMaterial = d.IdMaterial
+            )
+          )
+      ) devolucionesPresupuesto
       WHERE COALESCE(d.IdArea, s.IdArea) IS NOT NULL
     ),
     MovimientoArea AS (
@@ -341,7 +370,9 @@ async function loadPresupuestoRows() {
         Mes,
         SUM(ReservaPendiente + EjecutadoReal) AS Comprometido,
         SUM(EjecutadoReal) AS Ejecutado,
-        SUM(EjecutadoReal) AS Consumo
+        SUM(EjecutadoReal) AS ConsumoNeto,
+        SUM(MontoDevolucionPresupuestariaVigente) AS DevolucionesPresupuestarias,
+        SUM(MontoReconsumoPorAnulacion) AS ReconsumoAnulaciones
       FROM MovimientoDetalle
       GROUP BY IdArea, Anio, Mes
     )
@@ -357,7 +388,7 @@ async function loadPresupuestoRows() {
       cc.Nombre AS CentroCostoNombre,
       CAST(ISNULL(m.Comprometido, 0) AS DECIMAL(18,2)) AS Comprometido,
       CAST(ISNULL(m.Ejecutado, 0) AS DECIMAL(18,2)) AS Ejecutado,
-      CAST(ISNULL(m.Consumo, 0) AS DECIMAL(18,2)) AS Consumo,
+      CAST(ISNULL(m.ConsumoNeto, 0) AS DECIMAL(18,2)) AS Consumo,
       CAST(p.MontoTotal - ISNULL(m.Comprometido, 0) AS DECIMAL(18,2)) AS Disponible,
       CAST(CASE WHEN p.MontoTotal > 0 THEN (ISNULL(m.Comprometido, 0) / p.MontoTotal) * 100 ELSE 0 END AS DECIMAL(10,2)) AS PorcentajeEjecucion,
       CASE
@@ -372,7 +403,7 @@ async function loadPresupuestoRows() {
       SELECT
         SUM(COALESCE(ma.Comprometido, 0)) AS Comprometido,
         SUM(COALESCE(ma.Ejecutado, 0)) AS Ejecutado,
-        SUM(COALESCE(ma.Consumo, 0)) AS Consumo
+        SUM(COALESCE(ma.ConsumoNeto, 0)) AS ConsumoNeto
       FROM MovimientoArea ma
       WHERE ma.IdArea = p.IdArea
         AND ma.Anio = p.Anio
@@ -638,11 +669,11 @@ export async function obtenerDetallePresupuesto(idPresupuesto: number): Promise<
             + CASE
               WHEN (
                 ISNULL(despachosPrevios.CantidadYaDespachada, 0)
-                - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+                - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
               ) > 0
                 THEN (
                   ISNULL(despachosPrevios.CantidadYaDespachada, 0)
-                  - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+                  - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
                 ) * ISNULL(sa.UltimoPrecioCompra, 0)
               ELSE 0
             END
@@ -651,11 +682,11 @@ export async function obtenerDetallePresupuesto(idPresupuesto: number): Promise<
             CASE
               WHEN (
                 ISNULL(despachosPrevios.CantidadYaDespachada, 0)
-                - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+                - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
               ) > 0
                 THEN (
                   ISNULL(despachosPrevios.CantidadYaDespachada, 0)
-                  - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuesto, 0)
+                  - ISNULL(devolucionesPresupuesto.CantidadDevueltaPresupuestoVigente, 0)
                 ) * ISNULL(sa.UltimoPrecioCompra, 0)
               ELSE 0
             END
@@ -669,14 +700,40 @@ export async function obtenerDetallePresupuesto(idPresupuesto: number): Promise<
           detalleDespachoAlias: 'dd',
           despachoAlias: 'desp',
         })}
-        ${buildDevolucionesPresupuestoOuterApply(detalleDespachosSchema, {
-          solicitudIdExpression: 's.IdSolicitud',
-          detalleSolicitudAlias: 'd',
-          detalleDespachoAlias: 'dd_dev',
-          despachoAlias: 'desp_dev',
-          detalleDevolucionAlias: 'ddv',
-          devolucionAlias: 'dev',
-        })}
+        OUTER APPLY (
+          SELECT
+            SUM(
+              CASE
+                WHEN dev.Estado = 'REGISTRADA'
+                 AND ISNULL(dev.ReversaPresupuesto, 0) = 1
+                THEN ISNULL(ddv.CantidadDevuelta, 0)
+                ELSE 0
+              END
+            ) AS CantidadDevueltaPresupuestoVigente,
+            SUM(
+              CASE
+                WHEN dev.Estado = 'ANULADA'
+                 AND ISNULL(dev.ReversaPresupuesto, 0) = 1
+                THEN ISNULL(ddv.CantidadDevuelta, 0)
+                ELSE 0
+              END
+            ) AS CantidadReconsumidaPorAnulacion
+          FROM dbo.DetalleDevolucionesDespacho ddv
+          INNER JOIN dbo.DevolucionesDespacho dev
+            ON dev.IdDevolucion = ddv.IdDevolucion
+          INNER JOIN dbo.DetalleDespachos dd_dev
+            ON dd_dev.IdDetalleDespacho = ddv.IdDetalleDespacho
+          INNER JOIN dbo.Despachos desp_dev
+            ON desp_dev.IdDespacho = dd_dev.IdDespacho
+          WHERE desp_dev.IdSolicitud = s.IdSolicitud
+            AND (
+              ddv.IdDetalleSolicitud = d.IdDetalleSolicitud
+              OR (
+                ddv.IdDetalleSolicitud IS NULL
+                AND dd_dev.IdMaterial = d.IdMaterial
+              )
+            )
+        ) devolucionesPresupuesto
         WHERE COALESCE(d.IdArea, s.IdArea) = p.IdArea
           AND YEAR(s.FechaSolicitud) = p.Anio
           AND (p.Mes IS NULL OR MONTH(s.FechaSolicitud) = p.Mes)

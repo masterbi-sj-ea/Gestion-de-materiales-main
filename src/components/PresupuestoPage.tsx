@@ -113,6 +113,12 @@ export default function PresupuestoPage() {
       .sort((left, right) => left.nombre.localeCompare(right.nombre, 'es'));
   }, [presupuestos]);
 
+  const formatCurrencyUsd = (value: number) =>
+    `${Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} USD`;
+
   const resetFilters = () => {
     setSearchTerm('');
     setFilterAnio('todos');
@@ -124,13 +130,13 @@ export default function PresupuestoPage() {
     const headers = [
       'Area',
       'Periodo',
-      'Presupuesto',
-      'Consumo',
-      'Disponible',
+      'Presupuesto (USD)',
+      'Consumo (USD)',
+      'Disponible (USD)',
       'PorcentajeEjecucion',
       'Estado',
-      'Comprometido',
-      'Ejecutado',
+      'Comprometido (USD)',
+      'Ejecutado (USD)',
     ];
 
     const rows = filteredPresupuestos.map((presupuesto) => [
@@ -400,7 +406,7 @@ export default function PresupuestoPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Monto Total Autorizado ($)</Label>
+                  <Label>Monto Total Autorizado (USD)</Label>
                   <Input 
                     type="number" 
                     value={formMonto} 
@@ -439,21 +445,21 @@ export default function PresupuestoPage() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Presupuesto Total</CardTitle>
+                <CardTitle className="text-sm font-medium">Presupuesto Total (USD)</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">${stats.totalP.toLocaleString()}</div>
+                <div className="text-2xl font-bold">{formatCurrencyUsd(stats.totalP)}</div>
                 <p className="text-xs text-muted-foreground">Monto total autorizado para el ciclo</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Consumo Acumulado</CardTitle>
+                <CardTitle className="text-sm font-medium">Consumo Acumulado (USD)</CardTitle>
                 <TrendingUp className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">${stats.totalC.toLocaleString()}</div>
+                <div className="text-2xl font-bold">{formatCurrencyUsd(stats.totalC)}</div>
                 <div className="flex items-center pt-1">
                   <div className="w-full bg-secondary rounded-full h-2 mr-2">
                     <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(stats.porc, 100)}%` }} />
@@ -464,11 +470,11 @@ export default function PresupuestoPage() {
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Disponible</CardTitle>
+                <CardTitle className="text-sm font-medium">Disponible (USD)</CardTitle>
                 <TrendingDown className="h-4 w-4 text-emerald-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-emerald-600">${stats.totalD.toLocaleString()}</div>
+                <div className="text-2xl font-bold text-emerald-600">{formatCurrencyUsd(stats.totalD)}</div>
                 <p className="text-xs text-muted-foreground">Remanente para operaciones</p>
               </CardContent>
             </Card>
@@ -496,7 +502,7 @@ export default function PresupuestoPage() {
                     <XAxis dataKey="name" />
                     <YAxis />
                     <Tooltip 
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                      formatter={(value: number) => [formatCurrencyUsd(value), '']}
                       contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     />
                     <Legend />
@@ -519,7 +525,7 @@ export default function PresupuestoPage() {
                       <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">{p.AreaNombre}</p>
                         <p className="text-xs text-muted-foreground">
-                          Ejecución al {p.PorcentajeEjecucion.toFixed(1)}% - Disp: ${p.Disponible.toLocaleString()}
+                          Ejecución al {p.PorcentajeEjecucion.toFixed(1)}% - Disp: {formatCurrencyUsd(p.Disponible)}
                         </p>
                       </div>
                       <Badge variant={p.EstadoAlerta === 'Critico' ? 'destructive' : 'outline'}>
@@ -609,9 +615,9 @@ export default function PresupuestoPage() {
                     <TableRow>
                     <TableHead>Área</TableHead>
                     <TableHead>Período</TableHead>
-                    <TableHead className="text-right">Presupuesto</TableHead>
-                    <TableHead className="text-right">Consumo</TableHead>
-                    <TableHead className="text-right">Disponible</TableHead>
+                    <TableHead className="text-right">Presupuesto (USD)</TableHead>
+                    <TableHead className="text-right">Consumo (USD)</TableHead>
+                    <TableHead className="text-right">Disponible (USD)</TableHead>
                     <TableHead className="text-center">% Ejecución</TableHead>
                     <TableHead className="text-center">Estado</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
@@ -622,10 +628,10 @@ export default function PresupuestoPage() {
                     <TableRow key={p.IdPresupuesto}>
                       <TableCell className="font-medium">{p.AreaNombre}</TableCell>
                       <TableCell>{p.Mes ? `${p.Anio} - Mes ${p.Mes}` : `${p.Anio} - Anual`}</TableCell>
-                      <TableCell className="text-right font-semibold">${p.Presupuesto.toLocaleString()}</TableCell>
-                      <TableCell className="text-right font-medium text-primary">${p.Consumo.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-semibold">{formatCurrencyUsd(p.Presupuesto)}</TableCell>
+                      <TableCell className="text-right font-medium text-primary">{formatCurrencyUsd(p.Consumo)}</TableCell>
                       <TableCell className={`text-right font-medium ${p.Disponible < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                        ${p.Disponible.toLocaleString()}
+                        {formatCurrencyUsd(p.Disponible)}
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -694,17 +700,17 @@ export default function PresupuestoPage() {
             {selectedPresupuesto && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pb-4 border-b">
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">Monto Asignado</p>
-                  <p className="font-semibold text-lg">${selectedPresupuesto.Presupuesto.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mb-1">Monto Asignado (USD)</p>
+                  <p className="font-semibold text-lg">{formatCurrencyUsd(selectedPresupuesto.Presupuesto)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">Consumo Total</p>
-                  <p className="font-semibold text-lg text-primary">${selectedPresupuesto.Consumo.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mb-1">Consumo Total (USD)</p>
+                  <p className="font-semibold text-lg text-primary">{formatCurrencyUsd(selectedPresupuesto.Consumo)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">Disponible</p>
+                  <p className="text-xs text-muted-foreground mb-1">Disponible (USD)</p>
                   <p className={`font-semibold text-lg ${selectedPresupuesto.Disponible < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    ${selectedPresupuesto.Disponible.toLocaleString()}
+                    {formatCurrencyUsd(selectedPresupuesto.Disponible)}
                   </p>
                 </div>
                 <div>
@@ -736,8 +742,8 @@ export default function PresupuestoPage() {
                     <TableHeader className="bg-muted/50">
                       <TableRow>
                         <TableHead>Material / Grupo</TableHead>
-                        <TableHead className="text-right">Permitido</TableHead>
-                        <TableHead className="text-right">Ejecutado</TableHead>
+                        <TableHead className="text-right">Permitido (USD)</TableHead>
+                        <TableHead className="text-right">Ejecutado (USD)</TableHead>
                         <TableHead className="text-right">Progreso</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -749,8 +755,8 @@ export default function PresupuestoPage() {
                             <TableCell className="font-medium text-sm">
                               {d.MaterialNombre || d.GrupoArticulos || 'General'}
                             </TableCell>
-                            <TableCell className="text-right">${d.MontoPermitido.toLocaleString()}</TableCell>
-                            <TableCell className="text-right">${d.MontoEjecutado.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{formatCurrencyUsd(d.MontoPermitido)}</TableCell>
+                            <TableCell className="text-right">{formatCurrencyUsd(d.MontoEjecutado)}</TableCell>
                             <TableCell className="w-[120px] text-right">
                               <div className="flex items-center gap-2 justify-end">
                                 <span className="text-xs">{progreso.toFixed(1)}%</span>

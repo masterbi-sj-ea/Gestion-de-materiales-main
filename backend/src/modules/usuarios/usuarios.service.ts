@@ -6,6 +6,10 @@ export interface Usuario {
   Email: string;
   Activo: boolean;
   FechaCreacion: string;
+  RolPrincipal?: string | null;
+  IdRolPrincipal?: number | null;
+  AreaNombre?: string | null;
+  IdArea?: number | null;
 }
 
 export interface CrearUsuarioInput {

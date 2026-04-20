@@ -252,6 +252,13 @@ function formatStoredDateAsUtc(value: string | null | undefined): string {
   return new Intl.DateTimeFormat('es-NI', { timeZone: 'UTC' }).format(parsed);
 }
 
+function formatCurrencyUsd(value: number | null | undefined): string {
+  return `${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} USD`;
+}
+
 function getPaginationItems(page: number, totalPages: number): Array<number | 'ellipsis'> {
   if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
@@ -1757,7 +1764,7 @@ export default function DespachoPage() {
                                   {isEstadoDespachoAnulado(despacho.EstadoDespacho)
                                     ? 'Devolución anulada; el efecto sobre stock y presupuesto fue revertido.'
                                     : despacho.ReversaPresupuesto
-                                      ? `Monto revertido: $${Number(despacho.MontoReversionPresupuesto ?? 0).toLocaleString()}`
+                                      ? `Monto revertido: ${formatCurrencyUsd(despacho.MontoReversionPresupuesto)}`
                                       : 'Sin reversión presupuestaria'}
                                 </p>
                               )}
@@ -2461,7 +2468,7 @@ export default function DespachoPage() {
                           <p className="text-xs text-muted-foreground">
                             {devolucion.ItemsDevueltos} línea{devolucion.ItemsDevueltos !== 1 ? 's' : ''} · {isEstadoDespachoAnulado(devolucion.Estado)
                               ? 'Movimiento anulado'
-                              : `Reversión ${Number(devolucion.MontoReversionPresupuesto ?? 0).toFixed(2)}`}
+                              : `Reversión ${formatCurrencyUsd(devolucion.MontoReversionPresupuesto)}`}
                           </p>
                         </div>
                       )})

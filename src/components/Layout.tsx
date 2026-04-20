@@ -19,6 +19,7 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import type { Modulo } from '../contexts/PermisosContext';
+import { useAprobacionesRealtime } from '../contexts/AprobacionesRealtimeContext';
 import { useAuth } from '../hooks/useAuth';
 import { usePermisos } from '../contexts/PermisosContext';
 import { Button } from './ui/button';
@@ -150,6 +151,7 @@ function resolveSidebarMeta(modulo: Modulo): { group: SidebarGroupId; order: num
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const { cargandoPermisos, getModulosPermitidos, modulos } = usePermisos();
+  const { canAccessAprobaciones, pendingCount, attentionPulse, realtimeConnected } = useAprobacionesRealtime();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -278,6 +280,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {section.items.map((item) => {
             const isActive = normalizePath(item.path) === normalizePath(activeNavigationPath || '');
             const Icon = item.icon;
+            const isApprovalItem = String(item.id || '').trim().toLowerCase() === 'aprobaciones';
+            const showPendingBadge = isApprovalItem && canAccessAprobaciones && pendingCount > 0;
 
             return (
               <Link
@@ -303,7 +307,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     {item.label}
                   </span>
                 </span>
-                {isActive && (
+                {showPendingBadge && (
+                  <span
+                    className={`relative ml-2 inline-flex min-w-[2rem] items-center justify-center rounded-full border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${isActive
+                      ? 'border-[#E9D7FE] bg-white text-[#6941C6]'
+                      : 'border-[#D0D5DD] bg-[#F8FAFC] text-[#344054]'
+                      } ${attentionPulse ? 'shadow-[0_0_0_5px_rgba(127,86,217,0.10)]' : ''}`}
+                  >
+                    {pendingCount > 99 ? '99+' : pendingCount}
+                    {attentionPulse && (
+                      <span className="pointer-events-none absolute inset-0 -z-10 rounded-full bg-[#7F56D9]/15 animate-ping" />
+                    )}
+                  </span>
+                )}
+                {isActive && !showPendingBadge && (
                   <span className="absolute right-3 flex h-1.5 w-1.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#7F56D9] opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#6941C6]"></span>
@@ -341,6 +358,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {navigation.length} MÓD
         </span>
       </div>
+      
     </div>
   );
 

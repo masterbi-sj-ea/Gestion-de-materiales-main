@@ -6,6 +6,7 @@ export interface MovimientoInventario {
   NumeroArticulo: string;
   DescripcionArticulo: string;
   TipoMovimiento: string;
+  OrigenMovimiento: string;
   Cantidad: number;
   StockAnterior: number;
   StockNuevo: number;
@@ -15,6 +16,7 @@ export interface MovimientoInventario {
   Referencia: string | null;
   CodigoCuenta: string | null;
   AreaDestino: string | null;
+  TotalRows?: number;
 }
 
 export async function listarMovimientosInventario(filtros: {
@@ -23,6 +25,8 @@ export async function listarMovimientosInventario(filtros: {
   FechaInicio?: string;
   FechaFin?: string;
   Search?: string;
+  IdUsuario?: number;
+  OrigenMovimiento?: string;
   Page?: number;
   Limit?: number;
 }): Promise<MovimientoInventario[]> {
@@ -32,6 +36,8 @@ export async function listarMovimientosInventario(filtros: {
     FechaInicio: filtros.FechaInicio ?? null,
     FechaFin: filtros.FechaFin ?? null,
     Search: filtros.Search ?? null,
+    IdUsuario: filtros.IdUsuario ?? null,
+    OrigenMovimiento: filtros.OrigenMovimiento ?? null,
     Page: filtros.Page ?? null,
     Limit: filtros.Limit ?? null,
   });

@@ -13,6 +13,7 @@ import {
   crearMaterial,
   actualizarMaterial,
   eliminarMaterial,
+  reactivarMaterial,
   importarMaterialesYStock,
   MaterialImportRow,
 } from './materiales.service';
@@ -36,6 +37,28 @@ function buildDateFromParts(day: number, month: number, year: number): string | 
   const mm = String(month).padStart(2, '0');
   const dd = String(day).padStart(2, '0');
   return `${year}-${mm}-${dd}`;
+}
+
+function parseBooleanish(value: unknown): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'si' || normalized === 'sí';
+}
+
+function resolveSqlBusinessMessage(error: any): string | null {
+  const candidates = [
+    error?.message,
+    error?.originalError?.info?.message,
+    error?.precedingErrors?.[0]?.message,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate ?? '').trim();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return null;
 }
 
 function inferSnapshotDateFromFilename(filename: string): string | null {
@@ -129,6 +152,67 @@ function parseImportNumber(value: any): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+function normalizeImportDateValue(value: any): string | null {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) return null;
+    return buildDateFromParts(parsed.d, parsed.m, parsed.y);
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return buildDateFromParts(value.getDate(), value.getMonth() + 1, value.getFullYear());
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return buildDateFromParts(Number(isoMatch[3]), Number(isoMatch[2]), Number(isoMatch[1]));
+  }
+
+  const slashParts = raw.split('/').map((part) => part.trim());
+  if (slashParts.length === 3) {
+    const first = Number(slashParts[0]);
+    const second = Number(slashParts[1]);
+    const third = Number(slashParts[2]);
+
+    if (Number.isFinite(first) && Number.isFinite(second) && Number.isFinite(third)) {
+      if (slashParts[2].length <= 2) {
+        return buildDateFromParts(second, first, 2000 + third);
+      }
+
+      return buildDateFromParts(first, second, third);
+    }
+  }
+
+  const dashParts = raw.split('-').map((part) => part.trim());
+  if (dashParts.length === 3) {
+    const first = Number(dashParts[0]);
+    const second = Number(dashParts[1]);
+    const third = Number(dashParts[2]);
+
+    if (Number.isFinite(first) && Number.isFinite(second) && Number.isFinite(third)) {
+      if (dashParts[0].length === 4) {
+        return buildDateFromParts(third, second, first);
+      }
+
+      return buildDateFromParts(first, second, third);
+    }
+  }
+
+  const numericCandidate = Number(raw);
+  if (Number.isFinite(numericCandidate)) {
+    const parsed = XLSX.SSF.parse_date_code(numericCandidate);
+    if (!parsed) return null;
+    return buildDateFromParts(parsed.d, parsed.m, parsed.y);
+  }
+
+  return null;
+}
+
 function buildImportRows(records: any[]): MaterialImportRow[] {
   return (records || [])
     .map((r) => {
@@ -168,7 +252,7 @@ function buildImportRows(records: any[]): MaterialImportRow[] {
         EnStock: parseImportNumber(enStockRaw) ?? 0,
         UnidadMedida: normalizeCellValue(unidadMedida),
         GrupoArticulos: normalizeCellValue(grupoArticulos) || null,
-        UltimaFechaCompra: normalizeCellValue(ultimaFechaCompra) || null,
+        UltimaFechaCompra: normalizeImportDateValue(ultimaFechaCompra),
         UltimoPrecioCompra: parseImportNumber(ultimoPrecioRaw),
         UltimaMonedaCompra: normalizeCellValue(ultimaMonedaCompra) || null,
       } as MaterialImportRow;
@@ -380,9 +464,10 @@ export async function listarMaterialesController(_req: Request, res: Response) {
   }
 }
 
-export async function listarMaterialesConStockController(_req: Request, res: Response) {
+export async function listarMaterialesConStockController(req: Request, res: Response) {
   try {
-    const materiales = await listarMaterialesConStock();
+    const incluirInactivos = parseBooleanish(req.query?.incluirInactivos ?? req.query?.includeInactive);
+    const materiales = await listarMaterialesConStock({ incluirInactivos });
     return res.json(materiales);
   } catch (error: any) {
     console.error('Error en listarMaterialesConStockController', error);
@@ -643,6 +728,42 @@ export async function eliminarMaterialController(req: AuthRequest, res: Response
   }
 }
 
+export async function reactivarMaterialController(req: AuthRequest, res: Response) {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Id de material inválido' });
+  }
+
+  try {
+    const resultado = await reactivarMaterial(id);
+
+    try {
+      await registrarAuditoria(req.userId ?? null, 'REACTIVAR_MATERIAL', {
+        modulo: 'Materiales',
+        entidad: `Material #${id}`,
+        resultado: resultado?.Resultado ?? 'REACTIVADO',
+        idMaterial: id,
+      });
+    } catch (auditError) {
+      console.error('Error al registrar auditoría REACTIVAR_MATERIAL', auditError);
+    }
+
+    return res.status(200).json(resultado ?? { IdMaterial: id, Resultado: 'REACTIVADO' });
+  } catch (error: any) {
+    console.error('Error en reactivarMaterialController', error);
+    const businessMessage = resolveSqlBusinessMessage(error);
+    const lowerMessage = String(businessMessage ?? '').toLowerCase();
+
+    if (businessMessage) {
+      const status = lowerMessage.includes('ya existe otro material activo') ? 409 : 400;
+      return res.status(status).json({ message: businessMessage });
+    }
+
+    return res.status(500).json({ message: 'Error al reactivar material' });
+  }
+}
+
 export async function importarMaterialesController(req: AuthRequest, res: Response) {
   const file = (req as any).file as any | undefined;
 
@@ -670,6 +791,7 @@ export async function importarMaterialesController(req: AuthRequest, res: Respon
       records = XLSX.utils.sheet_to_json(sheet, {
         defval: '',
         raw: false,
+        dateNF: 'yyyy-mm-dd',
       }) as any[];
     } else {
       // Excel a veces exporta CSV en ANSI/Latin1; si lo leemos como UTF-8 puede aparecer mojibake ("N�mero", "Descripci�n").

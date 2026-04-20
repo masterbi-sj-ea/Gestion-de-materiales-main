@@ -83,6 +83,12 @@ interface CorteDetalleResponse {
   detalle: CorteDetalleLinea[];
 }
 
+interface CorteActionTarget {
+  id: number;
+  descripcion: string | null;
+  estado: string | null;
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) {
     return '-';
@@ -235,8 +241,16 @@ export default function CortesPage() {
   const [loadingDetalleId, setLoadingDetalleId] = useState<number | null>(null);
   const [processingSnapshot, setProcessingSnapshot] = useState(false);
   const [savingConteo, setSavingConteo] = useState(false);
+  const [processingApprove, setProcessingApprove] = useState(false);
+  const [processingApply, setProcessingApply] = useState(false);
   const [conteoDrafts, setConteoDrafts] = useState<Record<number, string>>({});
   const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  const [approvalTarget, setApprovalTarget] = useState<CorteActionTarget | null>(null);
+  const [applyTarget, setApplyTarget] = useState<CorteActionTarget | null>(null);
+  const [observacionRevisionDraft, setObservacionRevisionDraft] = useState('');
+  const [observacionAplicacionDraft, setObservacionAplicacionDraft] = useState('');
   const { token, user } = useAuth();
   const { getPermisosModulo } = usePermisos();
 
@@ -244,7 +258,9 @@ export default function CortesPage() {
   const canView = !!permisosModulo?.puedeVer;
   const canCreate = !!permisosModulo?.puedeCrear;
   const canEdit = !!permisosModulo?.puedeEditar;
+  const canApprove = !!permisosModulo?.puedeAprobar;
   const canDelete = !!permisosModulo?.puedeEliminar;
+  const canApply = canDelete;
   const total = cortes.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -256,6 +272,19 @@ export default function CortesPage() {
     setFechaFin('');
     setAmbito('STOCK');
     setEsMaximo(true);
+  };
+
+  const buildActionTarget = (id: number, descripcion?: string | null, estado?: string | null): CorteActionTarget => ({
+    id,
+    descripcion: descripcion ?? null,
+    estado: estado ?? null,
+  });
+
+  const syncDetalleState = (detalle: CorteDetalleResponse) => {
+    setSelectedCorteDetalle(detalle);
+    seedConteoState(detalle.detalle);
+    setObservacionRevisionDraft(detalle.cabecera?.observacionRevision ?? '');
+    setObservacionAplicacionDraft(detalle.cabecera?.observacionAplicacion ?? '');
   };
 
   const seedConteoState = (detalle: CorteDetalleLinea[]) => {
@@ -318,8 +347,15 @@ export default function CortesPage() {
 
   const recargarDetalleCorte = async (idCorte: number) => {
     const detalle = await fetchDetalleCorte(idCorte);
-    setSelectedCorteDetalle(detalle);
-    seedConteoState(detalle.detalle);
+    syncDetalleState(detalle);
+  };
+
+  const refreshAfterOperacion = async (idCorte: number) => {
+    await cargarCortes();
+
+    if (detalleOpen && selectedCorteId === idCorte) {
+      await recargarDetalleCorte(idCorte);
+    }
   };
 
   useEffect(() => {
@@ -432,8 +468,7 @@ export default function CortesPage() {
 
     try {
       const detalle = await fetchDetalleCorte(corte.id);
-      setSelectedCorteDetalle(detalle);
-      seedConteoState(detalle.detalle);
+      syncDetalleState(detalle);
     } catch (error) {
       console.error('Error al cargar detalle del corte', error);
       sileo.error({ title: 'Error', description: error instanceof Error ? error.message : 'No se pudo cargar el detalle del corte.' });
@@ -474,6 +509,14 @@ export default function CortesPage() {
       return;
     }
 
+    await ejecutarCargarSnapshot(selectedCorteId);
+  };
+
+  const ejecutarCargarSnapshot = async (idCorte: number) => {
+    if (!token) {
+      return;
+    }
+
     if (!canCreate) {
       sileo.error({ title: 'Sin permiso', description: 'No tienes permiso para cargar snapshot.' });
       return;
@@ -481,7 +524,7 @@ export default function CortesPage() {
 
     setProcessingSnapshot(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/cortes/${selectedCorteId}/snapshot`, {
+      const resp = await fetch(`${API_BASE_URL}/cortes/${idCorte}/snapshot`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -493,10 +536,7 @@ export default function CortesPage() {
         throw new Error(payload?.message || 'No se pudo cargar el snapshot del corte.');
       }
 
-      await Promise.all([
-        cargarCortes(),
-        recargarDetalleCorte(selectedCorteId),
-      ]);
+      await refreshAfterOperacion(idCorte);
 
       sileo.success({
         title: 'Snapshot cargado',
@@ -567,10 +607,7 @@ export default function CortesPage() {
         throw new Error(payload?.message || 'No se pudo registrar el conteo del corte.');
       }
 
-      await Promise.all([
-        cargarCortes(),
-        recargarDetalleCorte(selectedCorteId),
-      ]);
+      await refreshAfterOperacion(selectedCorteId);
 
       sileo.success({
         title: 'Conteo registrado',
@@ -586,12 +623,135 @@ export default function CortesPage() {
     }
   };
 
+  const abrirDialogoAprobacion = (target: CorteActionTarget) => {
+    setApprovalTarget(target);
+    setObservacionRevisionDraft(
+      target.id === selectedCorteId
+        ? (selectedCorteDetalle?.cabecera?.observacionRevision ?? '')
+        : '',
+    );
+    setApprovalDialogOpen(true);
+  };
+
+  const abrirDialogoAplicacion = (target: CorteActionTarget) => {
+    setApplyTarget(target);
+    setObservacionAplicacionDraft(
+      target.id === selectedCorteId
+        ? (selectedCorteDetalle?.cabecera?.observacionAplicacion ?? '')
+        : '',
+    );
+    setApplyDialogOpen(true);
+  };
+
+  const handleAprobarCorte = async () => {
+    if (!token || !approvalTarget) {
+      return;
+    }
+
+    if (!canApprove) {
+      sileo.error({ title: 'Sin permiso', description: 'No tienes permiso para aprobar cortes.' });
+      return;
+    }
+
+    setProcessingApprove(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/cortes/${approvalTarget.id}/aprobar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          observacionRevision: observacionRevisionDraft.trim() || null,
+        }),
+      });
+
+      const payload = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        throw new Error(payload?.message || 'No se pudo aprobar el corte.');
+      }
+
+      await refreshAfterOperacion(approvalTarget.id);
+      setApprovalDialogOpen(false);
+      setApprovalTarget(null);
+
+      sileo.success({
+        title: 'Corte aprobado',
+        description: payload?.nuevoEstado
+          ? `El corte cambió a estado ${String(payload.nuevoEstado).replace(/_/g, ' ').toLowerCase()}.`
+          : 'El corte fue aprobado correctamente.',
+      });
+    } catch (error) {
+      console.error('Error al aprobar el corte', error);
+      sileo.error({ title: 'Error', description: error instanceof Error ? error.message : 'No se pudo aprobar el corte.' });
+    } finally {
+      setProcessingApprove(false);
+    }
+  };
+
+  const handleAplicarAjuste = async () => {
+    if (!token || !applyTarget) {
+      return;
+    }
+
+    if (!canApply) {
+      sileo.error({ title: 'Sin permiso', description: 'No tienes permiso para aplicar ajustes.' });
+      return;
+    }
+
+    setProcessingApply(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/cortes/${applyTarget.id}/aplicar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          observacionAplicacion: observacionAplicacionDraft.trim() || null,
+        }),
+      });
+
+      const payload = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        throw new Error(payload?.message || 'No se pudo aplicar el ajuste del corte.');
+      }
+
+      await refreshAfterOperacion(applyTarget.id);
+      setApplyDialogOpen(false);
+      setApplyTarget(null);
+
+      sileo.success({
+        title: 'Ajuste aplicado',
+        description: payload?.lineasAjustadas != null
+          ? `Se ajustaron ${payload.lineasAjustadas} líneas del corte.`
+          : 'El ajuste del corte fue aplicado correctamente.',
+      });
+    } catch (error) {
+      console.error('Error al aplicar ajuste del corte', error);
+      sileo.error({ title: 'Error', description: error instanceof Error ? error.message : 'No se pudo aplicar el ajuste.' });
+    } finally {
+      setProcessingApply(false);
+    }
+  };
+
   const cortesPagina = cortes.slice((page - 1) * pageSize, page * pageSize);
   const selectedEstado = normalizeEstadoCorte(selectedCorteDetalle?.cabecera?.estado);
   const selectedEstadoBadge = getEstadoCorteBadgeProps(selectedEstado);
   const puedeCargarSnapshot = canCreate && selectedEstado === 'BORRADOR';
   const puedeRegistrarConteo = canEdit && selectedEstado === 'EN_CONTEO';
-  const lineasContadas = selectedCorteDetalle?.detalle.filter((linea) => (conteoDrafts[linea.idDetalleCorte] ?? '').trim().length > 0).length ?? 0;
+  const puedeAprobarSeleccionado = canApprove && selectedEstado === 'EN_REVISION';
+  const puedeAplicarSeleccionado = canApply && selectedEstado === 'APROBADO';
+  const selectedActionTarget = selectedCorteDetalle?.cabecera
+    ? buildActionTarget(
+        selectedCorteDetalle.cabecera.idCorte,
+        selectedCorteDetalle.cabecera.descripcion,
+        selectedCorteDetalle.cabecera.estado,
+      )
+    : null;
+  const lineasContadas = selectedCorteDetalle?.detalle.filter((linea) => linea.conteoFisico !== null).length ?? 0;
+  const lineasCapturadasEnPantalla = selectedCorteDetalle?.detalle.filter((linea) => (conteoDrafts[linea.idDetalleCorte] ?? '').trim().length > 0).length ?? 0;
+  const valorTotalDiferencia = selectedCorteDetalle?.detalle.reduce((sum, linea) => sum + (linea.valorDiferencia ?? 0), 0) ?? 0;
 
   if (!canView) {
     return (
@@ -782,6 +942,11 @@ export default function CortesPage() {
                   cortesPagina.map((corte) => {
                     const estadoBadge = getEstadoCorteBadgeProps(corte.estado);
                     const isOpening = loadingDetalleId === corte.id;
+                    const estadoNormalizado = normalizeEstadoCorte(corte.estado);
+                    const esBorrador = estadoNormalizado === 'BORRADOR';
+                    const esEnConteo = estadoNormalizado === 'EN_CONTEO';
+                    const esEnRevision = estadoNormalizado === 'EN_REVISION';
+                    const esAprobado = estadoNormalizado === 'APROBADO';
 
                     return (
                       <TableRow key={corte.id}>
@@ -816,6 +981,40 @@ export default function CortesPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
+                            {esBorrador && canCreate && (
+                              <Button
+                                size="sm"
+                                onClick={() => { void ejecutarCargarSnapshot(corte.id); }}
+                                disabled={processingSnapshot}
+                              >
+                                Cargar snapshot
+                              </Button>
+                            )}
+                            {esEnConteo && canEdit && (
+                              <Button
+                                size="sm"
+                                onClick={() => { void abrirDetalleCorte(corte); }}
+                                disabled={loadingDetalleId !== null}
+                              >
+                                Abrir conteo
+                              </Button>
+                            )}
+                            {esEnRevision && canApprove && (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirDialogoAprobacion(buildActionTarget(corte.id, corte.descripcion, corte.estado))}
+                              >
+                                Aprobar
+                              </Button>
+                            )}
+                            {esAprobado && canApply && (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirDialogoAplicacion(buildActionTarget(corte.id, corte.descripcion, corte.estado))}
+                              >
+                                Aplicar ajuste
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -825,7 +1024,7 @@ export default function CortesPage() {
                             >
                               {isOpening ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
                             </Button>
-                            {canEdit && (
+                            {canEdit && esBorrador && (
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -835,7 +1034,7 @@ export default function CortesPage() {
                                 <Edit className="w-4 h-4" />
                               </Button>
                             )}
-                            {canDelete && (
+                            {canDelete && esBorrador && (
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -867,6 +1066,8 @@ export default function CortesPage() {
             setLoadingDetalleId(null);
             setConteoDrafts({});
             setComentarioDrafts({});
+            setObservacionRevisionDraft('');
+            setObservacionAplicacionDraft('');
           }
         }}
       >
@@ -877,7 +1078,7 @@ export default function CortesPage() {
               {selectedCorteDetalle?.cabecera ? `Corte #${selectedCorteDetalle.cabecera.idCorte}` : 'Detalle de corte'}
             </DialogTitle>
             <DialogDescription>
-              Flujo mínimo de operación: cargar snapshot y capturar conteo físico.
+              Flujo operativo del corte por estado: conteo, revisión, aprobación y aplicación del ajuste.
             </DialogDescription>
           </DialogHeader>
 
@@ -888,7 +1089,7 @@ export default function CortesPage() {
             </div>
           ) : selectedCorteDetalle?.cabecera ? (
             <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
-              <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <Card>
                   <CardContent className="pt-4">
                     <div className="text-xs uppercase tracking-wide text-muted-foreground">Estado</div>
@@ -899,8 +1100,14 @@ export default function CortesPage() {
                 </Card>
                 <Card>
                   <CardContent className="pt-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Líneas</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Total líneas</div>
                     <div className="mt-2 text-2xl font-semibold text-slate-900">{selectedCorteDetalle.cabecera.totalLineas}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Líneas contadas</div>
+                    <div className="mt-2 text-2xl font-semibold text-slate-900">{lineasContadas}</div>
                   </CardContent>
                 </Card>
                 <Card>
@@ -911,8 +1118,10 @@ export default function CortesPage() {
                 </Card>
                 <Card>
                   <CardContent className="pt-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Pendientes</div>
-                    <div className="mt-2 text-2xl font-semibold text-slate-900">{selectedCorteDetalle.cabecera.lineasPendientes}</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Valor total diferencia</div>
+                    <div className={`mt-2 text-2xl font-semibold ${valorTotalDiferencia > 0 ? 'text-emerald-700' : valorTotalDiferencia < 0 ? 'text-red-700' : 'text-slate-900'}`}>
+                      {formatNumber(valorTotalDiferencia)}
+                    </div>
                   </CardContent>
                 </Card>
               </div>
@@ -972,7 +1181,7 @@ export default function CortesPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
                     <div>
                       {puedeRegistrarConteo
-                        ? `Líneas con conteo capturado en pantalla: ${lineasContadas} de ${selectedCorteDetalle.detalle.length}`
+                        ? `Líneas con conteo capturado en pantalla: ${lineasCapturadasEnPantalla} de ${selectedCorteDetalle.detalle.length}`
                         : `Líneas del corte: ${selectedCorteDetalle.detalle.length}`}
                     </div>
                     {puedeCargarSnapshot && (
@@ -1078,6 +1287,50 @@ export default function CortesPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {puedeAprobarSeleccionado && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Revisión y aprobación</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="observacion-revision">Observación de revisión</Label>
+                      <Textarea
+                        id="observacion-revision"
+                        value={observacionRevisionDraft}
+                        onChange={(event) => setObservacionRevisionDraft(event.target.value)}
+                        placeholder="Observación opcional para aprobar el corte"
+                      />
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Este corte está en revisión. Si todo está correcto, puedes aprobarlo desde aquí.
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {puedeAplicarSeleccionado && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Aplicación de ajuste</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      Este corte ya fue aprobado. La siguiente acción aplicará los movimientos de ajuste al inventario y luego quedará solo de consulta.
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="observacion-aplicacion">Observación de aplicación</Label>
+                      <Textarea
+                        id="observacion-aplicacion"
+                        value={observacionAplicacionDraft}
+                        onChange={(event) => setObservacionAplicacionDraft(event.target.value)}
+                        placeholder="Observación opcional para aplicar el ajuste"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -1104,6 +1357,112 @@ export default function CortesPage() {
                 )}
               </Button>
             )}
+            {puedeAprobarSeleccionado && selectedActionTarget && (
+              <Button onClick={() => abrirDialogoAprobacion(selectedActionTarget)} disabled={processingApprove}>
+                Aprobar
+              </Button>
+            )}
+            {puedeAplicarSeleccionado && selectedActionTarget && (
+              <Button onClick={() => abrirDialogoAplicacion(selectedActionTarget)} disabled={processingApply}>
+                Aplicar ajuste
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={approvalDialogOpen}
+        onOpenChange={(open) => {
+          setApprovalDialogOpen(open);
+          if (!open) {
+            setApprovalTarget(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Aprobar corte</DialogTitle>
+            <DialogDescription>
+              {approvalTarget ? `Confirmar aprobación del corte #${approvalTarget.id}.` : 'Confirmar aprobación del corte.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="approval-dialog-note">Observación de revisión</Label>
+              <Textarea
+                id="approval-dialog-note"
+                value={observacionRevisionDraft}
+                onChange={(event) => setObservacionRevisionDraft(event.target.value)}
+                placeholder="Observación opcional"
+              />
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Esta acción mueve el corte a estado aprobado y habilita la aplicación del ajuste.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setApprovalDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleAprobarCorte} disabled={processingApprove}>
+              {processingApprove ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Aprobando...
+                </>
+              ) : (
+                'Aprobar'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={applyDialogOpen}
+        onOpenChange={(open) => {
+          setApplyDialogOpen(open);
+          if (!open) {
+            setApplyTarget(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Aplicar ajuste</DialogTitle>
+            <DialogDescription>
+              {applyTarget ? `Confirmar aplicación del ajuste para el corte #${applyTarget.id}.` : 'Confirmar aplicación del ajuste.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+              Esta es una confirmación fuerte. Al aplicar el ajuste, el corte quedará solo de consulta y no se podrá volver a aprobar ni volver a aplicar.
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="apply-dialog-note">Observación de aplicación</Label>
+              <Textarea
+                id="apply-dialog-note"
+                value={observacionAplicacionDraft}
+                onChange={(event) => setObservacionAplicacionDraft(event.target.value)}
+                placeholder="Observación opcional"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setApplyDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleAplicarAjuste} disabled={processingApply}>
+              {processingApply ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Aplicando...
+                </>
+              ) : (
+                'Confirmar aplicación'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

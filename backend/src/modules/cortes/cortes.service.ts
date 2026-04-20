@@ -429,6 +429,56 @@ export async function registrarConteoCorte(
   throw lastError;
 }
 
+export async function aprobarCorte(
+  idCorte: number,
+  idUsuarioAprueba: number,
+  observacionRevision?: string | null,
+): Promise<CorteOperacionResultado> {
+  const result = await executeStoredProcedureWithVariants(
+    ['sp_AprobarCorteStock', 'sp_AprobarCorte'],
+    [
+      { IdCorte: idCorte, IdUsuarioAprueba: idUsuarioAprueba, ObservacionRevision: observacionRevision ?? null },
+      { IdCorte: idCorte, IdUsuarioRevision: idUsuarioAprueba, ObservacionRevision: observacionRevision ?? null },
+      { IdCorte: idCorte, IdUsuarioAprueba: idUsuarioAprueba, ComentarioRevision: observacionRevision ?? null },
+      { IdCorte: idCorte, IdUsuario: idUsuarioAprueba, ObservacionRevision: observacionRevision ?? null },
+      { IdCorte: idCorte, IdUsuario: idUsuarioAprueba, Observacion: observacionRevision ?? null },
+      { IdCorteStock: idCorte, IdUsuarioAprueba: idUsuarioAprueba, ObservacionRevision: observacionRevision ?? null },
+      { IdCorteStock: idCorte, IdUsuario: idUsuarioAprueba, Observacion: observacionRevision ?? null },
+      { IdCorte: idCorte, IdUsuarioAprueba: idUsuarioAprueba },
+      { IdCorte: idCorte, IdUsuario: idUsuarioAprueba },
+      { IdCorteStock: idCorte, IdUsuario: idUsuarioAprueba },
+    ],
+  );
+
+  const row = (result as any)?.recordset?.[0] ?? (result as any)?.recordsets?.[0]?.[0] ?? null;
+  return normalizeOperacionResultado(row, idCorte);
+}
+
+export async function aplicarAjusteCorte(
+  idCorte: number,
+  idUsuarioAplicacion: number,
+  observacionAplicacion?: string | null,
+): Promise<CorteOperacionResultado> {
+  const result = await executeStoredProcedureWithVariants(
+    ['sp_AplicarAjusteCorteStock', 'sp_AplicarAjusteCorte'],
+    [
+      { IdCorte: idCorte, IdUsuarioAplicacion: idUsuarioAplicacion, ObservacionAplicacion: observacionAplicacion ?? null },
+      { IdCorte: idCorte, IdUsuarioAplica: idUsuarioAplicacion, ObservacionAplicacion: observacionAplicacion ?? null },
+      { IdCorte: idCorte, IdUsuarioAplicacion: idUsuarioAplicacion, ComentarioAplicacion: observacionAplicacion ?? null },
+      { IdCorte: idCorte, IdUsuario: idUsuarioAplicacion, ObservacionAplicacion: observacionAplicacion ?? null },
+      { IdCorte: idCorte, IdUsuario: idUsuarioAplicacion, Observacion: observacionAplicacion ?? null },
+      { IdCorteStock: idCorte, IdUsuarioAplicacion: idUsuarioAplicacion, ObservacionAplicacion: observacionAplicacion ?? null },
+      { IdCorteStock: idCorte, IdUsuario: idUsuarioAplicacion, Observacion: observacionAplicacion ?? null },
+      { IdCorte: idCorte, IdUsuarioAplicacion: idUsuarioAplicacion },
+      { IdCorte: idCorte, IdUsuario: idUsuarioAplicacion },
+      { IdCorteStock: idCorte, IdUsuario: idUsuarioAplicacion },
+    ],
+  );
+
+  const row = (result as any)?.recordset?.[0] ?? (result as any)?.recordsets?.[0]?.[0] ?? null;
+  return normalizeOperacionResultado(row, idCorte);
+}
+
 export async function actualizarCorte(idCorte: number, input: CrearCorteInput): Promise<void> {
   await callSpOne<null>('sp_ActualizarCorteStock', {
     IdCorte: idCorte,

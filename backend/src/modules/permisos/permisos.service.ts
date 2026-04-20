@@ -24,6 +24,47 @@ export interface PermisoAccionesModulo {
   puedeEliminar: boolean;
 }
 
+function normalizeRoleKey(value: string | null | undefined): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function isProductionChiefRole(value: string | null | undefined): boolean {
+  return normalizeRoleKey(value) === 'jefe de produccion';
+}
+
+function mergePermisosModulo(
+  base: PermisoAccionesModulo,
+  extra: Partial<PermisoAccionesModulo>,
+): PermisoAccionesModulo {
+  return {
+    puedeVer: base.puedeVer || !!extra.puedeVer,
+    puedeCrear: base.puedeCrear || !!extra.puedeCrear,
+    puedeEditar: base.puedeEditar || !!extra.puedeEditar,
+    puedeAprobar: base.puedeAprobar || !!extra.puedeAprobar,
+    puedeEliminar: base.puedeEliminar || !!extra.puedeEliminar,
+  };
+}
+
+function buildRolePermissionOverride(
+  normalizedRoles: string[],
+  normalizedModulo: string,
+): Partial<PermisoAccionesModulo> {
+  if (normalizedModulo === 'aprobaciones' && normalizedRoles.some((rol) => isProductionChiefRole(rol))) {
+    return {
+      puedeVer: true,
+      puedeAprobar: true,
+    };
+  }
+
+  return {};
+}
+
 export async function obtenerPermisosPorRol(idRol: number): Promise<PermisoModulo[]> {
   const rows = await callSpMany<PermisoModulo>('sp_ObtenerPermisosPorRol', { IdRol: idRol });
   return rows;
@@ -37,7 +78,7 @@ export async function obtenerPermisosModuloPorRoles(
   const normalizedRoles = Array.from(
     new Set(
       (nombresRol || [])
-        .map((rol) => String(rol || '').trim().toLowerCase())
+        .map((rol) => normalizeRoleKey(rol))
         .filter(Boolean),
     ),
   );
@@ -48,23 +89,17 @@ export async function obtenerPermisosModuloPorRoles(
 
   const roles = await listarRoles();
   const idsRol = roles
-    .filter((rol) => normalizedRoles.includes(String(rol.Nombre || '').trim().toLowerCase()))
+    .filter((rol) => normalizedRoles.includes(normalizeRoleKey(rol.Nombre)))
     .map((rol) => rol.IdRol);
 
-  if (idsRol.length === 0) {
-    return null;
-  }
-
-  const permisosPorRol = await Promise.all(idsRol.map((idRol) => obtenerPermisosPorRol(idRol)));
+  const permisosPorRol = idsRol.length > 0
+    ? await Promise.all(idsRol.map((idRol) => obtenerPermisosPorRol(idRol)))
+    : [];
   const permisosModulo = permisosPorRol
     .flat()
     .filter((permiso) => String(permiso.Codigo || '').trim().toLowerCase() === normalizedModulo);
 
-  if (permisosModulo.length === 0) {
-    return null;
-  }
-
-  return permisosModulo.reduce<PermisoAccionesModulo>(
+  const permisosBase = permisosModulo.reduce<PermisoAccionesModulo>(
     (acc, permiso) => ({
       puedeVer: acc.puedeVer || !!permiso.PuedeVer,
       puedeCrear: acc.puedeCrear || !!permiso.PuedeCrear,
@@ -80,6 +115,17 @@ export async function obtenerPermisosModuloPorRoles(
       puedeEliminar: false,
     },
   );
+
+  const permisosFinales = mergePermisosModulo(
+    permisosBase,
+    buildRolePermissionOverride(normalizedRoles, normalizedModulo),
+  );
+
+  if (!Object.values(permisosFinales).some(Boolean)) {
+    return null;
+  }
+
+  return permisosFinales;
 }
 
 export interface PermisoRolInput {

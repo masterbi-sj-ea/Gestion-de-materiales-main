@@ -3,7 +3,17 @@ import { listarMovimientosInventario } from './kardex.service';
 
 export async function listarMovimientosController(req: Request, res: Response) {
   try {
-    const { idMaterial, tipoMovimiento, fechaInicio, fechaFin, search, page, limit } = req.query;
+    const {
+      idMaterial,
+      tipoMovimiento,
+      fechaInicio,
+      fechaFin,
+      search,
+      idUsuario,
+      origenMovimiento,
+      page,
+      limit,
+    } = req.query;
 
     const pageNumber = page ? Number(page) : undefined;
     const limitNumber = limit ? Number(limit) : undefined;
@@ -14,6 +24,8 @@ export async function listarMovimientosController(req: Request, res: Response) {
       FechaInicio: fechaInicio ? String(fechaInicio) : undefined,
       FechaFin: fechaFin ? String(fechaFin) : undefined,
       Search: search ? String(search) : undefined,
+      IdUsuario: idUsuario ? Number(idUsuario) : undefined,
+      OrigenMovimiento: origenMovimiento ? String(origenMovimiento) : undefined,
       Page: pageNumber && Number.isFinite(pageNumber) ? pageNumber : undefined,
       Limit: limitNumber && Number.isFinite(limitNumber) ? limitNumber : undefined,
     };

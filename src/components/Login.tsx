@@ -17,6 +17,7 @@ import { sileo as toast } from 'sileo';
 import './Login.css';
 
 export default function Login() {
+  const [viewMode, setViewMode] = useState<'operativo' | 'presentacion'>('operativo');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -36,33 +37,6 @@ export default function Login() {
       });
     }
   };
-
-  const demoUsers = [
-    {
-      email: 'admin@empresa.com',
-      password: 'admin123',
-      role: 'Administrador',
-      tone: 'amber',
-    },
-    {
-      email: 'solicitante@empresa.com',
-      password: 'sol123',
-      role: 'Solicitante',
-      tone: 'sky',
-    },
-    {
-      email: 'jefe@empresa.com',
-      password: 'jefe123',
-      role: 'Jefe de Producción',
-      tone: 'emerald',
-    },
-    {
-      email: 'bodega@empresa.com',
-      password: 'bodega123',
-      role: 'Encargado de Bodega',
-      tone: 'violet',
-    },
-  ];
 
   const featureHighlights = [
     {
@@ -85,7 +59,7 @@ export default function Login() {
   const mobileModules = ['Stock', 'Solicitudes', 'Despacho', 'Kardex'];
 
   return (
-    <div className="login-page">
+    <div className={`login-page ${viewMode === 'presentacion' ? 'login-page--presentacion' : 'login-page--operativo'}`}>
       <div className="login-orb login-orb-one" />
       <div className="login-orb login-orb-two" />
       <div className="login-orb login-orb-three" />
@@ -152,7 +126,29 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="login-status-badge">Sistema activo</div>
+            <div className="login-form-top-actions">
+              <div className="login-view-mode-toggle" role="tablist" aria-label="Modo de vista de inicio de sesión">
+                <button
+                  type="button"
+                  className={`login-view-mode-btn ${viewMode === 'operativo' ? 'is-active' : ''}`}
+                  onClick={() => setViewMode('operativo')}
+                  role="tab"
+                  aria-selected={viewMode === 'operativo'}
+                >
+                  Operativo
+                </button>
+                <button
+                  type="button"
+                  className={`login-view-mode-btn ${viewMode === 'presentacion' ? 'is-active' : ''}`}
+                  onClick={() => setViewMode('presentacion')}
+                  role="tab"
+                  aria-selected={viewMode === 'presentacion'}
+                >
+                  Presentación
+                </button>
+              </div>
+              <div className="login-status-badge">Sistema activo</div>
+            </div>
           </div>
 
           <div className="login-mobile-showcase">
@@ -184,11 +180,16 @@ export default function Login() {
           </div>
 
           <div className="login-form-intro">
-            <strong>Sistema de Gestion de Materiales</strong>
-            <p>
-              Ingresa tus credenciales para continuar con inventario,
-              aprobaciones y despacho.
-            </p>
+            <div className="login-form-intro-icon">
+              <ShieldCheck size={18} />
+            </div>
+            <div className="login-form-intro-copy">
+              <strong>Sistema de Gestion de Materiales</strong>
+              <p>
+                Ingresa tus credenciales para continuar con inventario,
+                aprobaciones y despacho.
+              </p>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="login-form">
@@ -200,6 +201,8 @@ export default function Login() {
                   id="email"
                   type="email"
                   placeholder="usuario@empresa.com"
+                  autoComplete="username"
+                  inputMode="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -216,6 +219,7 @@ export default function Login() {
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -235,7 +239,7 @@ export default function Login() {
             </div>
 
             {error && (
-              <div className="login-error">
+              <div className="login-error" role="alert" aria-live="polite">
                 <AlertCircle size={16} />
                 <span>{error}</span>
               </div>
@@ -247,31 +251,9 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="login-demo-header">
-            <span />
-            <p>Usuarios de demostracion</p>
-            <span />
-          </div>
-
-          <div className="login-demo-grid">
-            {demoUsers.map((user) => (
-              <button
-                key={user.email}
-                type="button"
-                className={`login-demo-card login-demo-${user.tone}`}
-                onClick={() => {
-                  setEmail(user.email);
-                  setPassword(user.password);
-                }}
-              >
-                <div className="login-demo-top">
-                  <strong>{user.role}</strong>
-                  <ArrowRight size={15} />
-                </div>
-                <div className="login-demo-email">{user.email}</div>
-                <div className="login-demo-password">{user.password}</div>
-              </button>
-            ))}
+          <div className="login-form-note">
+            <ShieldCheck size={15} />
+            <p>Acceso protegido y vista inicial segun tu perfil.</p>
           </div>
         </section>
       </div>

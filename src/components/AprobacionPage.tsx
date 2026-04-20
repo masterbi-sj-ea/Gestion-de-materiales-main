@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { usePermisos } from '../contexts/PermisosContext';
+import { useAprobacionesRealtime, type ApprovalSoundTone } from '../contexts/AprobacionesRealtimeContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { sileo } from 'sileo';
 import { Button } from './ui/button';
@@ -9,7 +9,6 @@ import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import {
   Pagination,
   PaginationContent,
@@ -23,13 +22,18 @@ import {
   CheckCircle,
   XCircle,
   Eye,
+  BellOff,
+  BellRing,
   Clock,
   AlertCircle,
+  Radio,
   DollarSign,
   FileText,
   Package,
   Search,
   RefreshCw,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import {
@@ -588,8 +592,25 @@ function shouldBlockBudgetApproval(solicitud: Pick<Solicitud, 'presupuestoBloque
 }
 
 export default function AprobacionPage() {
-  const { token, user } = useAuth();
-  const { getPermisosModulo } = usePermisos();
+  const { token } = useAuth();
+  const {
+    pendingCount,
+    realtimeConnected,
+    lastEventAt,
+    latestPendingRequest,
+    eventVersion,
+    canUseBrowserNotifications,
+    notificationPermission,
+    pushNotificationsEnabled,
+    pushNotificationsBusy,
+    pushNotificationsReason,
+    enablePushNotifications,
+    soundEnabled,
+    setSoundEnabled,
+    soundTone,
+    setSoundTone,
+    canApproveAprobaciones,
+  } = useAprobacionesRealtime();
   const pageSize = 8;
   const [pendientes, setPendientes] = useState<Solicitud[]>([]);
   const [aprobadas, setAprobadas] = useState<Solicitud[]>([]);
@@ -611,9 +632,7 @@ export default function AprobacionPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('pendientes');
   const [pages, setPages] = useState<PaginationByTab>({ pendientes: 1, aprobadas: 1, rechazadas: 1 });
   const isSearchMode = searchTerm.trim().length > 0;
-
-  const permisosModulo = user ? getPermisosModulo(user.role, 'aprobaciones') : null;
-  const puedeAprobar = !!permisosModulo?.puedeAprobar;
+  const puedeAprobar = canApproveAprobaciones;
 
   const mapSolicitud = (s: any): Solicitud => ({
     id: String(s.IdSolicitud ?? s.id ?? ''),
@@ -695,8 +714,8 @@ export default function AprobacionPage() {
     };
   };
 
-  const cargarSolicitudes = async (mode: LoadMode, signal?: AbortSignal) => {
-    if (!token) return;
+  const cargarSolicitudes = async (mode: LoadMode, signal?: AbortSignal): Promise<{ pendingTotal: number } | null> => {
+    if (!token) return null;
     setCargando(true);
     try {
       const endpoints = mode === 'full'
@@ -730,6 +749,7 @@ export default function AprobacionPage() {
       const pendingData = pendingPayload.data.map(mapSolicitud);
       const approvedData = approvedPayload.data.map(mapSolicitud);
       const rejectedData = rejectedPayload.data.map(mapSolicitud);
+        const pendingTotal = mode === 'full' ? pendingData.length : pendingPayload.total;
 
       setPendientes(pendingData);
       setAprobadas(approvedData);
@@ -769,11 +789,13 @@ export default function AprobacionPage() {
       }
 
       setLoadMode(mode);
+      return { pendingTotal };
     } catch (error) {
       if (isAbortError(error)) {
-        return;
+        return null;
       }
       console.error('Error al cargar aprobaciones', error);
+      return null;
     } finally {
       if (!signal?.aborted) {
         setCargando(false);
@@ -814,6 +836,14 @@ export default function AprobacionPage() {
 
     return () => controller.abort();
   }, [token, isSearchMode, loadMode]);
+
+  useEffect(() => {
+    if (!token || eventVersion === 0) {
+      return;
+    }
+
+    void cargarSolicitudes(isSearchMode ? 'full' : loadMode);
+  }, [eventVersion, isSearchMode, loadMode, token]);
 
   useEffect(() => {
     if (!selectedSolicitud || !token) return;
@@ -870,7 +900,7 @@ export default function AprobacionPage() {
     cargarDetalle();
 
     return () => controller.abort();
-  }, [selectedSolicitud, token]);
+  }, [eventVersion, selectedSolicitud, token]);
 
   const handleOpenModal = (solicitud: Solicitud, action: 'aprobar' | 'rechazar' | 'ver') => {
     setSelectedSolicitud(solicitud);
@@ -951,7 +981,11 @@ export default function AprobacionPage() {
   };
 
   const formatDate = (iso: string) => new Date(String(iso).replace('Z', '')).toLocaleDateString();
-  const formatCurrency = (value: number) => `$${Number(value || 0).toLocaleString()}`;
+  const formatCurrency = (value: number) =>
+    `${Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} USD`;
   const formatQuantity = (value: number) =>
     Number(value || 0).toLocaleString(undefined, {
       minimumFractionDigits: Number.isInteger(value || 0) ? 0 : 2,
@@ -961,6 +995,45 @@ export default function AprobacionPage() {
     iso ? new Date(String(iso).replace('Z', '')).toLocaleDateString() : 'Sin referencia';
   const formatDateTime = (iso?: string | null) =>
     iso ? new Date(String(iso).replace('Z', '')).toLocaleString() : 'Sin registro';
+
+  const livePendingLabel = pendingCount === 1
+    ? '1 pendiente en cola global'
+    : `${pendingCount} pendientes en cola global`;
+  const notificationStatusLabel = !canUseBrowserNotifications
+    ? 'Requiere HTTPS'
+    : pushNotificationsBusy
+    ? 'Configurando'
+    : pushNotificationsEnabled
+    ? 'Activas'
+    : notificationPermission === 'denied'
+      ? 'Bloqueadas'
+      : 'Por activar';
+  const notificationStatusHelp = pushNotificationsReason
+    ? pushNotificationsReason
+    : !canUseBrowserNotifications
+    ? 'Las notificaciones externas requieren HTTPS o localhost. En esta URL actual se mantendrán solo las alertas dentro de la app.'
+    : pushNotificationsEnabled
+    ? 'El service worker ya quedó vinculado a este equipo para avisarte aunque no tengas abierta la pantalla de aprobaciones.'
+    : notificationPermission === 'denied'
+      ? 'El navegador las tiene bloqueadas. Reactívalas desde la configuración del sitio para recibir avisos externos.'
+      : 'Actívalas para recibir avisos profesionales incluso con la app en segundo plano o cerrada.';
+  const latestRealtimeLabel = latestPendingRequest
+    ? `${latestPendingRequest.codigo} · ${latestPendingRequest.solicitante} · ${latestPendingRequest.area}`
+    : 'Sin ingresos recientes';
+  const soundToneLabel: Record<ApprovalSoundTone, string> = {
+    classic: 'Clasico',
+    soft: 'Suave',
+    bell: 'Campana',
+    urgent: 'Urgente',
+  };
+
+  const handleEnableBrowserNotifications = async () => {
+    try {
+      await enablePushNotifications();
+    } catch (error) {
+      console.error('No se pudo solicitar permiso de notificaciones', error);
+    }
+  };
 
   const getMaterialTotal = (item: DetalleSolicitudItem) =>
     Number(item.CantidadSolicitada ?? 0) * Number(item.UltimoPrecioCompra ?? 0);
@@ -1062,6 +1135,34 @@ export default function AprobacionPage() {
     setPages((current) => ({ ...current, [tab]: nextPage }));
   };
 
+  const tabPresentation = {
+    pendientes: {
+      title: 'Pendientes por decidir',
+      helper: 'Solicitudes que requieren validacion inmediata.',
+      accent: 'from-amber-50 via-white to-white',
+      chip: 'border-amber-200 bg-amber-50 text-amber-700',
+      count: pendientesView.totalItems,
+      icon: Clock,
+    },
+    aprobadas: {
+      title: 'Decisiones aprobadas',
+      helper: 'Solicitudes autorizadas y listas para ejecucion.',
+      accent: 'from-emerald-50 via-white to-white',
+      chip: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      count: aprobadasView.totalItems,
+      icon: CheckCircle,
+    },
+    rechazadas: {
+      title: 'Decisiones rechazadas',
+      helper: 'Solicitudes detenidas por control operativo.',
+      accent: 'from-rose-50 via-white to-white',
+      chip: 'border-rose-200 bg-rose-50 text-rose-700',
+      count: rechazadasView.totalItems,
+      icon: XCircle,
+    },
+  } as const;
+  const activeTabPresentation = tabPresentation[activeTab];
+
   const renderTable = (
     tab: TabKey,
     view: { filtered: Solicitud[]; pageItems: Solicitud[]; safePage: number; totalItems: number },
@@ -1071,19 +1172,35 @@ export default function AprobacionPage() {
     const showDecisionActions = options.showDecisionActions ?? false;
     const showActionsColumn = showViewAction || showDecisionActions;
     const solicitudes = view.pageItems;
+    const tabMeta = tabPresentation[tab];
+    const TabIcon = tabMeta.icon;
 
     return (
-      <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_60px_-42px_rgba(15,23,42,0.45)]">
+      <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white text-slate-900 shadow-[0_22px_60px_-42px_rgba(15,23,42,0.45)]">
+        <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-gradient-to-r ${tabMeta.accent} px-4 py-3`}>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full border ${tabMeta.chip}`}>
+              <TabIcon className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">{tabMeta.title}</p>
+              <p className="text-xs text-slate-500">{tabMeta.helper}</p>
+            </div>
+          </div>
+          <Badge variant="outline" className={tabMeta.chip}>
+            {view.totalItems} registros visibles
+          </Badge>
+        </div>
         <div className="overflow-x-auto">
-        <Table className="min-w-[700px]">
-          <TableHeader className="bg-muted/30">
+        <Table className="min-w-[700px] text-slate-900">
+          <TableHeader className="bg-slate-50">
             <TableRow className="hover:bg-muted/30">
               <TableHead className="text-xs font-semibold text-muted-foreground">Solicitud</TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Cobertura</TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Solicitante</TableHead>
               <TableHead className="text-center text-xs font-semibold text-muted-foreground">Items</TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Presupuesto</TableHead>
-              <TableHead className="text-right text-xs font-semibold text-muted-foreground">Total</TableHead>
+              <TableHead className="text-right text-xs font-semibold text-muted-foreground">Total (USD)</TableHead>
               {showActionsColumn && (
                 <TableHead className="text-right text-xs font-semibold text-muted-foreground">Acciones</TableHead>
               )}
@@ -1336,6 +1453,7 @@ export default function AprobacionPage() {
                 <TableHead className="text-xs">Descripción</TableHead>
                 <TableHead className="text-xs">Área</TableHead>
                 <TableHead className="text-xs">Cuenta</TableHead>
+                <TableHead className="text-xs">Actividad / O.C.</TableHead>
                 <TableHead className="text-right text-xs w-24">Cant. Sol.</TableHead>
                 <TableHead className="text-right text-xs w-24">Cant. Apr.</TableHead>
                 <TableHead className="text-xs w-20">Unidad</TableHead>
@@ -1365,6 +1483,7 @@ export default function AprobacionPage() {
                       <span className="text-xs text-slate-400">—</span>
                     )}
                   </TableCell>
+                  <TableCell className="max-w-[180px] truncate">{item.ComentarioLinea || '—'}</TableCell>
                   <TableCell className="text-right">{formatQuantity(Number(item.CantidadSolicitada ?? 0))}</TableCell>
                   <TableCell className="text-right">
                     {item.CantidadAprobada != null ? (
@@ -1486,140 +1605,159 @@ export default function AprobacionPage() {
 
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden border-slate-200/80 shadow-[0_24px_70px_-48px_rgba(15,23,42,0.45)]">
-        <CardContent className="bg-[linear-gradient(135deg,rgba(248,250,252,0.98)_0%,rgba(241,245,249,0.95)_48%,rgba(236,253,245,0.9)_100%)] px-6 py-6">
-          <div className="space-y-6">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="max-w-3xl space-y-4">
-                <div className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-                  Bandeja de aprobaciones
+      <Card className="overflow-hidden border-slate-200/80 shadow-[0_20px_55px_-38px_rgba(15,23,42,0.3)]">
+        <CardContent className="bg-[linear-gradient(135deg,rgba(248,250,252,0.98)_0%,rgba(241,245,249,0.95)_48%,rgba(236,253,245,0.9)_100%)] px-5 py-5">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white/90 px-3 py-2">
+              <div className="min-w-0">
+                <div className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  Operación de aprobaciones
                 </div>
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-950">Gestión de Aprobaciones</h1>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                    Revisa solicitudes con contexto operativo, presupuestario y contable real antes de aprobar o rechazar.
-                  </p>
-                  {!puedeAprobar && (
-                    <p className="mt-3 text-sm text-slate-500">
-                      Tu acceso actual es de solo lectura. Puedes revisar solicitudes, pero no aprobarlas ni rechazarlas.
-                    </p>
-                  )}
-                </div>
+                <h1 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Mesa de decisión</h1>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                  {pendingCount}
+                </Badge>
+                <Badge variant="outline" className={realtimeConnected ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}>
+                  <Radio className="mr-1 h-3.5 w-3.5" />
+                  {realtimeConnected ? 'Online' : 'Sync'}
+                </Badge>
+                <button
+                  type="button"
+                  onClick={handleEnableBrowserNotifications}
+                  disabled={!canUseBrowserNotifications || pushNotificationsBusy || pushNotificationsEnabled}
+                  title={notificationStatusHelp}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${
+                    pushNotificationsEnabled
+                      ? 'cursor-default border-emerald-300 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
+                  }`}
+                >
+                  {pushNotificationsEnabled ? <BellRing className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  aria-pressed={soundEnabled}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${
+                    soundEnabled
+                      ? 'border-sky-300 bg-sky-50 text-sky-700'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                </button>
+                <select
+                  value={soundTone}
+                  onChange={(event) => setSoundTone(event.target.value as ApprovalSoundTone)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
+                  title={`Tono: ${soundToneLabel[soundTone]}`}
+                >
+                  <option value="classic">Clasico</option>
+                  <option value="soft">Suave</option>
+                  <option value="bell">Campana</option>
+                  <option value="urgent">Urgente</option>
+                </select>
               </div>
             </div>
 
-            <div className="grid gap-4 rounded-[24px] border border-white/70 bg-white/85 p-5 shadow-[0_20px_55px_-38px_rgba(15,23,42,0.25)] backdrop-blur-sm lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                  <Search className="h-4 w-4" />
-                  Filtro rápido
-                </div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="Buscar por solicitud, área, cuenta, OT o solicitante"
-                    className="h-11 rounded-2xl border-slate-200 bg-white pl-10"
-                  />
-                </div>
+            <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Buscar por solicitud, área, cuenta, OT o solicitante"
+                  className="h-9 rounded-xl border-slate-200 bg-white pl-10 text-sm"
+                />
               </div>
-
-              <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-                <Button onClick={() => cargarSolicitudes(isSearchMode ? 'full' : 'paged')} disabled={cargando} className="rounded-2xl">
-                  <RefreshCw className={`mr-2 h-4 w-4 ${cargando ? 'animate-spin' : ''}`} />
-                  Actualizar bandeja
+              {searchTerm.trim() ? (
+                <Button variant="outline" size="sm" onClick={() => setSearchTerm('')} className="rounded-xl">
+                  Limpiar
                 </Button>
-                {searchTerm.trim() && (
-                  <Button variant="outline" onClick={() => setSearchTerm('')} className="rounded-2xl">
-                    Limpiar búsqueda
-                  </Button>
-                )}
-              </div>
-
-              <div className="text-xs text-slate-500 lg:col-span-2">
-                {pendientesView.totalItems + aprobadasView.totalItems + rechazadasView.totalItems} solicitudes visibles con el filtro actual.
-              </div>
+              ) : (
+                <div className="hidden md:block" />
+              )}
             </div>
+
+            
+
+            {!puedeAprobar && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Modo lectura: puedes revisar solicitudes, pero no aprobarlas ni rechazarlas.
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Pendientes</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{pendientesCount}</div>
-            <p className="mt-1 text-xs text-muted-foreground">Solicitudes listas para revisión</p>
-          </CardContent>
-        </Card>
+      
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Monto pendiente</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{formatCurrency(montoPendiente)}</div>
-            <p className="mt-1 text-xs text-muted-foreground">Valor total de la bandeja pendiente</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Aprobadas hoy</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{aprobadasHoyCount}</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatCurrency(aprobadasHoyMonto)} aprobados hoy
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Rechazadas</CardTitle>
-            <XCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{rechazadasCount}</div>
-            <p className="mt-1 text-xs text-muted-foreground">Solicitudes detenidas por decisión</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-slate-200/80 shadow-[0_24px_70px_-48px_rgba(15,23,42,0.45)]">
+      <Card className="border-slate-200/80 text-slate-900 shadow-[0_24px_70px_-48px_rgba(15,23,42,0.45)]">
         <CardContent className="pt-6">
-          <Tabs value={activeTab} onValueChange={(value: string) => setActiveTab(value as TabKey)}>
-            <TabsList className="grid w-full grid-cols-3 rounded-2xl bg-slate-100 p-1">
-              <TabsTrigger value="pendientes" className="rounded-xl">
-                Pendientes ({pendientesView.totalItems})
-              </TabsTrigger>
-              <TabsTrigger value="aprobadas" className="rounded-xl">
-                Aprobadas ({aprobadasView.totalItems})
-              </TabsTrigger>
-              <TabsTrigger value="rechazadas" className="rounded-xl">
-                Rechazadas ({rechazadasView.totalItems})
-              </TabsTrigger>
-            </TabsList>
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-white px-4 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                Mesa operativa de decision
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-900">{activeTabPresentation.title}</h2>
+              <p className="text-sm text-slate-600">{activeTabPresentation.helper}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className={activeTabPresentation.chip}>
+                {activeTabPresentation.count} en {activeTab}
+              </Badge>
+              <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
+                {pendientesView.totalItems + aprobadasView.totalItems + rechazadasView.totalItems} total visible
+              </Badge>
+            </div>
+          </div>
 
-            <TabsContent value="pendientes" className="mt-6">
-              {renderTable('pendientes', pendientesView, { showViewAction: true, showDecisionActions: puedeAprobar })}
-            </TabsContent>
+          <div className="grid w-full grid-cols-1 gap-2 rounded-2xl bg-slate-100 p-1 md:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => setActiveTab('pendientes')}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                activeTab === 'pendientes'
+                  ? 'border border-amber-200 bg-white text-slate-950 shadow-sm'
+                  : 'border border-transparent text-slate-700 hover:bg-white/70'
+              }`}
+            >
+              <Clock className="h-4 w-4 text-amber-600" />
+              Pendientes ({pendientesView.totalItems})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('aprobadas')}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                activeTab === 'aprobadas'
+                  ? 'border border-emerald-200 bg-white text-slate-950 shadow-sm'
+                  : 'border border-transparent text-slate-700 hover:bg-white/70'
+              }`}
+            >
+              <CheckCircle className="h-4 w-4 text-emerald-600" />
+              Aprobadas ({aprobadasView.totalItems})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('rechazadas')}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                activeTab === 'rechazadas'
+                  ? 'border border-rose-200 bg-white text-slate-950 shadow-sm'
+                  : 'border border-transparent text-slate-700 hover:bg-white/70'
+              }`}
+            >
+              <XCircle className="h-4 w-4 text-rose-600" />
+              Rechazadas ({rechazadasView.totalItems})
+            </button>
+          </div>
 
-            <TabsContent value="aprobadas" className="mt-6">
-              {renderTable('aprobadas', aprobadasView, { showViewAction: true })}
-            </TabsContent>
-
-            <TabsContent value="rechazadas" className="mt-6">
-              {renderTable('rechazadas', rechazadasView, { showViewAction: true })}
-            </TabsContent>
-          </Tabs>
+          <div className="mt-6">
+            {activeTab === 'pendientes' && renderTable('pendientes', pendientesView, { showViewAction: true, showDecisionActions: puedeAprobar })}
+            {activeTab === 'aprobadas' && renderTable('aprobadas', aprobadasView, { showViewAction: true })}
+            {activeTab === 'rechazadas' && renderTable('rechazadas', rechazadasView, { showViewAction: true })}
+          </div>
         </CardContent>
       </Card>
 
@@ -1666,7 +1804,7 @@ export default function AprobacionPage() {
                   <span className="font-semibold">{selectedSolicitud.items}</span>
                 </div>
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Total monto: </span>
+                  <span className="text-muted-foreground">Total monto (USD): </span>
                   <span className="font-semibold text-base">{formatCurrency(selectedSolicitud.total)}</span>
                 </div>
                 <div className="text-sm">
@@ -1679,7 +1817,9 @@ export default function AprobacionPage() {
                 </div>
                 <div className="text-sm">
                   <span className="text-muted-foreground">OT: </span>
-                  <span className="font-semibold">{detalleContext.ot || 'No informada'}</span>
+                  <span className="font-semibold">
+                    {detalleContext.ot || (detalleSolicitud.some((item) => String(item.ComentarioLinea ?? '').trim().length > 0) ? 'Definida por línea' : 'No informada')}
+                  </span>
                 </div>
               </div>
 

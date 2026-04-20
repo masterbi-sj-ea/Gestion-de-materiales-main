@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { usePermisos } from '../contexts/PermisosContext';
 import { API_BASE_URL } from '../services/apiConfig';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -98,7 +99,6 @@ interface SolicitudDetalleApi {
   EnStock: number | null;
   UltimaFechaCompra: string | null;
   UltimoPrecioCompra: number | null;
-  UltimaMonedaCompra: string | null;
 }
 
 interface AprobacionSolicitudApi {
@@ -175,7 +175,7 @@ function formatFechaUTC(fecha: string): string {
 }
 
 function formatCurrency(amount: number): string {
-  return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,8 +228,12 @@ const estadoConfig: Record<
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function VerSolicitudesPage() {
+  const { getPermisosModulo, puedeAcceder } = usePermisos();
   const { user, token } = useAuth();
   const navigate = useNavigate();
+  const permisosSolicitudes = user ? getPermisosModulo(user.role, 'solicitudes') : null;
+  const canCreateSolicitudes = (!!user && puedeAcceder(user.role, 'crear-solicitud')) || !!permisosSolicitudes?.puedeCrear;
+  const canEditSolicitudes = !!permisosSolicitudes?.puedeEditar;
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
@@ -422,11 +426,12 @@ export default function VerSolicitudesPage() {
             <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             {loading ? 'Cargando...' : 'Recargar'}
           </Button>
-          {/* Visible para todos los roles que puedan crear solicitudes */}
-          <Button onClick={() => navigate('/solicitudes/crear')}>
-            <FileText className="w-4 h-4 mr-2" />
-            Nueva Solicitud
-          </Button>
+          {canCreateSolicitudes && (
+            <Button onClick={() => navigate('/solicitudes/crear')}>
+              <FileText className="w-4 h-4 mr-2" />
+              Nueva Solicitud
+            </Button>
+          )}
         </div>
       </div>
 
@@ -502,7 +507,7 @@ export default function VerSolicitudesPage() {
                   <TableHead className="min-w-[200px]">Área</TableHead>
                   <TableHead className="min-w-[150px]">Solicitante</TableHead>
                   <TableHead className="text-center min-w-[70px]">Items</TableHead>
-                  <TableHead className="text-right min-w-[110px]">Total</TableHead>
+                  <TableHead className="text-right min-w-[110px]">Total (USD)</TableHead>
                   <TableHead className="min-w-[160px]">Estado</TableHead>
                   <TableHead className="text-right min-w-[120px]">Acciones</TableHead>
                 </TableRow>
@@ -565,17 +570,19 @@ export default function VerSolicitudesPage() {
                             </Button>
 
                             {/* Clonar solicitud */}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Clonar solicitud"
-                              onClick={() => handleClonar(solicitud.id)}
-                            >
-                              <Copy className="w-4 h-4 text-blue-600" />
-                            </Button>
+                            {canCreateSolicitudes && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Clonar solicitud"
+                                onClick={() => handleClonar(solicitud.id)}
+                              >
+                                <Copy className="w-4 h-4 text-blue-600" />
+                              </Button>
+                            )}
 
                             {/* Editar — solo disponible cuando está rechazada o aún pendiente */}
-                            {(solicitud.estado === 'rechazada' || solicitud.estado === 'pendiente') && (
+                            {canEditSolicitudes && (solicitud.estado === 'rechazada' || solicitud.estado === 'pendiente') && (
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -679,7 +686,7 @@ export default function VerSolicitudesPage() {
                   <span className="font-semibold">{selectedSolicitud.items}</span>
                 </div>
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Total monto: </span>
+                  <span className="text-muted-foreground">Total monto (USD): </span>
                   <span className="font-semibold text-base">{formatCurrency(selectedSolicitud.total)}</span>
                 </div>
               </div>
@@ -716,6 +723,7 @@ export default function VerSolicitudesPage() {
                           <TableRow>
                             <TableHead className="text-xs">N° Artículo</TableHead>
                             <TableHead className="text-xs">Descripción</TableHead>
+                            <TableHead className="text-xs">Actividad / O.C.</TableHead>
                             <TableHead className="text-right text-xs">Cant. Solicitada</TableHead>
                             <TableHead className="text-right text-xs">Cant. Aprobada</TableHead>
                             <TableHead className="text-xs">Unidad</TableHead>
@@ -727,6 +735,7 @@ export default function VerSolicitudesPage() {
                             <TableRow key={d.IdDetalleSolicitud} className="text-sm">
                               <TableCell className="font-mono">{d.NumeroArticulo}</TableCell>
                               <TableCell className="max-w-[200px]">{d.DescripcionArticulo}</TableCell>
+                              <TableCell className="max-w-[180px]">{d.ComentarioLinea || '—'}</TableCell>
                               <TableCell className="text-right">{d.CantidadSolicitada}</TableCell>
                               <TableCell className="text-right">
                                 {d.CantidadAprobada != null ? (
@@ -871,7 +880,7 @@ export default function VerSolicitudesPage() {
             <div className="shrink-0 border-t px-6 py-4 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
               <div className="flex gap-2">
                 {/* Editar si es rechazada o pendiente */}
-                {(selectedSolicitud.estado === 'rechazada' ||
+                {canEditSolicitudes && (selectedSolicitud.estado === 'rechazada' ||
                   selectedSolicitud.estado === 'pendiente') && (
                   <Button
                     variant="outline"
@@ -885,17 +894,19 @@ export default function VerSolicitudesPage() {
                     {selectedSolicitud.estado === 'rechazada' ? 'Editar y reenviar' : 'Editar'}
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    handleCerrarModal();
-                    handleClonar(selectedSolicitud.id);
-                  }}
-                >
-                  <Copy className="w-4 h-4 mr-1" />
-                  Clonar
-                </Button>
+                {canCreateSolicitudes && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      handleCerrarModal();
+                      handleClonar(selectedSolicitud.id);
+                    }}
+                  >
+                    <Copy className="w-4 h-4 mr-1" />
+                    Clonar
+                  </Button>
+                )}
               </div>
               <Button variant="ghost" size="sm" onClick={handleCerrarModal}>
                 Cerrar

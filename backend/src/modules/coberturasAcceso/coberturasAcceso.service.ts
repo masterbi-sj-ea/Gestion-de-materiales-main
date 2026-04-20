@@ -755,6 +755,7 @@ SELECT @CreatedId AS IdCobertura;
 export async function agregarUsuarioCobertura(idCobertura: number, idUsuario: number): Promise<void> {
   const today = new Date();
   const startDate = toSqlDateOnly(today);
+  const defaultParticipation = 'USUARIO';
 
   try {
     await executeStoredProcedureWithVariants('sp_AgregarUsuarioCobertura', [
@@ -786,6 +787,9 @@ DECLARE @UserColumn SYSNAME = NULL;
 DECLARE @ActiveColumn SYSNAME = NULL;
 DECLARE @StartDateColumn SYSNAME = NULL;
 DECLARE @EndDateColumn SYSNAME = NULL;
+DECLARE @ParticipationColumn SYSNAME = NULL;
+DECLARE @ParticipationLookupSql NVARCHAR(MAX) = N'';
+DECLARE @ParticipationValue NVARCHAR(255) = NULL;
 DECLARE @InsertColumns NVARCHAR(MAX) = N'';
 DECLARE @InsertValues NVARCHAR(MAX) = N'';
 DECLARE @UpdateAssignments NVARCHAR(MAX) = N'';
@@ -822,6 +826,9 @@ ELSE IF COL_LENGTH('dbo.CoberturaUsuarios','VigenteHasta') IS NOT NULL
 ELSE IF COL_LENGTH('dbo.CoberturaUsuarios','Hasta') IS NOT NULL
   SET @EndDateColumn = 'Hasta';
 
+IF COL_LENGTH('dbo.CoberturaUsuarios','TipoParticipacion') IS NOT NULL
+  SET @ParticipationColumn = 'TipoParticipacion';
+
 IF @CoverageColumn IS NULL OR @UserColumn IS NULL
 BEGIN
   RAISERROR('No se detectaron columnas compatibles en dbo.CoberturaUsuarios.',16,1);
@@ -854,6 +861,31 @@ BEGIN
   SET @InsertValues += N', @FechaFin';
   SET @UpdateAssignments += CASE WHEN LEN(@UpdateAssignments) > 0 THEN N', ' ELSE N'' END
     + QUOTENAME(@EndDateColumn) + N' = @FechaFin';
+END
+
+IF @ParticipationColumn IS NOT NULL
+BEGIN
+  SET @ParticipationLookupSql = N'
+    SELECT TOP (1) @ParticipationValueOut = ParticipationValue
+    FROM (
+      SELECT
+        LTRIM(RTRIM(CONVERT(NVARCHAR(255), ' + QUOTENAME(@ParticipationColumn) + N'))) AS ParticipationValue,
+        COUNT_BIG(*) AS UsageCount
+      FROM dbo.CoberturaUsuarios
+      WHERE ' + QUOTENAME(@ParticipationColumn) + N' IS NOT NULL
+        AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), ' + QUOTENAME(@ParticipationColumn) + N'))) <> N''''
+      GROUP BY LTRIM(RTRIM(CONVERT(NVARCHAR(255), ' + QUOTENAME(@ParticipationColumn) + N')))
+    ) AS ExistingParticipation
+    ORDER BY ExistingParticipation.UsageCount DESC, ExistingParticipation.ParticipationValue;';
+
+  EXEC sp_executesql
+    @ParticipationLookupSql,
+    N'@ParticipationValueOut NVARCHAR(255) OUTPUT',
+    @ParticipationValueOut = @ParticipationValue OUTPUT;
+
+  SET @ParticipationValue = COALESCE(@ParticipationValue, NULLIF(LTRIM(RTRIM(@TipoParticipacionFallback)), N''), N'USUARIO');
+  SET @InsertColumns += N', ' + QUOTENAME(@ParticipationColumn);
+  SET @InsertValues += N', @TipoParticipacion';
 END
 
 SET @Sql = N'
@@ -892,12 +924,13 @@ VALUES (' + @InsertValues + N');';
 
 EXEC sp_executesql
   @Sql,
-  N'@IdCobertura INT, @IdUsuario INT, @FechaInicio DATE, @FechaFin DATE, @Activo BIT',
+  N'@IdCobertura INT, @IdUsuario INT, @FechaInicio DATE, @FechaFin DATE, @Activo BIT, @TipoParticipacion NVARCHAR(255)',
   @IdCobertura = @IdCobertura,
   @IdUsuario = @IdUsuario,
   @FechaInicio = @FechaInicio,
   @FechaFin = @FechaFin,
-  @Activo = @Activo;
+  @Activo = @Activo,
+  @TipoParticipacion = @ParticipationValue;
 `;
 
   await request
@@ -906,6 +939,7 @@ EXEC sp_executesql
     .input('FechaInicio', sql.Date, today)
     .input('FechaFin', sql.Date, null)
     .input('Activo', sql.Bit, true)
+    .input('TipoParticipacionFallback', sql.NVarChar(255), defaultParticipation)
     .query(statement);
 }
 

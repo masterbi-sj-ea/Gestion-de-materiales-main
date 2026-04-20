@@ -3,6 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from './ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -23,8 +32,11 @@ const API_BASE = API_ORIGIN;
 
 interface MovimientoInventario {
   IdMovimiento: number;
+  IdMaterial: number;
+  NumeroArticulo: string;
   DescripcionArticulo: string;
   TipoMovimiento: string;
+  OrigenMovimiento: string;
   Cantidad: number;
   StockAnterior: number;
   StockNuevo: number;
@@ -32,18 +44,66 @@ interface MovimientoInventario {
   IdUsuario: number | null;
   NombreUsuario: string | null;
   Referencia: string | null;
-  NumeroArticulo: string;
   CodigoCuenta: string | null;
   AreaDestino: string | null;
+  TotalRows?: number;
+}
+
+const normalizeUpper = (value: string | null | undefined) => String(value ?? '').trim().toUpperCase();
+
+const getTipoClasses = (tipo: string) => {
+  switch (normalizeUpper(tipo)) {
+    case 'ENTRADA':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'SALIDA':
+      return 'bg-rose-50 text-rose-700 border-rose-200';
+    default:
+      return 'bg-slate-50 text-slate-700 border-slate-200';
+  }
+};
+
+const getOrigenClasses = (origen: string) => {
+  switch (normalizeUpper(origen)) {
+    case 'DESPACHO':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'DEVOLUCION':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'ANULACION_DEVOLUCION':
+      return 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200';
+    case 'AJUSTE_CORTE':
+      return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+    default:
+      return 'bg-slate-50 text-slate-700 border-slate-200';
+  }
+};
+
+function getPaginationItems(page: number, totalPages: number): Array<number | 'ellipsis'> {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  if (page <= 3) {
+    return [1, 2, 3, 4, 'ellipsis', totalPages];
+  }
+
+  if (page >= totalPages - 2) {
+    return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', totalPages];
 }
 
 export function KardexPage() {
   const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtroTipo, setFiltroTipo] = useState<string>('TODOS');
+  const [filtroOrigen, setFiltroOrigen] = useState<string>('TODOS');
   const [filtroArticulo, setFiltroArticulo] = useState('');
   const [fechaInicio, setFechaInicio] = useState<Date | undefined>(undefined);
   const [fechaFin, setFechaFin] = useState<Date | undefined>(undefined);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalRows, setTotalRows] = useState(0);
   const componentRef = useRef<HTMLDivElement>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -78,21 +138,28 @@ export function KardexPage() {
       const params = new URLSearchParams();
 
       if (filtroTipo !== 'TODOS') params.append('tipoMovimiento', filtroTipo);
+      if (filtroOrigen !== 'TODOS') params.append('origenMovimiento', filtroOrigen);
       if (fechaInicio) params.append('fechaInicio', format(fechaInicio, 'yyyy-MM-dd'));
       if (fechaFin) params.append('fechaFin', format(fechaFin, 'yyyy-MM-dd'));
       if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
-
-      // Pedimos más de 50 por defecto para que el usuario no “pierda” registros
-      // si no está usando filtros, pero sin cargar todo el histórico.
-      params.append('page', '1');
-      params.append('limit', debouncedSearch.trim() ? '200' : '500');
+      params.append('page', String(page));
+      params.append('limit', String(pageSize));
 
       const res = await fetch(`${API_BASE}/api/kardex?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
-        setMovimientos(data);
+        const rows = Array.isArray(data) ? data : [];
+        setMovimientos(rows);
+        setTotalRows((current) => {
+          const reportedTotal = Number(rows[0]?.TotalRows);
+          if (Number.isFinite(reportedTotal) && reportedTotal >= 0) {
+            return reportedTotal;
+          }
+
+          return page === 1 ? rows.length : current;
+        });
       }
     } catch (error) {
       console.error('Error fetching kardex:', error);
@@ -103,7 +170,7 @@ export function KardexPage() {
 
   useEffect(() => {
     fetchMovimientos();
-  }, [filtroTipo, fechaInicio, fechaFin, debouncedSearch]);
+  }, [page, pageSize, filtroTipo, filtroOrigen, fechaInicio, fechaFin, debouncedSearch]);
 
   // Debounce del buscador para no golpear el backend en cada tecla.
   useEffect(() => {
@@ -126,9 +193,19 @@ export function KardexPage() {
   });
 
   const stats = {
-    entradas: movimientosFiltrados.filter(m => m.TipoMovimiento === 'ENTRADA').reduce((acc, m) => acc + m.Cantidad, 0),
-    salidas: movimientosFiltrados.filter(m => m.TipoMovimiento === 'SALIDA').reduce((acc, m) => acc + Math.abs(m.Cantidad), 0),
-    totalItems: movimientosFiltrados.length
+    entradas: movimientosFiltrados
+      .filter((m) => normalizeUpper(m.TipoMovimiento) === 'ENTRADA')
+      .reduce((acc, m) => acc + Number(m.Cantidad || 0), 0),
+    salidas: movimientosFiltrados
+      .filter((m) => normalizeUpper(m.TipoMovimiento) === 'SALIDA')
+      .reduce((acc, m) => acc + Math.abs(Number(m.Cantidad || 0)), 0),
+    ajustesCorte: movimientosFiltrados
+      .filter((m) => normalizeUpper(m.OrigenMovimiento) === 'AJUSTE_CORTE').length,
+    devoluciones: movimientosFiltrados
+      .filter((m) => normalizeUpper(m.OrigenMovimiento) === 'DEVOLUCION').length,
+    despachos: movimientosFiltrados
+      .filter((m) => normalizeUpper(m.OrigenMovimiento) === 'DESPACHO').length,
+    totalItems: totalRows,
   };
 
   const exportToCSV = () => {
@@ -139,7 +216,7 @@ export function KardexPage() {
       return needsQuotes ? `"${escaped}"` : escaped;
     };
 
-    const headers = ["Fecha", "Artículo", "Descripción", "Área Destino", "Cuenta", "Tipo", "Cantidad", "Stock Anterior", "Stock Nuevo", "Usuario", "Referencia"];
+    const headers = ["Fecha", "Artículo", "Descripción", "Área Destino", "Cuenta", "Tipo", "Origen", "Cantidad", "Stock Anterior", "Stock Nuevo", "Usuario", "Referencia"];
     const rows = movimientosFiltrados.map(m => [
       format(new Date(m.FechaMovimiento), "yyyy-MM-dd HH:mm"),
       m.NumeroArticulo,
@@ -147,6 +224,7 @@ export function KardexPage() {
       m.AreaDestino || '',
       m.CodigoCuenta || '',
       m.TipoMovimiento,
+      m.OrigenMovimiento || '',
       m.Cantidad,
       m.StockAnterior,
       m.StockNuevo,
@@ -171,8 +249,13 @@ export function KardexPage() {
   const applyQuickFilter = (value: string) => {
     const next = String(value || '').trim();
     if (!next) return;
+    setPage(1);
     setFiltroArticulo(next);
   };
+
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const startItem = totalRows === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endItem = totalRows === 0 ? 0 : startItem + movimientos.length - 1;
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
@@ -197,44 +280,59 @@ export function KardexPage() {
         </div>
       </div>
 
-      {/* Resumen de Movimientos */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Card className="bg-white border-l-4 border-l-blue-500 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Movimientos</p>
-              <h3 className="text-2xl font-bold">{stats.totalItems}</h3>
+      <Card className="border-slate-200 shadow-sm">
+        <CardContent className="p-3 md:p-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total</span>
+                <History className="h-4 w-4 text-slate-500" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900">{stats.totalItems}</div>
             </div>
-            <div className="p-3 bg-blue-50 rounded-full">
-              <History className="h-6 w-6 text-blue-600" />
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="bg-white border-l-4 border-l-green-500 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Entradas Totales</p>
-              <h3 className="text-2xl font-bold text-green-600">+{stats.entradas}</h3>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Entradas</span>
+                <ArrowUpRight className="h-4 w-4 text-blue-600" />
+              </div>
+              <div className="text-2xl font-bold text-blue-700">+{stats.entradas}</div>
             </div>
-            <div className="p-3 bg-green-50 rounded-full">
-              <ArrowUpRight className="h-6 w-6 text-green-600" />
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="bg-white border-l-4 border-l-red-500 shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Salidas Totales</p>
-              <h3 className="text-2xl font-bold text-red-600">-{stats.salidas}</h3>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Salidas</span>
+                <ArrowDownLeft className="h-4 w-4 text-emerald-600" />
+              </div>
+              <div className="text-2xl font-bold text-emerald-700">-{stats.salidas}</div>
             </div>
-            <div className="p-3 bg-red-50 rounded-full">
-              <ArrowDownLeft className="h-6 w-6 text-red-600" />
+
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">Ajustes</span>
+                <FileText className="h-4 w-4 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-bold text-indigo-700">{stats.ajustesCorte}</div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Devoluciones</span>
+                <RefreshCw className="h-4 w-4 text-amber-600" />
+              </div>
+              <div className="text-2xl font-bold text-amber-700">{stats.devoluciones}</div>
+            </div>
+
+            <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">Despachos</span>
+                <Download className="h-4 w-4 text-sky-600" />
+              </div>
+              <div className="text-2xl font-bold text-sky-700">{stats.despachos}</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-200/60 shadow-inner space-y-4">
         <div className="flex flex-col lg:flex-row gap-4 lg:items-center">
@@ -244,7 +342,10 @@ export function KardexPage() {
             <Input
               placeholder="Buscar por código, descripción o referencia..."
               value={filtroArticulo}
-              onChange={(e) => setFiltroArticulo(e.target.value)}
+              onChange={(e) => {
+                setPage(1);
+                setFiltroArticulo(e.target.value);
+              }}
               className="!pl-11 h-11 bg-white border-slate-200 focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm rounded-lg relative w-full"
             />
           </div>
@@ -269,7 +370,10 @@ export function KardexPage() {
                   <Calendar
                     mode="single"
                     selected={fechaInicio}
-                    onSelect={setFechaInicio}
+                    onSelect={(value: Date | undefined) => {
+                      setPage(1);
+                      setFechaInicio(value);
+                    }}
                     initialFocus
                     locale={es}
                   />
@@ -296,7 +400,10 @@ export function KardexPage() {
                   <Calendar
                     mode="single"
                     selected={fechaFin}
-                    onSelect={setFechaFin}
+                    onSelect={(value: Date | undefined) => {
+                      setPage(1);
+                      setFechaFin(value);
+                    }}
                     initialFocus
                     locale={es}
                   />
@@ -304,25 +411,49 @@ export function KardexPage() {
               </Popover>
             </div>
 
-            <div className="w-full sm:w-[200px]">
-              <Select value={filtroTipo} onValueChange={setFiltroTipo}>
-                <SelectTrigger className="h-11 bg-white border-slate-200 text-xs font-bold shadow-sm rounded-lg">
-                  <SelectValue placeholder="Tipo de Movimiento" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="TODOS" className="text-xs">Todos los tipos</SelectItem>
-                  <SelectItem value="ENTRADA" className="text-xs">⚡ Solo Entradas</SelectItem>
-                  <SelectItem value="SALIDA" className="text-xs">📦 Solo Salidas</SelectItem>
-                  <SelectItem value="AJUSTE" className="text-xs">🔧 Solo Ajustes</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex w-full flex-col gap-4 sm:w-auto sm:flex-row">
+              <div className="w-full sm:w-[200px]">
+                <Select value={filtroTipo} onValueChange={(value: string) => {
+                  setPage(1);
+                  setFiltroTipo(value);
+                }}>
+                  <SelectTrigger className="h-11 bg-white border-slate-200 text-xs font-bold shadow-sm rounded-lg">
+                    <SelectValue placeholder="Tipo de Movimiento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TODOS" className="text-xs">Todos los tipos</SelectItem>
+                    <SelectItem value="ENTRADA" className="text-xs">⚡ Solo Entradas</SelectItem>
+                    <SelectItem value="SALIDA" className="text-xs">📦 Solo Salidas</SelectItem>
+                    <SelectItem value="AJUSTE" className="text-xs">🔧 Solo Ajustes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="w-full sm:w-[220px]">
+                <Select value={filtroOrigen} onValueChange={(value: string) => {
+                  setPage(1);
+                  setFiltroOrigen(value);
+                }}>
+                  <SelectTrigger className="h-11 bg-white border-slate-200 text-xs font-bold shadow-sm rounded-lg">
+                    <SelectValue placeholder="Origen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TODOS" className="text-xs">Todos los orígenes</SelectItem>
+                    <SelectItem value="DESPACHO" className="text-xs">Despacho</SelectItem>
+                    <SelectItem value="DEVOLUCION" className="text-xs">Devolución</SelectItem>
+                    <SelectItem value="ANULACION_DEVOLUCION" className="text-xs">Anulación devolución</SelectItem>
+                    <SelectItem value="AJUSTE_CORTE" className="text-xs">Ajuste corte</SelectItem>
+                    <SelectItem value="OTRO" className="text-xs">Otro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Chips de Filtros Activos */}
-      {(filtroTipo !== 'TODOS' || fechaInicio || fechaFin || filtroArticulo) && (
+      {(filtroTipo !== 'TODOS' || filtroOrigen !== 'TODOS' || fechaInicio || fechaFin || filtroArticulo) && (
         <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-1">
           <span className="text-xs font-semibold text-gray-500 self-center mr-1">Filtros activos:</span>
           {filtroArticulo && (
@@ -335,6 +466,12 @@ export function KardexPage() {
             <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-100 px-3 py-1 flex gap-2 items-center">
               Tipo: {filtroTipo}
               <X className="h-3 w-3 cursor-pointer hover:text-amber-900" onClick={() => setFiltroTipo('TODOS')} />
+            </Badge>
+          )}
+          {filtroOrigen !== 'TODOS' && (
+            <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 border-indigo-100 px-3 py-1 flex gap-2 items-center">
+              Origen: {filtroOrigen}
+              <X className="h-3 w-3 cursor-pointer hover:text-indigo-900" onClick={() => setFiltroOrigen('TODOS')} />
             </Badge>
           )}
           {fechaInicio && (
@@ -352,7 +489,7 @@ export function KardexPage() {
           <Button 
             variant="ghost" 
             size="sm" 
-            onClick={() => { setFechaInicio(undefined); setFechaFin(undefined); setFiltroTipo('TODOS'); setFiltroArticulo(''); }}
+            onClick={() => { setPage(1); setFechaInicio(undefined); setFechaFin(undefined); setFiltroTipo('TODOS'); setFiltroOrigen('TODOS'); setFiltroArticulo(''); }}
             className="text-[10px] uppercase font-bold text-gray-400 hover:text-red-500 p-0 h-auto"
           >
             Limpiar todo
@@ -376,10 +513,11 @@ export function KardexPage() {
                   <TableHead className="min-w-[120px]">Fecha</TableHead>
                   <TableHead className="min-w-[200px]">Producto</TableHead>
                   <TableHead className="min-w-[150px]">Área / Cuenta</TableHead>
-                  <TableHead className="min-w-[100px]">Tipo</TableHead>
+                  <TableHead className="min-w-[140px]">Tipo / Origen</TableHead>
                   <TableHead className="text-right min-w-[100px]">Cantidad</TableHead>
                   <TableHead className="text-right min-w-[100px]">Balance</TableHead>
-                  <TableHead className="min-w-[180px]">Usuario / Referencia</TableHead>
+                  <TableHead className="min-w-[160px]">Usuario</TableHead>
+                  <TableHead className="min-w-[220px]">Referencia</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -398,18 +536,23 @@ export function KardexPage() {
                         <Skeleton className="h-4 w-20 mb-1" />
                         <Skeleton className="h-3 w-16" />
                       </TableCell>
-                      <TableCell><Skeleton className="h-6 w-16 rounded-full" /></TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-20 rounded-full mb-2" />
+                        <Skeleton className="h-6 w-24 rounded-full" />
+                      </TableCell>
                       <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
                       <TableCell>
                         <Skeleton className="h-4 w-24 mb-1" />
-                        <Skeleton className="h-3 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-32" />
                       </TableCell>
                     </TableRow>
                   ))
                 ) : movimientosFiltrados.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-24 bg-gray-50/20">
+                    <TableCell colSpan={8} className="text-center py-24 bg-gray-50/20">
                       <div className="flex flex-col items-center gap-4 max-w-[400px] mx-auto">
                         <div className="p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
                           <Search className="h-10 w-10 text-blue-200" />
@@ -423,7 +566,7 @@ export function KardexPage() {
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          onClick={() => { setFechaInicio(undefined); setFechaFin(undefined); setFiltroTipo('TODOS'); setFiltroArticulo(''); }}
+                          onClick={() => { setPage(1); setFechaInicio(undefined); setFechaFin(undefined); setFiltroTipo('TODOS'); setFiltroOrigen('TODOS'); setFiltroArticulo(''); }}
                           className="mt-2"
                         >
                           Restablecer todos los filtros
@@ -474,19 +617,13 @@ export function KardexPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <div className={cn(
-                            "h-2 w-2 rounded-full",
-                            mov.TipoMovimiento === 'ENTRADA' ? 'bg-emerald-500' : 
-                            mov.TipoMovimiento === 'SALIDA' ? 'bg-rose-500' : 'bg-amber-500'
-                          )} />
-                          <span className={cn(
-                            "text-[10px] font-black tracking-widest uppercase",
-                            mov.TipoMovimiento === 'ENTRADA' ? 'text-emerald-700' : 
-                            mov.TipoMovimiento === 'SALIDA' ? 'text-rose-700' : 'text-amber-700'
-                          )}>
+                        <div className="flex flex-col gap-1">
+                          <Badge variant="outline" className={getTipoClasses(mov.TipoMovimiento)}>
                             {mov.TipoMovimiento}
-                          </span>
+                          </Badge>
+                          <Badge variant="outline" className={getOrigenClasses(mov.OrigenMovimiento || 'OTRO')}>
+                            {mov.OrigenMovimiento || 'OTRO'}
+                          </Badge>
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -504,17 +641,11 @@ export function KardexPage() {
                       <TableCell>
                         <div className="flex flex-col">
                           <span className="text-[11px] font-semibold text-gray-700 uppercase tracking-tight">{mov.NombreUsuario || 'SISTEMA'}</span>
-                          <div className="flex items-center gap-1">
-                            <FileText className="h-3 w-3 text-blue-500" />
-                            <button
-                              type="button"
-                              onClick={() => applyQuickFilter(mov.Referencia || '')}
-                              className="text-xs text-blue-600 font-bold hover:underline decoration-2 underline-offset-2 text-left"
-                              title="Filtrar por referencia"
-                            >
-                              {highlightText(mov.Referencia || '', filtroArticulo)}
-                            </button>
-                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[220px]">
+                        <div className="text-xs font-mono break-words text-slate-700">
+                          {mov.Referencia || '—'}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -522,6 +653,83 @@ export function KardexPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          <div className="no-print flex flex-col gap-3 border-t border-slate-200/80 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              <p className="text-sm text-muted-foreground">
+                Mostrando {startItem}-{endItem} de {totalRows}
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Filas</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(value: string) => {
+                    setPage(1);
+                    setPageSize(Number(value));
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[90px] bg-white text-xs font-semibold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {totalPages > 1 && (
+              <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        if (page > 1) {
+                          setPage(page - 1);
+                        }
+                      }}
+                    />
+                  </PaginationItem>
+
+                  {getPaginationItems(page, totalPages).map((item, index) => (
+                    <PaginationItem key={`${item}-${index}`}>
+                      {item === 'ellipsis' ? (
+                        <PaginationEllipsis />
+                      ) : (
+                        <PaginationLink
+                          href="#"
+                          isActive={item === page}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            setPage(item);
+                          }}
+                        >
+                          {item}
+                        </PaginationLink>
+                      )}
+                    </PaginationItem>
+                  ))}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        if (page < totalPages) {
+                          setPage(page + 1);
+                        }
+                      }}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -9,7 +9,6 @@ export interface MaterialDisponible {
   grupoArticulos: string | null;
   enStock: number | null;
   ultimoPrecioCompra: number | null;
-  ultimaMonedaCompra: string | null;
   rutaImagenFinal?: string | null;
   tieneImagen?: number | boolean | null;
 }
@@ -55,7 +54,6 @@ function mapMaterial(raw: any): MaterialDisponible {
     grupoArticulos: raw.GrupoArticulos ?? null,
     enStock: raw.EnStock ?? null,
     ultimoPrecioCompra: raw.UltimoPrecioCompra ?? null,
-    ultimaMonedaCompra: raw.UltimaMonedaCompra ?? null,
     rutaImagenFinal: raw.RutaImagenFinal ?? null,
     tieneImagen: raw.TieneImagen ?? null,
   };

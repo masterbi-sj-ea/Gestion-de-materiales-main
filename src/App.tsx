@@ -28,12 +28,13 @@ import { AuthContext } from './contexts/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import { API_BASE_URL, API_ORIGIN } from './services/apiConfig';
 import { usePermisos } from './contexts/PermisosContext';
+import { AprobacionesRealtimeProvider } from './contexts/AprobacionesRealtimeContext';
 
 function ProtectedModuleRoute({
   moduloId,
   children,
 }: {
-  moduloId: string;
+  moduloId: string | string[];
   children: JSX.Element;
 }) {
   const { user } = useAuth();
@@ -51,7 +52,9 @@ function ProtectedModuleRoute({
     );
   }
 
-  if (!puedeAcceder(user.role, moduloId)) {
+  const moduleIds = Array.isArray(moduloId) ? moduloId : [moduloId];
+
+  if (!moduleIds.some((moduleId) => puedeAcceder(user.role, moduleId))) {
     return <Navigate to="/" replace />;
   }
 
@@ -184,6 +187,40 @@ function App() {
   };
 
   const logout = () => {
+    const activeToken = token;
+
+    void (async () => {
+      if (
+        typeof window === 'undefined'
+        || !activeToken
+        || !window.isSecureContext
+        || !('serviceWorker' in navigator)
+      ) {
+        return;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          return;
+        }
+
+        await fetch(`${API_BASE_URL}/push/subscriptions`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${activeToken}`,
+          },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+
+        await subscription.unsubscribe().catch(() => undefined);
+      } catch (error) {
+        console.error('No se pudo limpiar la suscripción push al cerrar sesión', error);
+      }
+    })();
+
     setUser(null);
     setToken(null);
     if (typeof window !== 'undefined') {
@@ -196,136 +233,138 @@ function App() {
     <AuthContext.Provider value={{ user, token, login, logout }}>
       <PermisosProvider>
         <Router>
-          {!user ? (
-            <Login />
-          ) : (
-            <Layout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route
-                  path="/materiales"
-                  element={
-                    <ProtectedModuleRoute moduloId="materiales">
-                      <MaterialesPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/solicitudes/crear"
-                  element={
-                    <ProtectedModuleRoute moduloId="solicitudes">
-                      <CrearSolicitudPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/solicitudes"
-                  element={
-                    <ProtectedModuleRoute moduloId="solicitudes">
-                      <VerSolicitudesPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/aprobaciones"
-                  element={
-                    <ProtectedModuleRoute moduloId="aprobaciones">
-                      <AprobacionPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/despacho"
-                  element={
-                    <ProtectedModuleRoute moduloId="despacho">
-                      <DespachoPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/kardex"
-                  element={
-                    <ProtectedModuleRoute moduloId="kardex">
-                      <KardexPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/presupuesto"
-                  element={
-                    <ProtectedModuleRoute moduloId="presupuesto">
-                      <PresupuestoPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/cortes"
-                  element={
-                    <ProtectedModuleRoute moduloId="cortes">
-                      <CortesPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/auditoria"
-                  element={
-                    <ProtectedModuleRoute moduloId="auditoria">
-                      <AuditoriaPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/reportes"
-                  element={
-                    <ProtectedModuleRoute moduloId="reportes">
-                      <ReportesPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/usuarios"
-                  element={
-                    <ProtectedModuleRoute moduloId="usuarios">
-                      <UsuariosPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/permisos"
-                  element={
-                    <ProtectedModuleRoute moduloId="permisos">
-                      <PermisosPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/roles"
-                  element={
-                    <ProtectedModuleRoute moduloId="roles">
-                      <RolesPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/areas"
-                  element={
-                    <ProtectedModuleRoute moduloId="areas">
-                      <AreasPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route
-                  path="/coberturas-acceso"
-                  element={
-                    <ProtectedModuleRoute moduloId="coberturas-acceso">
-                      <CoberturasAccesoPage />
-                    </ProtectedModuleRoute>
-                  }
-                />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Layout>
-          )}
+          <AprobacionesRealtimeProvider>
+            {!user ? (
+              <Login />
+            ) : (
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route
+                    path="/materiales"
+                    element={
+                      <ProtectedModuleRoute moduloId="materiales">
+                        <MaterialesPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/solicitudes/crear"
+                    element={
+                      <ProtectedModuleRoute moduloId={["crear-solicitud", "solicitudes"]}>
+                        <CrearSolicitudPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/solicitudes"
+                    element={
+                      <ProtectedModuleRoute moduloId="solicitudes">
+                        <VerSolicitudesPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/aprobaciones"
+                    element={
+                      <ProtectedModuleRoute moduloId="aprobaciones">
+                        <AprobacionPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/despacho"
+                    element={
+                      <ProtectedModuleRoute moduloId="despacho">
+                        <DespachoPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/kardex"
+                    element={
+                      <ProtectedModuleRoute moduloId="kardex">
+                        <KardexPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/presupuesto"
+                    element={
+                      <ProtectedModuleRoute moduloId="presupuesto">
+                        <PresupuestoPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/cortes"
+                    element={
+                      <ProtectedModuleRoute moduloId="cortes">
+                        <CortesPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/auditoria"
+                    element={
+                      <ProtectedModuleRoute moduloId="auditoria">
+                        <AuditoriaPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/reportes"
+                    element={
+                      <ProtectedModuleRoute moduloId="reportes">
+                        <ReportesPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/usuarios"
+                    element={
+                      <ProtectedModuleRoute moduloId="usuarios">
+                        <UsuariosPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/permisos"
+                    element={
+                      <ProtectedModuleRoute moduloId="permisos">
+                        <PermisosPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/roles"
+                    element={
+                      <ProtectedModuleRoute moduloId="roles">
+                        <RolesPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/areas"
+                    element={
+                      <ProtectedModuleRoute moduloId="areas">
+                        <AreasPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route
+                    path="/coberturas-acceso"
+                    element={
+                      <ProtectedModuleRoute moduloId="coberturas-acceso">
+                        <CoberturasAccesoPage />
+                      </ProtectedModuleRoute>
+                    }
+                  />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Layout>
+            )}
+          </AprobacionesRealtimeProvider>
         </Router>
       </PermisosProvider>
     </AuthContext.Provider>

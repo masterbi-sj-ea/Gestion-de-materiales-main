@@ -7,6 +7,7 @@ import {
   crearMaterialController,
   actualizarMaterialController,
   eliminarMaterialController,
+  reactivarMaterialController,
   importarMaterialesController,
   obtenerImagenMaterialPorNumeroArticuloController,
   obtenerArchivoImagenMaterialPorNumeroArticuloController,
@@ -31,6 +32,7 @@ router.get('/archivo/por-numero/:numeroArticulo', requireModulePermission('mater
 router.get('/imagen-archivo/:numeroArticulo', requireModulePermission('materiales', 'ver'), obtenerArchivoImagenMaterialPorNumeroArticuloController);
 router.post('/', requireModulePermission('materiales', 'crear'), crearMaterialController);
 router.put('/:id', requireModulePermission('materiales', 'editar'), actualizarMaterialController);
+router.put('/:id/reactivar', requireModulePermission('materiales', 'editar'), reactivarMaterialController);
 router.delete('/:id', requireModulePermission('materiales', 'eliminar'), eliminarMaterialController);
 router.post('/importar', requireModulePermission('materiales', 'crear'), upload.single('file'), importarMaterialesController);
 

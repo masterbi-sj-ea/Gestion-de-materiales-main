@@ -8,7 +8,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Badge } from './ui/badge';
-import { Search, Plus, Upload, Package, Edit, Trash2, Eye, RefreshCw, Clock3 } from 'lucide-react';
+import { Search, Plus, Upload, Package, Edit, Trash2, Eye, RefreshCw, Clock3, RotateCcw } from 'lucide-react';
 import { API_BASE_URL } from '../services/apiConfig';
 import { sileo } from 'sileo';
 import {
@@ -27,10 +27,10 @@ interface Material {
   descripcion: string;
   unidadMedida: string;
   grupoArticulos: string | null;
+  activo: boolean;
   enStock: number | null;
   ultimaFechaCompra: string | null;
   ultimoPrecioCompra: number | null;
-  ultimaMonedaCompra: string | null;
 
   // Imagen (viene de vw_MaterialesConImagen)
   idImagen?: number | null;
@@ -44,14 +44,37 @@ type CategoriaOption = {
   label: string;
 };
 
+type EstadoMaterialFilter = 'activos' | 'inactivos' | 'todos';
+
 const ALL_CATEGORIES_VALUE = 'todas';
 
 function safeTrim(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeSearchValue(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 function normalizeCategoria(value: unknown): string {
   return safeTrim(value).toLowerCase();
+}
+
+function buildMaterialSearchIndex(material: Material): string {
+  return [
+    material.numeroArticulo,
+    material.descripcion,
+    material.grupoArticulos,
+    material.unidadMedida,
+    material.activo ? 'activo' : 'inactivo',
+  ]
+    .map((value) => normalizeSearchValue(value))
+    .filter((value) => value.length > 0)
+    .join(' ');
 }
 
 function formatMaterialDate(value: string | null): string {
@@ -132,11 +155,29 @@ function getImageViewportStyle(aspectRatio: number | null): CSSProperties {
   };
 }
 
+async function readResponseMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      const payload = await response.json().catch(() => null);
+      const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+      return message || fallback;
+    }
+
+    const text = (await response.text().catch(() => '')).trim();
+    return text || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function MaterialesPage() {
   const { user, token } = useAuth();
   const { modulos, cargandoPermisos, puedeAcceder, getPermisosModulo } = usePermisos();
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedEstado, setSelectedEstado] = useState<EstadoMaterialFilter>('activos');
   const [selectedCategoria, setSelectedCategoria] = useState<string>(ALL_CATEGORIES_VALUE);
   const [loading, setLoading] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -195,17 +236,29 @@ export default function MaterialesPage() {
     return [{ value: ALL_CATEGORIES_VALUE, label: 'Todas' }, ...options];
   }, [materiales]);
 
-  const normalizedSearchTerm = useMemo(() => searchTerm.trim().toLowerCase(), [searchTerm]);
+  const normalizedSearchTerm = useMemo(() => normalizeSearchValue(searchTerm), [searchTerm]);
+  const searchTokens = useMemo(
+    () => normalizedSearchTerm.split(/\s+/).filter((token) => token.length > 0),
+    [normalizedSearchTerm],
+  );
+
+  const materialesPorEstado = useMemo(() => {
+    if (selectedEstado === 'todos') {
+      return materiales;
+    }
+
+    return materiales.filter((material) => selectedEstado === 'activos' ? material.activo : !material.activo);
+  }, [materiales, selectedEstado]);
 
   const filteredMateriales = useMemo(() => {
     const categoria = selectedCategoria;
-    const hasSearch = normalizedSearchTerm.length > 0;
+    const hasSearch = searchTokens.length > 0;
 
-    return materiales.filter((material) => {
+    return materialesPorEstado.filter((material) => {
+      const searchIndex = hasSearch ? buildMaterialSearchIndex(material) : '';
       const matchesSearch = !hasSearch
         ? true
-        : material.numeroArticulo.toLowerCase().includes(normalizedSearchTerm) ||
-          material.descripcion.toLowerCase().includes(normalizedSearchTerm);
+        : searchTokens.every((token) => searchIndex.includes(token));
 
       const matchesCategoria =
         categoria === ALL_CATEGORIES_VALUE ||
@@ -213,13 +266,13 @@ export default function MaterialesPage() {
 
       return matchesSearch && matchesCategoria;
     });
-  }, [materiales, normalizedSearchTerm, selectedCategoria]);
+  }, [materialesPorEstado, searchTokens, selectedCategoria]);
 
   const cargarMateriales = async () => {
     if (!token || !canView) return;
     try {
       setLoading(true);
-      const resp = await fetch(`${API_BASE_URL}/materiales/con-stock`, {
+      const resp = await fetch(`${API_BASE_URL}/materiales/con-stock?incluirInactivos=1`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -236,10 +289,10 @@ export default function MaterialesPage() {
         descripcion: String(m?.DescripcionArticulo ?? ''),
         unidadMedida: String(m?.UnidadMedida ?? ''),
         grupoArticulos: safeTrim(m?.GrupoArticulos) || null,
+        activo: m?.Activo != null ? Boolean(m.Activo) : true,
         enStock: m?.EnStock ?? null,
         ultimaFechaCompra: (m?.UltimaFechaCompra as string) ?? null,
         ultimoPrecioCompra: m?.UltimoPrecioCompra ?? null,
-        ultimaMonedaCompra: safeTrim(m?.UltimaMonedaCompra) || null,
 
         idImagen: m?.id_imagen != null ? Number(m.id_imagen) : null,
         rutaImagenFinal: safeTrim(m?.RutaImagenFinal) || null,
@@ -253,6 +306,52 @@ export default function MaterialesPage() {
       console.error('Error al cargar materiales', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReactivar = async (material: Material) => {
+    if (!token) {
+      sileo.error({ title: 'Atención', description: 'Debes iniciar sesión para reactivar materiales' });
+      return;
+    }
+
+    if (!canEdit) {
+      sileo.error({ title: 'Sin acceso', description: 'No tienes permiso para reactivar materiales' });
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/materiales/${material.id}/reactivar`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!resp.ok) {
+        const message = await readResponseMessage(resp, 'Error al reactivar material');
+        sileo.error({ title: 'Error', description: message });
+        return;
+      }
+
+      const payload = await resp.json().catch(() => null) as { Resultado?: string } | null;
+
+      await cargarMateriales();
+
+      if (payload?.Resultado === 'YA_ACTIVO') {
+        sileo.info({
+          title: 'Material ya activo',
+          description: `${material.numeroArticulo} ya estaba activo en el catálogo.`,
+        });
+      } else {
+        sileo.success({
+          title: 'Material reactivado',
+          description: `${material.numeroArticulo} volvió a quedar disponible en el catálogo operativo.`,
+        });
+      }
+    } catch (error) {
+      console.error('Error al reactivar material', error);
+      sileo.error({ title: 'Error', description: 'Error al reactivar material' });
     }
   };
 
@@ -435,13 +534,18 @@ export default function MaterialesPage() {
     }
   };
 
-  const totalMaterialesCatalogo = materiales.length;
+  const totalMaterialesActivos = useMemo(
+    () => materiales.reduce((acc, material) => acc + (material.activo ? 1 : 0), 0),
+    [materiales],
+  );
+  const totalMaterialesInactivos = Math.max(0, materiales.length - totalMaterialesActivos);
+  const totalMaterialesCatalogo = materialesPorEstado.length;
   const totalMaterialesFiltrados = filteredMateriales.length;
   const totalPages = Math.max(1, Math.ceil(totalMaterialesFiltrados / pageSize));
   const totalCategoriasCatalogo = Math.max(0, categorias.length - 1);
   const materialesConStock = useMemo(
-    () => materiales.reduce((acc, material) => acc + ((material.enStock ?? 0) > 0 ? 1 : 0), 0),
-    [materiales],
+    () => materialesPorEstado.reduce((acc, material) => acc + ((material.enStock ?? 0) > 0 ? 1 : 0), 0),
+    [materialesPorEstado],
   );
 
   const pagedMateriales = useMemo(
@@ -449,15 +553,11 @@ export default function MaterialesPage() {
     [filteredMateriales, page, pageSize],
   );
 
-  // Cálculo de valores de inventario (sobre todos los materiales cargados)
-  const TIPO_CAMBIO_USD_A_CORD = 36.5; // 1 USD = 36.5 C$
-
   const inventoryTotals = useMemo(() => {
     let totalValorUSD = 0;
-    let totalValorCord = 0;
     let materialesConStockSinPrecio = 0;
 
-    for (const m of materiales) {
+    for (const m of materialesPorEstado) {
       const qty = m.enStock ?? 0;
       const price = m.ultimoPrecioCompra;
 
@@ -468,26 +568,16 @@ export default function MaterialesPage() {
         continue;
       }
 
-      const moneda = (m.ultimaMonedaCompra || 'COR').toUpperCase();
-
-      if (moneda.includes('USD')) {
-        const valorUsd = qty * price;
-        totalValorUSD += valorUsd;
-        totalValorCord += valorUsd * TIPO_CAMBIO_USD_A_CORD;
-      } else {
-        const valorCord = qty * price;
-        totalValorCord += valorCord;
-        totalValorUSD += valorCord / TIPO_CAMBIO_USD_A_CORD;
-      }
+      totalValorUSD += qty * price;
     }
 
-    return { totalValorUSD, totalValorCord, materialesConStockSinPrecio };
-  }, [materiales]);
+    return { totalValorUSD, materialesConStockSinPrecio };
+  }, [materialesPorEstado]);
 
-  // Resetear a página 1 cuando cambia el filtro de búsqueda/categoría
+  // Resetear a página 1 cuando cambia el filtro de búsqueda/categoría/estado
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, selectedCategoria]);
+  }, [searchTerm, selectedCategoria, selectedEstado]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -672,10 +762,19 @@ export default function MaterialesPage() {
 
             <div className="materials-hero__stats">
               <article className="materials-stat-card">
-                <span className="materials-stat-card__label">Artículos</span>
+                <span className="materials-stat-card__label">
+                  {selectedEstado === 'todos'
+                    ? 'Catálogo total'
+                    : selectedEstado === 'inactivos'
+                      ? 'Inactivos'
+                      : 'Activos'}
+                </span>
                 <strong className="materials-stat-card__value">
                   {totalMaterialesCatalogo.toLocaleString()}
                 </strong>
+                <span className="materials-stat-card__meta">
+                  Activos {totalMaterialesActivos.toLocaleString()} | Inactivos {totalMaterialesInactivos.toLocaleString()}
+                </span>
               </article>
               <article className="materials-stat-card materials-stat-card--large">
                 <span className="materials-stat-card__label">Valor Inventario (USD)</span>
@@ -685,20 +784,22 @@ export default function MaterialesPage() {
                     maximumFractionDigits: 2,
                   })}
                 </strong>
-                
+                <span className="materials-stat-card__meta">Valor principal del catálogo normalizado a USD</span>
               </article>
               <article className="materials-stat-card materials-stat-card--large">
-                <span className="materials-stat-card__label">Valor Inventario (C$)</span>
+                <span className="materials-stat-card__label">Materiales con stock</span>
                 <strong className="materials-stat-card__value">
-                  {inventoryTotals.totalValorCord.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {materialesConStock.toLocaleString()}
                 </strong>
-                <span className="materials-stat-card__meta">C${TIPO_CAMBIO_USD_A_CORD}por 1 $ </span>
+                <span className="materials-stat-card__meta">Materiales visibles con existencia mayor a 0</span>
               </article>
-              
-              
+              <article className="materials-stat-card materials-stat-card--large">
+                <span className="materials-stat-card__label">Sin precio USD</span>
+                <strong className="materials-stat-card__value">
+                  {inventoryTotals.materialesConStockSinPrecio.toLocaleString()}
+                </strong>
+                <span className="materials-stat-card__meta">Materiales con stock que aún no tienen precio cargado en USD</span>
+              </article>
             </div>
           </div>
 
@@ -870,16 +971,6 @@ export default function MaterialesPage() {
           </div>
           <DialogFooter className="flex flex-col sm:flex-row gap-2">
             <Button
-              variant="outline"
-              onClick={() => {
-                setDialogOpen(false);
-                setEditingMaterial(null);
-              }}
-              className="w-full sm:w-auto"
-            >
-              Cancelar
-            </Button>
-            <Button
               onClick={handleGuardar}
               disabled={editingMaterial ? !canEdit : !canCreate}
               className="w-full sm:w-auto"
@@ -903,18 +994,30 @@ export default function MaterialesPage() {
           <CardTitle>Inventario</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-4 md:flex-row md:items-center mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <div className="mb-6 flex flex-wrap items-center gap-4">
+            <div className="min-w-[320px] flex-1">
               <Input
-                placeholder="Buscar por código o descripción..."
+                type="search"
+                placeholder="Buscar por código, descripción, grupo o unidad..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
+                autoComplete="off"
+                spellCheck={false}
+                className="h-11 rounded-xl border-slate-200 bg-white"
               />
             </div>
+            <Select value={selectedEstado} onValueChange={(value: string) => setSelectedEstado(value as EstadoMaterialFilter)}>
+              <SelectTrigger className="h-11 w-[180px] rounded-xl border-slate-200 bg-white">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="activos">Activos</SelectItem>
+                <SelectItem value="inactivos">Inactivos</SelectItem>
+                <SelectItem value="todos">Todos</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
-              <SelectTrigger className="w-full md:w-[200px]">
+              <SelectTrigger className="h-11 w-[200px] rounded-xl border-slate-200 bg-white">
                 <SelectValue placeholder="Categoría" />
               </SelectTrigger>
               <SelectContent>
@@ -935,28 +1038,29 @@ export default function MaterialesPage() {
                   <TableHead>Descripción</TableHead>
                   <TableHead>Grupo de artículos</TableHead>
                   <TableHead>Unidad de medida</TableHead>
+                  <TableHead>Estado</TableHead>
                   <TableHead className="text-right">Stock</TableHead>
                   <TableHead className="text-right">Última compra</TableHead>
-                  <TableHead className="text-right">Último precio</TableHead>
+                  <TableHead className="text-right">Último precio (USD)</TableHead>
                   {showActions && <TableHead className="text-center">Acciones</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={showActions ? 8 : 7} className="text-center text-muted-foreground py-6">
+                    <TableCell colSpan={showActions ? 9 : 8} className="text-center text-muted-foreground py-6">
                       Cargando materiales...
                     </TableCell>
                   </TableRow>
                 ) : pagedMateriales.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={showActions ? 8 : 7} className="text-center text-muted-foreground py-6">
+                    <TableCell colSpan={showActions ? 9 : 8} className="text-center text-muted-foreground py-6">
                       Sin resultados
                     </TableCell>
                   </TableRow>
                 ) : (
                   pagedMateriales.map((material) => (
-                    <TableRow key={material.id}>
+                    <TableRow key={material.id} className={!material.activo ? 'bg-slate-50/70 text-slate-600' : undefined}>
                       <TableCell className="font-medium">{material.numeroArticulo}</TableCell>
                       <TableCell>{material.descripcion}</TableCell>
                       <TableCell>
@@ -967,6 +1071,13 @@ export default function MaterialesPage() {
                         )}
                       </TableCell>
                       <TableCell>{material.unidadMedida}</TableCell>
+                      <TableCell>
+                        {material.activo ? (
+                          <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">Activo</Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Inactivo</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         {material.enStock !== null ? material.enStock : '-'}
                       </TableCell>
@@ -978,7 +1089,7 @@ export default function MaterialesPage() {
                           ? `${material.ultimoPrecioCompra.toLocaleString(undefined, {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
-                            })} ${material.ultimaMonedaCompra || ''}`
+                            })} USD`
                           : '-'}
                       </TableCell>
                       {showActions && (
@@ -1004,15 +1115,32 @@ export default function MaterialesPage() {
                                 <Edit className="w-4 h-4" />
                               </Button>
                             )}
-                            {canDelete && (
+                            {material.activo ? (
+                              canDelete && (
                               <Button
                                 size="sm"
-                                variant="ghost"
+                                variant="outline"
+                                className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                                 onClick={() => setConfirmDelete({ open: true, material })}
                                 title="Desactivar material"
                               >
-                                <Trash2 className="w-4 h-4 text-red-600" />
+                                <Trash2 className="w-4 h-4" />
+                                <span className="hidden sm:inline">Desactivar</span>
                               </Button>
+                              )
+                            ) : (
+                              canEdit && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                                  onClick={() => handleReactivar(material)}
+                                  title="Reactivar material"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                  <span className="hidden sm:inline">Reactivar</span>
+                                </Button>
+                              )
                             )}
                           </div>
                         </TableCell>

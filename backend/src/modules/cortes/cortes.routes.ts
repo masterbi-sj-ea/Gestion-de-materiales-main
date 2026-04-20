@@ -7,6 +7,8 @@ import {
 	obtenerDetalleCorteController,
 	cargarSnapshotCorteController,
 	registrarConteoCorteController,
+	aprobarCorteController,
+	aplicarAjusteCorteController,
 } from './cortes.controller';
 import { authMiddleware } from '../../middleware/auth';
 import { requireModulePermission } from '../../middleware/accessControl';
@@ -18,6 +20,8 @@ router.post('/', authMiddleware, requireModulePermission('cortes', 'crear'), cre
 router.get('/:id/detalle', authMiddleware, requireModulePermission('cortes', 'ver'), obtenerDetalleCorteController);
 router.post('/:id/snapshot', authMiddleware, requireModulePermission('cortes', 'crear'), cargarSnapshotCorteController);
 router.post('/:id/conteo', authMiddleware, requireModulePermission('cortes', 'editar'), registrarConteoCorteController);
+router.post('/:id/aprobar', authMiddleware, requireModulePermission('cortes', 'aprobar'), aprobarCorteController);
+router.post('/:id/aplicar', authMiddleware, requireModulePermission('cortes', 'eliminar'), aplicarAjusteCorteController);
 router.put('/:id', authMiddleware, requireModulePermission('cortes', 'editar'), actualizarCorteController);
 router.delete('/:id', authMiddleware, requireModulePermission('cortes', 'eliminar'), eliminarCorteController);
 
