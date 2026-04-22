@@ -35,6 +35,20 @@ import { sileo as toast } from 'sileo';
 const imageCache: Map<string, { url: string; ts: number }> = new Map();
 const pendingImageFetches: Map<string, Promise<string | null>> = new Map();
 
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError';
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const maybeError = error as { name?: unknown; message?: unknown };
+    return String(maybeError.name ?? '') === 'AbortError'
+      || String(maybeError.message ?? '').toLowerCase().includes('aborted');
+  }
+
+  return false;
+}
+
 function isUrlCached(url: string | null): boolean {
   if (!url) return false;
   for (const v of imageCache.values()) {
@@ -62,7 +76,7 @@ async function obtenerBlobUrlImagenMaterial(numeroArticulo: string): Promise<str
 
   const fetcher = (async (): Promise<string | null> => {
     const thumbEndpoint = `/materiales/archivo/por-numero/${encodeURIComponent(key)}?w=470&format=webp&q=70`;
-    const fallbackEndpoint = `/materiales/imagen-archivo/${encodeURIComponent(key)}`;
+    const fallbackEndpoint = `/materiales/archivo/por-numero/${encodeURIComponent(key)}?w=900&format=jpeg&q=78`;
 
     async function tryFetch(endpoint: string, timeoutMs: number): Promise<string | null> {
       const controller = new AbortController();
@@ -85,13 +99,15 @@ async function obtenerBlobUrlImagenMaterial(numeroArticulo: string): Promise<str
 
     try {
       // intento rápido thumbnail
-      return await tryFetch(thumbEndpoint, 2500);
+      return await tryFetch(thumbEndpoint, 4000);
     } catch (e) {
       // si falla o timeout, intento fallback con tolerancia mayor
       try {
-        return await tryFetch(fallbackEndpoint, 10000);
+        return await tryFetch(fallbackEndpoint, 15000);
       } catch (e2) {
-        console.error('Error al cargar imagen (thumb y fallback):', e2);
+        if (!isAbortError(e2)) {
+          console.error('Error al cargar imagen (thumb y fallback):', e2);
+        }
         return null;
       }
     } finally {
@@ -111,7 +127,7 @@ async function diagnosticarImagen(numeroArticulo: string): Promise<string | null
   if (!numeroArticulo) return 'Número de artículo inválido';
   const key = String(numeroArticulo);
   const thumbEndpoint = `/materiales/archivo/por-numero/${encodeURIComponent(key)}?w=240&format=webp&q=70`;
-  const fallbackEndpoint = `/materiales/imagen-archivo/${encodeURIComponent(key)}`;
+  const fallbackEndpoint = `/materiales/archivo/por-numero/${encodeURIComponent(key)}?w=900&format=jpeg&q=78`;
 
   async function probe(endpoint: string, timeoutMs: number): Promise<string | null> {
     const controller = new AbortController();
@@ -130,11 +146,11 @@ async function diagnosticarImagen(numeroArticulo: string): Promise<string | null
   }
 
   // Intentar primero thumbnail rápido
-  const thumb = await probe(thumbEndpoint, 2500);
+  const thumb = await probe(thumbEndpoint, 4000);
   if (thumb === null) return null;
 
   // Si thumb indica problema, probar el endpoint completo
-  const full = await probe(fallbackEndpoint, 5000);
+  const full = await probe(fallbackEndpoint, 15000);
   if (full === null) return null;
   // Si ambos probes fallaron, intentar obtener metadata del material para más contexto
   try {

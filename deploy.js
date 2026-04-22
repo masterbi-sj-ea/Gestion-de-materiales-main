@@ -79,15 +79,14 @@ try {
   console.log('🔨 Construyendo backend...');
   run('npm run build', BACKEND_DIR);
   assertExists(path.join(BACKEND_DIST_DIR, 'server.js'), 'backend/dist/server.js');
+  assertExists(BACKEND_DEPLOY_DIR, 'backend/deploy');
 
   // 5) Empaquetar runtime listo para producción
   console.log('🧱 Generando paquete release/backend...');
   ensureDir(RELEASE_BACKEND_DIR);
   copyRecursive(BACKEND_DIST_DIR, path.join(RELEASE_BACKEND_DIR, 'dist'));
   copyRecursive(BACKEND_PUBLIC_DIR, path.join(RELEASE_BACKEND_DIR, 'public'));
-  if (fs.existsSync(BACKEND_DEPLOY_DIR)) {
-    copyRecursive(BACKEND_DEPLOY_DIR, path.join(RELEASE_BACKEND_DIR, 'deploy'));
-  }
+  copyRecursive(BACKEND_DEPLOY_DIR, path.join(RELEASE_BACKEND_DIR, 'deploy'));
   copyFileSafe(path.join(BACKEND_DIR, 'package.json'), path.join(RELEASE_BACKEND_DIR, 'package.json'));
   copyFileSafe(path.join(BACKEND_DIR, 'package-lock.json'), path.join(RELEASE_BACKEND_DIR, 'package-lock.json'));
   copyFileSafe(path.join(BACKEND_DIR, '.env.example'), path.join(RELEASE_BACKEND_DIR, '.env.example'));
@@ -104,8 +103,8 @@ try {
   console.log('  1. Copiar la carpeta release/backend');
   console.log('  2. Crear .env a partir de .env.example');
   console.log('  3. Ejecutar npm ci --omit=dev');
-  console.log('  4. En Windows Server + IIS, revisar release/backend/deploy/README.md y publicar con servicio Windows + reverse proxy');
-  console.log('  5. En Linux, alternativamente puedes usar pm2 start ecosystem.config.cjs --env production');
+  console.log('  4. Ejecutar pm2 start ecosystem.config.cjs --env production');
+  console.log('  5. O usar deploy/ para Windows Server + IIS + servicio WinSW');
 } catch (error) {
   console.error('❌ Error durante la construcción/despliegue:', error.message || error);
   process.exit(1);

@@ -35,7 +35,7 @@ function parseCsv(value: string | undefined): string[] {
 export const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: process.env.PORT ? Number(process.env.PORT) : 4009,
-  HOST: (process.env.HOST || '').trim() || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0'),
+  HOST: (process.env.HOST || '').trim() || undefined,
   TRUST_PROXY: parseBoolean(process.env.TRUST_PROXY, false),
   CORS_ALLOWED_ORIGINS: parseCsv(process.env.CORS_ALLOWED_ORIGINS),
   DB_SERVER: process.env.DB_SERVER || '',

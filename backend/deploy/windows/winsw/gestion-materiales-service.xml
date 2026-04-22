@@ -14,6 +14,7 @@
   <env name="NODE_ENV" value="production" />
   <env name="PORT" value="4009" />
   <env name="HOST" value="127.0.0.1" />
+  <env name="TRUST_PROXY" value="true" />
   <log mode="roll-by-size-time">
     <sizeThreshold>10240</sizeThreshold>
     <pattern>yyyyMMdd</pattern>

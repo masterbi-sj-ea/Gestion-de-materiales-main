@@ -71,6 +71,7 @@
   3. Compila el backend TypeScript a `backend/dist`.
   4. Genera un paquete final en `release/backend` listo para copiar al servidor.
   5. Incluye `ecosystem.config.cjs` para arrancar el backend con PM2.
+  6. Incluye `deploy/` con plantillas para IIS reverse proxy y servicio Windows.
 
   En producción, el backend servirá automáticamente el SPA y sus assets estáticos desde `public/`, con:
 
@@ -78,6 +79,19 @@
   - `no-cache` para `index.html` y `push-sw.js`
   - fallback SPA solo para rutas HTML, sin interferir con `/api`, `/health` ni `/socket.io`
   - control explícito de orígenes para API y Socket.IO en producción
+
+  ## Windows Server + IIS recomendado
+
+  Para el servidor que muestras, la opción profesional recomendada es:
+
+  - Node ejecutándose como servicio Windows en `127.0.0.1:4009`
+  - IIS al frente publicando el sitio y reenviando todo al proceso Node
+
+  El paquete de producción ya deja preparado este enfoque en `release/backend/deploy/` con:
+
+  - `deploy/iis/web.config`
+  - `deploy/iis/.env.production.example`
+  - `deploy/windows/winsw/gestion-materiales-service.xml`
 
   ## Docker y Compose
 

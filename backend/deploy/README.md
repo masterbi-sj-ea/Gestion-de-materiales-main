@@ -36,5 +36,5 @@ Además, en IIS debes permitir estas server variables para URL Rewrite:
 ## Notas operativas
 
 - Con esta topología, la app queda same-origin y normalmente no necesita `CORS_ALLOWED_ORIGINS`.
-- `TRUST_PROXY=true` es obligatorio para que Express entienda que el HTTPS termina en IIS.
+- `TRUST_PROXY=true` es obligatorio para que Express entienda correctamente si el request público llega por HTTP o HTTPS.
 - El backend ya sirve frontend estático, `/api`, `/health` y `socket.io` desde el mismo proceso Node.

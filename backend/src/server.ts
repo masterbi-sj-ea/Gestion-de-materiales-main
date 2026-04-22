@@ -102,10 +102,17 @@ function shutdown(signal: string) {
 // Solo escuchar puerto cuando este archivo se ejecuta como entrypoint.
 // Esto permite importar servicios en scripts/tests sin chocar con EADDRINUSE.
 if (require.main === module) {
-  server.listen(PORT, HOST, () => {
-    console.log(`API Gestión Materiales con WebSockets escuchando en ${serverConfig.protocol.toUpperCase()} ${HOST}:${PORT}`);
+  const onListen = () => {
+    const bindHost = HOST || '0.0.0.0';
+    console.log(`API Gestión Materiales con WebSockets escuchando en ${serverConfig.protocol.toUpperCase()} ${bindHost}:${PORT}`);
     console.log(`[server] Política de orígenes: ${describeOriginPolicy(normalizedAllowedOrigins, env.NODE_ENV)}`);
-  });
+  };
+
+  if (HOST) {
+    server.listen(PORT, HOST, onListen);
+  } else {
+    server.listen(PORT, onListen);
+  }
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));

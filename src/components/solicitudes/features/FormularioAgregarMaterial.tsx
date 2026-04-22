@@ -86,12 +86,18 @@ export const FormularioAgregarMaterial = memo(function FormularioAgregarMaterial
   const inputCantidadRef = useRef<HTMLInputElement>(null);
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
   const stockFisico = stockActualSeleccionado ?? 0;
+  const imagenMaterialErrorLower = String(imagenMaterialError ?? '').toLowerCase();
   const imagenEstadoLabel = imagenMaterialLoading
     ? 'Preparando imagen'
     : imagenMaterialUrl
       ? 'Imagen disponible'
       : imagenMaterialError
-        ? 'Archivo no disponible'
+        ? imagenMaterialErrorLower.includes('tiempo de espera')
+          ? 'Carga lenta'
+          : imagenMaterialErrorLower.includes('sin imagen')
+            || imagenMaterialErrorLower.includes('no está disponible')
+            ? 'Sin imagen'
+            : 'Archivo no disponible'
         : 'Sin imagen disponible';
   const materialImageViewportStyle = getImageViewportStyle(imageAspectRatio);
 
